@@ -1411,6 +1411,18 @@ export interface MvShapeLayer extends MvLayerBase {
 	 * 帯や罫線のように「横に長くて薄い」形を作るときに小さくする。
 	 */
 	barAspect?: number;
+	/**
+	 * form==='ripple' のとき、輪が広がりきって消える周期（拍）。未指定は
+	 * `MV_BEATS_PER_BAR`（＝1小節、従来どおりの挙動）。1/2/4/8拍など好きな倍数に
+	 * すれば、複数の波紋レイヤーを違う拍で重ねて多層のリズムにできる。
+	 */
+	rippleBeats?: number;
+	/**
+	 * form==='ripple' のとき、周期の頭をどれだけ遅らせるか（拍）。同じ
+	 * `rippleBeats` の輪を複数重ねるときにこれをずらすと、輪が時間差で
+	 * 次々に広がる（裏拍・半小節・付点小節ずれ、など）。未指定は0（拍の頭）。
+	 */
+	ripplePhaseOffset?: number;
 	/** 同じ図形を何個並べるか（1で単体）。 */
 	count?: number;
 	/** count>1 のときの1個あたりのサイズ差。 */

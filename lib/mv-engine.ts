@@ -3832,8 +3832,15 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 			ctx.rect(-inner, -inner, inner * 2, inner * 2);
 			ctx.stroke();
 		} else if (layer.form === "ripple") {
-			// 輪が小節の頭から外へ広がって消える。1小節でぴったりループする。
-			const barPhase = d.bar - Math.floor(d.bar);
+			// 輪が周期の頭から外へ広がって消える。既定は1小節でぴったりループ
+			// （従来どおり）。`rippleBeats` で周期を、`ripplePhaseOffset` で
+			// 頭出しの位置をずらせる——同じ形を複数レイヤー重ねて拍・倍拍・
+			// 裏拍などをずらして波紋を層にするために使う。
+			const periodBeats = Math.max(0.1, layer.rippleBeats ?? MV_BEATS_PER_BAR);
+			const periodBars = periodBeats / MV_BEATS_PER_BAR;
+			const phaseOffsetBars = (layer.ripplePhaseOffset ?? 0) / MV_BEATS_PER_BAR;
+			const raw = (d.bar - phaseOffsetBars) / periodBars;
+			const barPhase = raw - Math.floor(raw);
 			const rippleAlpha = clamp01(1 - barPhase);
 			if (rippleAlpha > 0.004) {
 				ctx.globalAlpha = baseAlpha * opacity * rippleAlpha;

@@ -270,13 +270,58 @@ const MONOCHROME_PALETTE = ["#ffffff", "#e5e5e5", "#bdbdbd"];
  */
 const DEFAULT_BASE_BEATS = 1;
 
-/** 「ベースの拍」に選べる値。半拍〜1小節。 */
+/** 「ベースの拍」に選べる値。半拍〜8小節。 */
 export const MV_SHAPE_BASE_BEATS_OPTIONS: { value: number; label: string }[] = [
 	{ value: 0.5, label: "半拍（倍速）" },
 	{ value: 1, label: "1拍（既定）" },
 	{ value: 2, label: "2拍" },
 	{ value: 4, label: "1小節（4拍）" },
+	{ value: 8, label: "2小節（8拍）" },
+	{ value: 16, label: "4小節（16拍）" },
+	{ value: 32, label: "8小節（32拍）" },
 ];
+
+/**
+ * 「ずれ方」に選べる値。表拍そのままに対して、要素ごとの位相へ足す追加の
+ * ずれ量（拍）。`mixed`（既定）はこの中から要素ごとに乱数で1つ選んで組み合わせる
+ * ——「裏拍や半小節、1.5小節ズレのものを新規生成時に混ぜて組み合わせる」ため。
+ * 特定の値に固定したいときだけ個別指定する。
+ */
+export type MvShapeSyncStyle =
+	| "mixed"
+	| "onbeat"
+	| "offbeat"
+	| "halfBar"
+	| "dottedBar";
+
+export const MV_SHAPE_SYNC_STYLE_OPTIONS: { value: MvShapeSyncStyle; label: string }[] =
+	[
+		{ value: "mixed", label: "自動で組み合わせ（既定）" },
+		{ value: "onbeat", label: "表拍のまま" },
+		{ value: "offbeat", label: "裏拍（半拍ずらす）" },
+		{ value: "halfBar", label: "半小節ずらす" },
+		{ value: "dottedBar", label: "1.5小節ずらす" },
+	];
+
+/** `mixed` が選ぶ候補（拍単位のずれ量）。`onbeat`(0)を含めておくことで、
+ * 全要素が必ずずれる単調さを避け、表拍のままの要素も混ざるようにしている。 */
+const SYNC_STYLE_OFFSET_BEATS: Record<Exclude<MvShapeSyncStyle, "mixed">, number> = {
+	onbeat: 0,
+	offbeat: 0.5,
+	halfBar: MV_BEATS_PER_BAR / 2,
+	dottedBar: MV_BEATS_PER_BAR * 1.5,
+};
+
+/** 指定した（または `mixed` ならランダムに選んだ）ずれ方の、拍単位のオフセット量。 */
+function syncOffsetBeats(style: MvShapeSyncStyle): number {
+	if (style === "mixed") {
+		const flavors = Object.keys(
+			SYNC_STYLE_OFFSET_BEATS,
+		) as (keyof typeof SYNC_STYLE_OFFSET_BEATS)[];
+		return SYNC_STYLE_OFFSET_BEATS[pick(flavors)];
+	}
+	return SYNC_STYLE_OFFSET_BEATS[style];
+}
 
 function pick<T>(arr: readonly T[]): T {
 	return arr[Math.floor(Math.random() * arr.length)];
@@ -319,8 +364,17 @@ export interface SymmetricShapeGroupOptions {
 	 *   269x67〜345x105（横長）と165x165（正方形）を毎拍往復し、両方が同時に出る
 	 *   フレームは通常ループ中に1枚も無い）。これを iconCycle の空白コマで実装する。
 	 * duet 以外は**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
+	 * "ripple" = form:'ripple'（輪が広がって消える）を、`baseBeats`の1/2/4/8倍
+	 *   （`RATE_LADDER`）と `syncStyle` のずれを組み合わせた複数周期で重ね置く。
+	 *   単一周期だと単調な「毎小節同じ輪」にしかならないため、遅い輪の中を
+	 *   速い輪がくぐるような多層のリズムにしてある。
 	 */
-	clusterType?: "centered" | "scattered" | "bars" | "duet";
+	clusterType?: "centered" | "scattered" | "bars" | "duet" | "ripple";
+	/**
+	 * 要素ごとの拍位相の「ずれ方」。未指定は `"mixed"`
+	 * （裏拍・半小節・付点小節ずれ・表拍のままを要素ごとに乱数で組み合わせる）。
+	 */
+	syncStyle?: MvShapeSyncStyle;
 	/** 図形の種類の傾向。"sharp" (矩形グリフ) / "round" (丸い原始図形) / "all" (混在) */
 	shapeStyle?: "sharp" | "round" | "all";
 	/** 線の太さ。"thick" (太め) / "thin" (細め) / "random" (ランダム) */
@@ -478,6 +532,7 @@ interface GroupPlan {
 	useRound: boolean;
 	/** スロット数。要素はこの数で割った位相を受け持つ。 */
 	slots: number;
+	syncStyle: MvShapeSyncStyle;
 }
 
 /**
@@ -492,11 +547,13 @@ interface GroupPlan {
  * 以前はここから確率で1枚ずつ抽選していたが、1倍の当選比率を高くしてある
  * せいで要素数が少ないグループ（同心の2段目、帯の最初のペア等）では
  * 「ベースの拍」が1拍のとき2拍・4拍がほぼ出ない、という運任せの偏りが出ていた。
- * 内側（＝呼び出し順が早い要素）から外側へ向けて 1→2→4 の順に確実に割り当て、
- * 4枚目以降は最も遅い4のまま据え置く方式にして、要素が2つ以上あれば
- * 2拍・4拍が確実に構成要素として混ざるようにしてある。
+ * 内側（＝呼び出し順が早い要素）から外側へ向けて 1→2→4→8 の順に確実に割り当て、
+ * 5枚目以降は最も遅い8のまま据え置く方式にして、要素が2つ以上あれば
+ * 2拍・4拍・8拍が確実に構成要素として混ざるようにしてある
+ * （「選んだ拍(1倍)以上のビートの図形も組み合わせる」——例えば1拍を選んでも
+ * 2・4・8倍の要素が自動で同梱される）。
  */
-const RATE_LADDER = [1, 2, 4];
+const RATE_LADDER = [1, 2, 4, 8];
 
 /** コマ列を k コマぶん回す。脇役を主役と違うコマから始めるのに使う。 */
 function rotateCycle(paths: string[], k: number): string[] {
@@ -533,8 +590,14 @@ function buildElement(
 	// 形のひと巡りと拍の踏み込みは同じ周期にする。片方だけ別の速さにすると、
 	// 形が一巡する頭と踏み込む頭がずれて拍に乗っていないように見える。
 	const periodBeats = roundTo(plan.baseBeats * opts.rateMul, 2);
+	// スロットによる均等な位相ずらしに、「ずれ方」(裏拍/半小節/1.5小節/…)の
+	// 追加オフセットを重ねる。周期でmodulo済みにしておかないと、遅い要素
+	// （periodBeatsが大きい）で足したぶんが周期を超えて位相が意図とズレる。
+	const rawPhaseOffset =
+		(opts.slot % plan.slots) * (periodBeats / plan.slots) +
+		syncOffsetBeats(plan.syncStyle);
 	const phaseOffset = roundTo(
-		(opts.slot % plan.slots) * (periodBeats / plan.slots),
+		((rawPhaseOffset % periodBeats) + periodBeats) % periodBeats,
 		2,
 	);
 	const size = roundTo(opts.size, 1);
@@ -647,6 +710,7 @@ function makePlan(options: SymmetricShapeGroupOptions): GroupPlan {
 		accentColor,
 		useRound,
 		slots: pick([2, 2, 4]),
+		syncStyle: options.syncStyle ?? "mixed",
 	};
 }
 
@@ -795,6 +859,47 @@ export function buildSymmetricShapeGroupLayers(
 				});
 			}
 			cursor += size * randRange(1.4, 2.2) + randRange(16, 40);
+		}
+		return layers;
+	}
+
+	if (clusterType === "ripple") {
+		// ── 波紋（form:'ripple'）を複数周期で重ねる ──
+		// 単一周期だと「毎小節同じ輪」の単調な絵にしかならない。RATE_LADDER
+		// （1/2/4/8倍）で周期を分け、`syncOffsetBeats` で頭出しの位置もずらして、
+		// 遅く大きい輪の中を速く小さい輪がくぐるような多層のリズムを作る。
+		const ringCount = options.pairCount
+			? Math.min(4, Math.max(2, options.pairCount))
+			: pick([3, 3, 4]);
+		const palette = [plan.mainColor, plan.accentColor];
+		for (let i = 0; i < ringCount; i++) {
+			const rateMul = RATE_LADDER[Math.min(i, RATE_LADDER.length - 1)];
+			const rippleBeats = roundTo(plan.baseBeats * rateMul, 2);
+			// 遅い(=大きい周期の)輪ほど大きく描く——速い輪が外まで広がりきる前に
+			// 遅い輪の内側をくぐる、という重なりの階層を作るため。
+			const outerSize = randRange(70, 150) * (1 + i * 0.35);
+			layers.push({
+				kind: "shape",
+				form: "ripple",
+				id: mvUid("shp"),
+				groupId,
+				x: axisX,
+				y: baseY,
+				z: nextZ(),
+				rotation: 0,
+				color: i === 0 ? plan.mainColor : pick(palette),
+				filled: false,
+				thickness: roundTo(plan.baseThickness * randRange(0.6, 1), 1),
+				size: roundTo(outerSize, 1),
+				count: 1,
+				spread: 0,
+				spin: 0,
+				blend: "normal",
+				pathBox: [0, 0, 100, 100],
+				rippleBeats,
+				ripplePhaseOffset: roundTo(syncOffsetBeats(plan.syncStyle), 2),
+				modulators: [],
+			});
 		}
 		return layers;
 	}
@@ -1406,6 +1511,51 @@ function renderFrame(plan: FramePlan, t: number): string {
 	return plan.corners.map((c) => growFromCenterRect(c.x, c.y, plan.size, t)).join(" ");
 }
 
+interface SpokePlan {
+	arms: { angle: number; len: number; w: number }[];
+}
+
+/** 中心から放射状に伸びる細い腕（矩形ではなく回転した4点ポリゴン）。 */
+function planSpokes(): SpokePlan {
+	const n = 3 + Math.floor(Math.random() * 5); // 3〜7本
+	const arms: SpokePlan["arms"] = [];
+	for (let i = 0; i < n; i++) {
+		arms.push({
+			angle: (i / n) * Math.PI * 2 + randRange(-0.25, 0.25, 3),
+			len: randRange(26, 42),
+			w: randRange(5, 11),
+		});
+	}
+	return { arms };
+}
+
+/** 各腕は中心をアンカーに、進度tぶん外向きに伸びる（回転した矩形＝4点ポリゴン）。 */
+function renderSpokes(plan: SpokePlan, t: number): string {
+	const cx = 50;
+	const cy = 50;
+	return plan.arms
+		.map((a) => {
+			const minLen = 2;
+			const len = minLen + (a.len - minLen) * easeOutCubic(t);
+			const dx = Math.cos(a.angle);
+			const dy = Math.sin(a.angle);
+			// 進行方向に直交する向きへ半幅ぶんオフセットして、腕の断面(4点)を作る。
+			const px = -dy;
+			const py = dx;
+			const hw = a.w / 2;
+			const x0 = cx + px * hw;
+			const y0 = cy + py * hw;
+			const x1 = cx - px * hw;
+			const y1 = cy - py * hw;
+			const x2 = x1 + dx * len;
+			const y2 = y1 + dy * len;
+			const x3 = x0 + dx * len;
+			const y3 = y0 + dy * len;
+			return `M${roundTo(x0, 1)} ${roundTo(y0, 1)}L${roundTo(x1, 1)} ${roundTo(y1, 1)}L${roundTo(x2, 1)} ${roundTo(y2, 1)}L${roundTo(x3, 1)} ${roundTo(y3, 1)}Z`;
+		})
+		.join(" ");
+}
+
 /** かぎ括弧（コーナーブラケット）。`flip` で対角側の向きになる。破線混じり。 */
 function cornerBracketGlyph(flip: boolean): string {
 	const arm = randRange(55, 75);
@@ -1451,7 +1601,14 @@ function sizePopModulator(fullSize: number, phaseOffset: number, bars: number, c
 	};
 }
 
-/** 第4幕で使えるグリフ種。`geo` は再帰的矩形分割による無限生成。 */
+/**
+ * 第4幕グリフの内部生成方式。UIには出さず、`generateArrangementForGroup` が
+ * 毎回この中からアルゴリズムで（重み付き）ランダムに選ぶ——「有限リストから
+ * ユーザーが選ぶ」のではなく「無限に組み合わせを吐けるジェネレータの集合から
+ * 実行時に選ぶ」という設計。`geo`（再帰的矩形分割）と`spokes`（放射状の腕）は
+ * パラメータ空間が連続でほぼ無限に組み合わせがあるため重めに、残りは
+ * 手作りモチーフとしての語彙の厚みを添える程度の軽い重みにしてある。
+ */
 export type MvArrangementGlyphKind =
 	| "bar"
 	| "can"
@@ -1459,7 +1616,8 @@ export type MvArrangementGlyphKind =
 	| "cross"
 	| "dots"
 	| "frame"
-	| "geo";
+	| "geo"
+	| "spokes";
 
 /** 特殊アレンジ生成の見た目パラメータ。未指定分はこれまでどおりの既定挙動。 */
 export interface ArrangementGenOptions {
@@ -1796,32 +1954,52 @@ export function generateArrangementForGroup(
 	);
 
 	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
-	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
-	// 大きめの縞箱、上下はバーチャート、それ以外は目盛り、という参考動画の
-	// 役割分担に寄せつつ、形の中身は毎回乱数で起こす。bar/can/tickの3種だけだと
-	// 何度出しても同じ語彙の繰り返しに見えるため、十字・ドット集合・四隅枠を
-	// 追加して語彙を広げてある。
-	const allSlots: { x: number; y: number; kind: MvArrangementGlyphKind; size: number }[] = [
-		{ x: MV_W * 0.42, y: MV_H * 0.16, kind: "bar", size: randRange(38, 52) },
-		{ x: MV_W * 0.87, y: MV_H * 0.32, kind: "tick", size: randRange(24, 34) },
-		{ x: MV_W * 0.16, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
-		{ x: MV_W * 0.84, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
-		{ x: MV_W * 0.1, y: MV_H * 0.78, kind: "tick", size: randRange(22, 32) },
-		{ x: MV_W * 0.56, y: MV_H * 0.85, kind: "bar", size: randRange(36, 50) },
-		{ x: MV_W * 0.5, y: MV_H * 0.12, kind: "cross", size: randRange(30, 44) },
-		{ x: MV_W * 0.24, y: MV_H * 0.86, kind: "dots", size: randRange(46, 60) },
-		{ x: MV_W * 0.76, y: MV_H * 0.14, kind: "frame", size: randRange(50, 64) },
-		{ x: MV_W * 0.5, y: MV_H * 0.5, kind: "geo", size: randRange(48, 66) },
-		{ x: MV_W * 0.68, y: MV_H * 0.68, kind: "geo", size: randRange(40, 56) },
+	// 「決め打ちの語彙リストからユーザーが種類を選ぶ」のをやめ、置く場所（座標の
+	// プール）と生成方式（グリフの中身）を分離した。方式は毎回このリストから
+	// アルゴリズム側で重み付きランダムに選ぶ——`geo`（再帰的矩形分割）と
+	// `spokes`（放射状の腕）はパラメータが連続で組み合わせがほぼ無限なので
+	// 重めに、残りは手作りモチーフとして軽く混ぜる。`genOptions.act4Kinds` を
+	// 渡せば選択候補を絞れるが、既定は全方式が対象。
+	const GLYPH_KIND_WEIGHTS: [MvArrangementGlyphKind, number][] = [
+		["geo", 3],
+		["spokes", 2],
+		["bar", 1],
+		["can", 1],
+		["tick", 1],
+		["cross", 1],
+		["dots", 1],
+		["frame", 1],
 	];
-	const slots = allSlots.filter(
-		(s) => !genOptions?.act4Kinds || genOptions.act4Kinds.includes(s.kind),
-	);
+	const pickGlyphKind = (): MvArrangementGlyphKind => {
+		const pool = genOptions?.act4Kinds?.length
+			? GLYPH_KIND_WEIGHTS.filter(([k]) => genOptions.act4Kinds?.includes(k))
+			: GLYPH_KIND_WEIGHTS;
+		const total = pool.reduce((s, [, w]) => s + w, 0);
+		let r = Math.random() * total;
+		for (const [k, w] of pool) {
+			r -= w;
+			if (r <= 0) return k;
+		}
+		return pool[pool.length - 1][0];
+	};
+	const positionSlots: { x: number; y: number; size: number }[] = [
+		{ x: MV_W * 0.42, y: MV_H * 0.16, size: randRange(36, 54) },
+		{ x: MV_W * 0.87, y: MV_H * 0.32, size: randRange(30, 46) },
+		{ x: MV_W * 0.16, y: MV_H * 0.5, size: randRange(46, 66) },
+		{ x: MV_W * 0.84, y: MV_H * 0.5, size: randRange(46, 66) },
+		{ x: MV_W * 0.1, y: MV_H * 0.78, size: randRange(28, 42) },
+		{ x: MV_W * 0.56, y: MV_H * 0.85, size: randRange(36, 52) },
+		{ x: MV_W * 0.5, y: MV_H * 0.12, size: randRange(32, 46) },
+		{ x: MV_W * 0.24, y: MV_H * 0.86, size: randRange(40, 58) },
+		{ x: MV_W * 0.76, y: MV_H * 0.14, size: randRange(40, 58) },
+		{ x: MV_W * 0.5, y: MV_H * 0.5, size: randRange(46, 64) },
+		{ x: MV_W * 0.68, y: MV_H * 0.68, size: randRange(38, 54) },
+	];
 	const useCount = genOptions?.act4Count ?? pick([4, 5, 6, 6]);
-	// 左右の縞箱（主役）は必ず残し、他をシャッフルして間引く。
-	const mains = slots.filter((s) => s.kind === "can");
-	const rest = slots.filter((s) => s.kind !== "can").sort(() => Math.random() - 0.5);
-	const chosen = [...mains, ...rest].slice(0, useCount);
+	const chosen = [...positionSlots]
+		.sort(() => Math.random() - 0.5)
+		.slice(0, useCount)
+		.map((slot) => ({ ...slot, kind: pickGlyphKind() }));
 	// 幕の頭でグリフが最終形のまま静止出現していた（参考動画は逆に「部品ごとに
 	// アンカーされた辺から線が伸びて」最終形へ到達する）。size を一様スケール
 	// すると全部品が中心へ向かって縮む＝ズームにしか見えないので、部品分解した
@@ -1866,6 +2044,10 @@ export function generateArrangementForGroup(
 		geo: () => {
 			const plan = planGeo();
 			return (t) => renderGeo(plan, t);
+		},
+		spokes: () => {
+			const plan = planSpokes();
+			return (t) => renderSpokes(plan, t);
 		},
 	};
 	for (const s of chosen) {

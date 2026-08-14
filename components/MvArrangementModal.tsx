@@ -16,7 +16,6 @@ import {
 	type ArrangementGenOptions,
 	DEFAULT_ARRANGEMENT_BEATS,
 	generateArrangementForGroup,
-	type MvArrangementGlyphKind,
 } from "@/lib/mv-shape-group-macro";
 
 /** 何拍を1周に選べるか。 */
@@ -24,17 +23,6 @@ const BEATS_OPTIONS = [2, 4, 8, 16];
 
 /** 第4幕のグリフ数として選べる値。「自動」は従来どおり4〜6を乱数で。 */
 const ACT4_COUNT_OPTIONS: (4 | 5 | 6 | "auto")[] = ["auto", 4, 5, 6];
-
-/** 第4幕に出すグリフ種のトグル候補。 */
-const ACT4_KIND_OPTIONS: { value: MvArrangementGlyphKind; label: string }[] = [
-	{ value: "bar", label: "バーチャート" },
-	{ value: "can", label: "縞箱" },
-	{ value: "tick", label: "目盛り" },
-	{ value: "cross", label: "十字" },
-	{ value: "dots", label: "ドット集合" },
-	{ value: "frame", label: "四隅枠" },
-	{ value: "geo", label: "幾何学模様（無限生成）" },
-];
 
 const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSpeed"]>; label: string }[] = [
 	{ value: "fast", label: "速い" },
@@ -230,16 +218,15 @@ export default function MvArrangementModal({
 	// 主要パラメータだけモーダルで固定できるようにしてある。指定していない
 	// 部分（グリフの配置・色味の細部など）は引き続き乱数で振れる。
 	const [act4Count, setAct4Count] = useState<4 | 5 | 6 | "auto">("auto");
-	const [act4Kinds, setAct4Kinds] = useState<MvArrangementGlyphKind[]>(
-		ACT4_KIND_OPTIONS.map((o) => o.value),
-	);
 	const [growthSpeed, setGrowthSpeed] =
 		useState<NonNullable<ArrangementGenOptions["growthSpeed"]>>("normal");
 	const [centerPop, setCenterPop] = useState(true);
 
+	// 第4幕のグリフの中身（bar/can/tick/cross/dots/frame/geo/spokes）は
+	// ユーザーが選ぶ有限リストではなく、`generateArrangementForGroup` が毎回
+	// アルゴリズム側で重み付きランダムに選ぶ——ここでは絞り込まず全方式を対象にする。
 	const buildGenOptions = (): ArrangementGenOptions => ({
 		act4Count: act4Count === "auto" ? undefined : act4Count,
-		act4Kinds,
 		growthSpeed,
 		centerPop,
 	});
@@ -268,16 +255,6 @@ export default function MvArrangementModal({
 		);
 	};
 
-	const toggleAct4Kind = (kind: MvArrangementGlyphKind) => {
-		setAct4Kinds((prev) => {
-			// 最後の1つは外させない（全種類ゼロだと第4幕に何も出なくなり分かりにくい）。
-			if (prev.includes(kind) && prev.length === 1) return prev;
-			const next = prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind];
-			regenerate(beats, { act4Kinds: next });
-			return next;
-		});
-	};
-
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
 			<div className="flex h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[88vh] sm:rounded-xl">
@@ -297,8 +274,10 @@ export default function MvArrangementModal({
 					<ArrangementLivePreview layers={result.layers} beats={beats} bpm={bpm} />
 					<div className="rounded border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-gray-300 leading-relaxed">
 						アレンジ元のグループを加工して、割り込み用の変化を作ります。
-						気に入らなければ「生成しなおす」で型を振り直し、決まったら挿入してください。
-						どの小節に割り込むかは挿入後にグループの表示欄で調整できます。
+						第4幕のグリフは決め打ちの型リストではなく、生成アルゴリズムが毎回
+						無限に近い組み合わせを作ります。気に入らなければ「生成しなおす」で
+						型を振り直し、決まったら挿入してください。どの小節に割り込むかは
+						挿入後にグループの表示欄で調整できます。
 					</div>
 				</div>
 
@@ -342,25 +321,6 @@ export default function MvArrangementModal({
 									}`}
 								>
 									{opt === "auto" ? "自動" : `${opt}個`}
-								</button>
-							))}
-						</div>
-					</div>
-
-					<div>
-						<p className="mb-1 text-[10px] font-bold text-gray-300">第4幕に出すグリフ種</p>
-						<div className="flex flex-wrap gap-1.5">
-							{ACT4_KIND_OPTIONS.map((opt) => (
-								<button
-									key={opt.value}
-									onClick={() => toggleAct4Kind(opt.value)}
-									className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
-										act4Kinds.includes(opt.value)
-											? "bg-blue-600 text-white font-bold"
-											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
-									}`}
-								>
-									{opt.label}
 								</button>
 							))}
 						</div>

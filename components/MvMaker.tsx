@@ -193,6 +193,8 @@ import {
 	generateArrangementForGroup,
 	generateSymmetricShapeGroup,
 	MV_SHAPE_BASE_BEATS_OPTIONS,
+	MV_SHAPE_SYNC_STYLE_OPTIONS,
+	type MvShapeSyncStyle,
 	type SymmetricShapeGroupOptions,
 } from "@/lib/mv-shape-group-macro";
 import {
@@ -5992,7 +5994,8 @@ export default function MvMaker({
 												| "centered"
 												| "scattered"
 												| "bars"
-												| "duet",
+												| "duet"
+												| "ripple",
 										}))
 									}
 									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
@@ -6001,6 +6004,7 @@ export default function MvMaker({
 									<option value="centered">中央に入れ子（エンブレム風）</option>
 									<option value="scattered">中央線上に横並び</option>
 									<option value="bars">棒の列（イコライザー風）</option>
+									<option value="ripple">波紋（複数の拍で重なる輪）</option>
 								</select>
 							</label>
 							<label className="flex items-center justify-between">
@@ -6039,8 +6043,31 @@ export default function MvMaker({
 								</select>
 							</label>
 							<Hint>
-								ベースの拍でひと巡りします。図形ごとに等倍・1/2倍速・1/4倍速を織り交ぜるので、
+								ベースの拍でひと巡りします。図形ごとに等倍・2倍・4倍・8倍速を織り交ぜるので、
 								速い図形が拍を刻む裏でゆっくり形が変わる層ができます（すべて整数倍なので小節の頭で必ず揃います）。
+							</Hint>
+							<label className="flex items-center justify-between">
+								<span>ずれ方</span>
+								<select
+									value={macroSettings.syncStyle ?? "mixed"}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											syncStyle: e.target.value as MvShapeSyncStyle,
+										}))
+									}
+									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
+								>
+									{MV_SHAPE_SYNC_STYLE_OPTIONS.map((o) => (
+										<option key={o.value} value={o.value}>
+											{o.label}
+										</option>
+									))}
+								</select>
+							</label>
+							<Hint>
+								要素ごとの拍位相のずらし方です。「自動で組み合わせ」なら裏拍・半小節・
+								1.5小節ずれ・表拍のままを図形ごとに混ぜます。特定のずれだけに揃えたいときは個別に選べます。
 							</Hint>
 							<label className="flex items-center justify-between">
 								<span>図形の傾向</span>
