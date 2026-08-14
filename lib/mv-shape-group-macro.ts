@@ -1517,7 +1517,7 @@ type MathExpr =
 	| { t: "add"; l: MathExpr; r: MathExpr }
 	| { t: "mul"; l: MathExpr; r: MathExpr }
 	| { t: "sin"; a: MathExpr; freq: number }
-	| { t: "cos"; a: MathExpr; freq: number };
+	| { t: "noise"; l: MathExpr; r: MathExpr };
 
 /** 乱数で数式の木（AST）を自動生成する。 */
 function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
@@ -1527,11 +1527,11 @@ function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
 		return { t: "var", n: pick(["x", "y", "r", "th", "t"] as const) };
 	}
 	
-	const types = ["add", "mul", "sin", "cos"];
+	const types = ["add", "mul", "sin", "noise"];
 	const type = pick(types);
 	
-	if (type === "sin" || type === "cos") {
-		return { t: type, a: buildRandomMathExpr(depth - 1, requireT), freq: randRange(1, 4, 1) };
+	if (type === "sin") {
+		return { t: "sin", a: buildRandomMathExpr(depth - 1, requireT), freq: randRange(1, 4, 1) };
 	}
 	
 	const leftRequiresT = requireT ? chance(0.5) : false;
@@ -1551,7 +1551,12 @@ function evaluateMathExpr(expr: MathExpr, env: { x: number; y: number; r: number
 		case "add": return (evaluateMathExpr(expr.l, env) + evaluateMathExpr(expr.r, env)) / 2;
 		case "mul": return evaluateMathExpr(expr.l, env) * evaluateMathExpr(expr.r, env);
 		case "sin": return Math.sin(evaluateMathExpr(expr.a, env) * expr.freq * Math.PI);
-		case "cos": return Math.cos(evaluateMathExpr(expr.a, env) * expr.freq * Math.PI);
+		case "noise": {
+			const vx = evaluateMathExpr(expr.l, env);
+			const vy = evaluateMathExpr(expr.r, env);
+			const h = Math.sin(vx * 12.9898 + vy * 78.233) * 43758.5453;
+			return (h - Math.floor(h)) * 2 - 1; // [-1, 1] に正規化
+		}
 	}
 }
 
@@ -1565,9 +1570,8 @@ function opProceduralMath(): PointOp {
 	const astX = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
 	const astY = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
 	
-	// 飛び散りすぎないように振幅は控えめにする
-	const ampX = randRange(5, 25);
-	const ampY = randRange(5, 25);
+	const ampX = randRange(10, 60);
+	const ampY = randRange(10, 60);
 	const reverse = chance(0.5);
 
 	return (x, y, t) => {
