@@ -3348,6 +3348,7 @@ export default function MvMaker({
 						{ value: "'rorigaifont', sans-serif", label: "ロリガイフォント" },
 						{ value: "'PBfont', sans-serif", label: "PBfont(かわいい)" },
 						{ value: "'chupakafont', sans-serif", label: "チュパカブラフォント" },
+						{ value: "'favofont', sans-serif", label: "ふぁぼフォント" },
 						...customFonts.map((f) => ({
 							value: `'${f.name}', sans-serif`,
 							label: `${f.name}`,
