@@ -1065,52 +1065,123 @@ export const DEFAULT_ARRANGEMENT_BEATS = 4;
 // 新しく起こす——元レイヤーの変形では作れない絵なので、アレンジが自前で
 // グリフを発明する（「無から参考エフェクトを生み出す」ためのパーツ）。
 
+/**
+ * 塗りグリフの「部品分解＋アンカー付き成長」共通ヘルパー。
+ *
+ * 全体を一様スケールする（＝ズームにしか見えない）のではなく、各部品ごとに
+ * 「固定される辺（アンカー）」と「伸びる軸」を持たせ、成長進度 t(0..1) に応じて
+ * アンカー側は動かさず反対側の辺だけをアンカーへ向けて縮める＝t=0 で
+ * 「アンカー際の細い線」、t=1 で「本来の形」になるようにする。
+ * イージングは easeOutCubic（勢いよく伸びて着地）で統一。
+ */
+function easeOutCubic(t: number): number {
+	const c = Math.min(1, Math.max(0, t));
+	return 1 - (1 - c) ** 3;
+}
+
+/** 縦方向（下辺アンカー）に伸びる矩形1本の、進度tでのパス。 */
+function growUpRect(x: number, w: number, bottomY: number, fullH: number, t: number): string {
+	const minH = 2;
+	const h = minH + (fullH - minH) * easeOutCubic(t);
+	return rectPath(x, bottomY - h, x + w, bottomY);
+}
+
+/** 中心線を軸に上下対称へ伸びる矩形1本の、進度tでのパス。 */
+function growFromCenterYRect(x: number, w: number, centerY: number, fullH: number, t: number): string {
+	const minH = 2;
+	const h = minH + (fullH - minH) * easeOutCubic(t);
+	return rectPath(x, centerY - h / 2, x + w, centerY + h / 2);
+}
+
+/** 中心点を軸に左右対称へ伸びる横長矩形の、進度tでのパス。 */
+function growFromCenterXRect(centerX: number, y0: number, y1: number, fullW: number, t: number): string {
+	const minW = 2;
+	const w = minW + (fullW - minW) * easeOutCubic(t);
+	return rectPath(centerX - w / 2, y0, centerX + w / 2, y1);
+}
+
+interface BarChartPlan {
+	x: number;
+	w: number;
+	h: number;
+}
+
 /** イコライザー風の縦棒列。高さは1本ずつ独立に振れる。 */
-function barChartGlyph(): string {
+function planBarChart(): BarChartPlan[] {
 	const n = 4 + Math.floor(Math.random() * 4); // 4〜7本
 	const gap = randRange(3, 6);
 	const w = randRange(6, 11);
 	let x = 50 - ((w + gap) * n - gap) / 2;
-	const parts: string[] = [];
+	const plan: BarChartPlan[] = [];
 	for (let i = 0; i < n; i++) {
 		const h = randRange(15, 60);
-		parts.push(rectPath(x, 80 - h, x + w, 80));
+		plan.push({ x, w, h });
 		x += w + gap;
 	}
-	return parts.join(" ");
+	return plan;
+}
+
+/** 底辺(y=80)を固定したまま、進度tぶん各バーの高さだけを成長させる。 */
+function renderBarChart(plan: BarChartPlan[], t: number): string {
+	return plan.map((b) => growUpRect(b.x, b.w, 80, b.h, t)).join(" ");
+}
+
+interface CanisterPlan {
+	stripes: { x: number; w: number }[];
 }
 
 /** 上下に細いラインを持つ、縦縞の入った箱（参考動画の左右の主役）。 */
-function canisterGlyph(): string {
-	const parts: string[] = [
-		rectPath(10, 10, 90, 16),
-		rectPath(10, 84, 90, 90),
-	];
+function planCanister(): CanisterPlan {
 	const stripes = 3 + Math.floor(Math.random() * 2); // 3〜4本
 	const gap = randRange(2.5, 5);
 	const span = 70;
 	const w = (span - gap * (stripes - 1)) / stripes;
 	let x = 15;
+	const list: { x: number; w: number }[] = [];
 	for (let i = 0; i < stripes; i++) {
-		parts.push(rectPath(x, 24, x + w, 76));
+		list.push({ x, w });
 		x += w + gap;
 	}
+	return { stripes: list };
+}
+
+/**
+ * 上下の横線は中心(x=50)から左右へ、縦縞は中心線(y=50)から上下へ、
+ * それぞれアンカーを動かさず進度tぶん伸ばす。
+ */
+function renderCanister(plan: CanisterPlan, t: number): string {
+	const parts = [
+		growFromCenterXRect(50, 10, 16, 80, t),
+		growFromCenterXRect(50, 84, 90, 80, t),
+		...plan.stripes.map((s) => growFromCenterYRect(s.x, s.w, 50, 52, t)),
+	];
 	return parts.join(" ");
 }
 
+interface TicksPlan {
+	x: number;
+	w: number;
+	h: number;
+}
+
 /** 目盛りのような小さな短冊の列。 */
-function ticksGlyph(): string {
+function planTicks(): TicksPlan[] {
 	const n = 3 + Math.floor(Math.random() * 4); // 3〜6個
-	const parts: string[] = [];
+	const plan: TicksPlan[] = [];
 	let x = 10;
 	for (let i = 0; i < n; i++) {
 		const w = randRange(4, 14);
 		const h = randRange(6, 14);
-		parts.push(rectPath(x, 50 - h / 2, x + w, 50 + h / 2));
+		plan.push({ x, w, h });
 		x += w + randRange(4, 10);
 		if (x > 92) break;
 	}
-	return parts.join(" ");
+	return plan;
+}
+
+/** 各短冊の中心線(y=50)を軸に、進度tぶん上下へ伸ばす。 */
+function renderTicks(plan: TicksPlan[], t: number): string {
+	return plan.map((s) => growFromCenterYRect(s.x, s.w, 50, s.h, t)).join(" ");
 }
 
 /** かぎ括弧（コーナーブラケット）。`flip` で対角側の向きになる。破線混じり。 */
@@ -1400,7 +1471,13 @@ export function generateArrangementForGroup(
 		cornerBracketGlyph(false),
 		randRange(50, 70),
 	);
-	fadeBridge(0.75, cornerBracketGlyph(true), randRange(50, 70), barChartGlyph(), randRange(38, 52));
+	fadeBridge(
+		0.75,
+		cornerBracketGlyph(true),
+		randRange(50, 70),
+		renderBarChart(planBarChart(), 1),
+		randRange(38, 52),
+	);
 
 	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
 	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
@@ -1419,15 +1496,62 @@ export function generateArrangementForGroup(
 	const mains = slots.filter((s) => s.kind === "can");
 	const rest = slots.filter((s) => s.kind !== "can").sort(() => Math.random() - 0.5);
 	const chosen = [...mains, ...rest].slice(0, useCount);
-	// 幕の頭でグリフが最終形のまま静止出現していた（参考動画は逆に「小さな線
-	// から本体が伸びて」最終形へ到達する）。第1幕のフェードイン（opacity）と
-	// 同じ「phraseの減衰envelopeをsubで引く」手口を size に流用し、各グリフ
-	// がこの幕の最初の3割ぶんで小さな種（本来サイズの2割強）から本来サイズへ
-	// イージング成長するようにする。
-	const growthBars = Math.max(0.01, durationBars * 0.25 * 0.3);
+	// 幕の頭でグリフが最終形のまま静止出現していた（参考動画は逆に「部品ごとに
+	// アンカーされた辺から線が伸びて」最終形へ到達する）。size を一様スケール
+	// すると全部品が中心へ向かって縮む＝ズームにしか見えないので、部品分解した
+	// 形状（renderBarChart/renderCanister/renderTicks）を成長進度tで静的パスに
+	// 焼き、幕の頭の3割ぶんを数コマの離散フレームとして barRange を刻んで
+	// 積み重ねる（=== 第2/3幕境目の `fadeBridge` と同じ「離散フレーム」路線。
+	// iconCycle は絶対タイムラインの拍位相でコマが進むため、トリガー位置に
+	// 依存せず「出現の瞬間に必ず種から始まる」保証ができず不採用）。
+	const growthBars = Math.max(0.02, durationBars * 0.25 * 0.3);
+	const growthFrameCount = 5;
+	const growthProgress = [0.12, 0.32, 0.54, 0.78, 1];
 	for (const s of chosen) {
-		const glyph =
-			s.kind === "bar" ? barChartGlyph() : s.kind === "can" ? canisterGlyph() : ticksGlyph();
+		const render: (t: number) => string =
+			s.kind === "bar"
+				? ((plan) => (t: number) => renderBarChart(plan, t))(planBarChart())
+				: s.kind === "can"
+					? ((plan) => (t: number) => renderCanister(plan, t))(planCanister())
+					: ((plan) => (t: number) => renderTicks(plan, t))(planTicks());
+		const sliceLen = growthBars / growthFrameCount;
+		for (let i = 0; i < growthFrameCount; i++) {
+			const frameStart = at(0.75) + sliceLen * i;
+			const frameEnd = i === growthFrameCount - 1 ? at(0.75) + growthBars : frameStart + sliceLen;
+			const isFirst = i === 0;
+			layers.push({
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: roundTo(s.x, 1),
+				y: roundTo(s.y, 1),
+				z: nextZ(),
+				filled: true,
+				thickness: 2,
+				size: roundTo(s.size, 1),
+				path: render(growthProgress[i]),
+				barRange: [roundTo(frameStart, 4), roundTo(frameEnd, 4)],
+				// 種の1コマ目だけ不透明度0→1のフェードインを掛け、成長開始が
+				// ハードカットでパッと現れないようにする（成長コマ同士は
+				// 「離散的に差し替わる」参考動画の質感どおりハードカットのまま）。
+				modulators: isFirst
+					? [
+							{
+								source: "phrase",
+								target: "opacity",
+								op: "sub",
+								amount: 1,
+								bars: Math.max(0.01, frameEnd - frameStart),
+								phaseOffset: roundTo(frameStart, 4),
+								symmetric: false,
+								curve: 1,
+							},
+						]
+					: [],
+			});
+		}
+		// 成長が終わった残り（最後のコマ〜幕の終わり）は完成形を維持し、区間の
+		// 終わりだけ不透明度1→0のフェードアウトでアレンジ元への復帰を和らげる。
 		layers.push({
 			...common,
 			form: "path",
@@ -1438,23 +1562,9 @@ export function generateArrangementForGroup(
 			filled: true,
 			thickness: 2,
 			size: roundTo(s.size, 1),
-			path: glyph,
-			barRange: [at(0.75), at(1)],
+			path: render(1),
+			barRange: [roundTo(at(0.75) + growthBars, 4), at(1)],
 			modulators: [
-				// 小さな種→本来サイズへイージング成長（幕の頭の30%）。
-				{
-					source: "phrase",
-					target: "size",
-					op: "sub",
-					amount: roundTo(s.size * 0.82, 1),
-					bars: growthBars,
-					phaseOffset: at(0.75),
-					symmetric: false,
-					curve: 2,
-				},
-				// 区間の終わりはアレンジ元へ戻る＝ハードカットなので、この幕の最後の
-				// 15%だけ不透明度1→0のフェードアウトを掛けて、復帰の瞬間の
-				// ポップを和らげる（第1幕のフェードインと対になる措置）。
 				{
 					source: "phrase",
 					target: "opacity",
