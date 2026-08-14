@@ -282,45 +282,56 @@ export const MV_SHAPE_BASE_BEATS_OPTIONS: { value: number; label: string }[] = [
 ];
 
 /**
- * 「ずれ方」に選べる値。表拍そのままに対して、要素ごとの位相へ足す追加の
- * ずれ量（拍）。`mixed`（既定）はこの中から要素ごとに乱数で1つ選んで組み合わせる
- * ——「裏拍や半小節、1.5小節ズレのものを新規生成時に混ぜて組み合わせる」ため。
- * 特定の値に固定したいときだけ個別指定する。
+ * 「拍の組み合わせ」の候補となる絶対の周期(拍)。`MV_SHAPE_BASE_BEATS_OPTIONS`の
+ * 整数拍ぶんと揃えてある（0.5拍は「ベースの拍」専用の特殊値なのでここには含めない）。
  */
-export type MvShapeSyncStyle =
-	| "mixed"
-	| "onbeat"
-	| "offbeat"
-	| "halfBar"
-	| "dottedBar";
+const BEAT_COMBO_LEVELS = [1, 2, 4, 8, 16, 32];
 
-export const MV_SHAPE_SYNC_STYLE_OPTIONS: { value: MvShapeSyncStyle; label: string }[] =
-	[
-		{ value: "mixed", label: "自動で組み合わせ（既定）" },
-		{ value: "onbeat", label: "表拍のまま" },
-		{ value: "offbeat", label: "裏拍（半拍ずらす）" },
-		{ value: "halfBar", label: "半小節ずらす" },
-		{ value: "dottedBar", label: "1.5小節ずらす" },
-	];
+/**
+ * 周期(拍)と位相(拍)の組。位相0が表拍、位相=周期/2が「裏拍」
+ * （その周期のちょうど半分ずらした位置）を表す。
+ */
+interface BeatCombo {
+	periodBeats: number;
+	phaseBeats: number;
+}
 
-/** `mixed` が選ぶ候補（拍単位のずれ量）。`onbeat`(0)を含めておくことで、
- * 全要素が必ずずれる単調さを避け、表拍のままの要素も混ざるようにしている。 */
-const SYNC_STYLE_OFFSET_BEATS: Record<Exclude<MvShapeSyncStyle, "mixed">, number> = {
-	onbeat: 0,
-	offbeat: 0.5,
-	halfBar: MV_BEATS_PER_BAR / 2,
-	dottedBar: MV_BEATS_PER_BAR * 1.5,
-};
-
-/** 指定した（または `mixed` ならランダムに選んだ）ずれ方の、拍単位のオフセット量。 */
-function syncOffsetBeats(style: MvShapeSyncStyle): number {
-	if (style === "mixed") {
-		const flavors = Object.keys(
-			SYNC_STYLE_OFFSET_BEATS,
-		) as (keyof typeof SYNC_STYLE_OFFSET_BEATS)[];
-		return SYNC_STYLE_OFFSET_BEATS[pick(flavors)];
+/**
+ * ベースの拍から「選んだ拍以上の周期 × 表拍/裏拍」の全組み合わせを作る。
+ *
+ * 例: ベース1拍 → 1,2,4,8,16,32拍のそれぞれに表拍・裏拍の2通り＝12通り。
+ *     ベース4拍 → 4,8,16,32拍（1,2拍はベース未満なので除外）の2通り＝8通り。
+ * （ユーザー要件の列挙どおり。ベースが `BEAT_COMBO_LEVELS` に無い半端な値
+ * （半拍など）でもベース自身は必ず候補へ含める。）
+ */
+function buildBeatCombos(baseBeats: number): BeatCombo[] {
+	const periods = BEAT_COMBO_LEVELS.filter((p) => p >= baseBeats);
+	if (!periods.includes(baseBeats)) periods.unshift(baseBeats);
+	const combos: BeatCombo[] = [];
+	for (const p of periods) {
+		combos.push({ periodBeats: p, phaseBeats: 0 });
+		combos.push({ periodBeats: p, phaseBeats: p / 2 });
 	}
-	return SYNC_STYLE_OFFSET_BEATS[style];
+	return combos;
+}
+
+/** 「組み合わせ密度」の既定値。1（全部）だと拍だけで12〜8種を同時に踏み過ぎて
+ * うるさくなる（ユーザー指摘の「過剰」）ため、既定は半分ほどに間引く。 */
+export const DEFAULT_BEAT_COMBO_DENSITY = 0.5;
+
+/**
+ * 密度(0..1)ぶんだけ組み合わせを間引く。1個も残らなかった場合はベースの表拍
+ * だけを保証で残す（間引きすぎて「何も動かないグループ」になるのを防ぐ）。
+ */
+function thinBeatCombos(
+	combos: BeatCombo[],
+	density: number,
+	baseBeats: number,
+): BeatCombo[] {
+	const d = Math.min(1, Math.max(0, density));
+	const kept = combos.filter(() => chance(d));
+	if (kept.length > 0) return kept;
+	return [{ periodBeats: baseBeats, phaseBeats: 0 }];
 }
 
 function pick<T>(arr: readonly T[]): T {
@@ -364,17 +375,19 @@ export interface SymmetricShapeGroupOptions {
 	 *   269x67〜345x105（横長）と165x165（正方形）を毎拍往復し、両方が同時に出る
 	 *   フレームは通常ループ中に1枚も無い）。これを iconCycle の空白コマで実装する。
 	 * duet 以外は**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
-	 * "ripple" = form:'ripple'（輪が広がって消える）を、`baseBeats`の1/2/4/8倍
-	 *   （`RATE_LADDER`）と `syncStyle` のずれを組み合わせた複数周期で重ね置く。
+	 * "ripple" = form:'ripple'（輪が広がって消える）を、`baseBeats`以上の
+	 *   拍の組み合わせ（`buildBeatCombos`/`comboDensity`）で複数周期重ね置く。
 	 *   単一周期だと単調な「毎小節同じ輪」にしかならないため、遅い輪の中を
 	 *   速い輪がくぐるような多層のリズムにしてある。
 	 */
 	clusterType?: "centered" | "scattered" | "bars" | "duet" | "ripple";
 	/**
-	 * 要素ごとの拍位相の「ずれ方」。未指定は `"mixed"`
-	 * （裏拍・半小節・付点小節ずれ・表拍のままを要素ごとに乱数で組み合わせる）。
+	 * 「ベースの拍」以上の周期（1/2/4/8/16/32拍）× 表拍/裏拍のうち、実際に
+	 * 組み合わせへ使う割合(0..1)。未指定は `DEFAULT_BEAT_COMBO_DENSITY`(0.5)。
+	 * 1にすると全組み合わせ（ベース1拍なら12種、4拍なら8種）を一度に使うが、
+	 * 過剰に賑やかになりやすいので既定は半分ほどに間引いてある。
 	 */
-	syncStyle?: MvShapeSyncStyle;
+	comboDensity?: number;
 	/** 図形の種類の傾向。"sharp" (矩形グリフ) / "round" (丸い原始図形) / "all" (混在) */
 	shapeStyle?: "sharp" | "round" | "all";
 	/** 線の太さ。"thick" (太め) / "thin" (細め) / "random" (ランダム) */
@@ -532,28 +545,22 @@ interface GroupPlan {
 	useRound: boolean;
 	/** スロット数。要素はこの数で割った位相を受け持つ。 */
 	slots: number;
-	syncStyle: MvShapeSyncStyle;
+	/** このグループ1回ぶんに実際に使う「周期×表拍/裏拍」の組み合わせ（間引き済み）。 */
+	beatCombos: BeatCombo[];
 }
 
 /**
- * 要素ごとの速さの倍率。ベースの拍に対して 1倍・1/2倍速・1/4倍速を織り交ぜる。
+ * 要素ごとに割り当てる周期・位相の組を、グループの `beatCombos`
+ * （ベースの拍以上の周期×表拍/裏拍を密度で間引いたプール）から順番に回して返す。
  *
- * 全部が同じ速さだと、いくら要素を増やしても1枚の絵が明滅しているだけに見える。
- * 遅い要素が混ざると、速い要素の裏でゆっくり形が変わっていく層ができて厚みが出る。
- * **整数倍だけにしてあるので、何倍速が混ざっても小節の頭で必ず全部が揃う**
- * （3倍のような値を混ぜると何小節も揃わず、拍から浮いて聞こえる）。
- * 1倍を多めにして、拍を踏む要素が常に主役になるようにしてある。
- *
- * 以前はここから確率で1枚ずつ抽選していたが、1倍の当選比率を高くしてある
- * せいで要素数が少ないグループ（同心の2段目、帯の最初のペア等）では
- * 「ベースの拍」が1拍のとき2拍・4拍がほぼ出ない、という運任せの偏りが出ていた。
- * 内側（＝呼び出し順が早い要素）から外側へ向けて 1→2→4→8 の順に確実に割り当て、
- * 5枚目以降は最も遅い8のまま据え置く方式にして、要素が2つ以上あれば
- * 2拍・4拍・8拍が確実に構成要素として混ざるようにしてある
- * （「選んだ拍(1倍)以上のビートの図形も組み合わせる」——例えば1拍を選んでも
- * 2・4・8倍の要素が自動で同梱される）。
+ * 全要素が同じ周期・位相だと、いくら要素を増やしても1枚の絵が明滅しているだけに
+ * 見える。プールを使い切ったら先頭へ戻って再利用する（要素数がプールより多くても
+ * 必ず全種類が最低1回は使われることを保証するため、確率抽選ではなく巡回にしてある）。
  */
-const RATE_LADDER = [1, 2, 4, 8];
+function makeComboCycler(combos: BeatCombo[]): () => BeatCombo {
+	let i = 0;
+	return () => combos[i++ % combos.length];
+}
 
 /** コマ列を k コマぶん回す。脇役を主役と違うコマから始めるのに使う。 */
 function rotateCycle(paths: string[], k: number): string[] {
@@ -574,8 +581,8 @@ function buildElement(
 		filled: boolean;
 		/** コマ列の開始位置をずらす（脇役を主役と別の絵にする）。 */
 		cycleShift: number;
-		/** ベースの拍に対する周期の倍率（1 / 2 / 4）。 */
-		rateMul: number;
+		/** この要素が受け持つ周期・位相（`plan.beatCombos` から巡回で割り当てたもの）。 */
+		combo: BeatCombo;
 		z: number;
 	},
 ): MvShapeLayer {
@@ -589,13 +596,12 @@ function buildElement(
 	const thickness = roundTo(rawThickness, 1);
 	// 形のひと巡りと拍の踏み込みは同じ周期にする。片方だけ別の速さにすると、
 	// 形が一巡する頭と踏み込む頭がずれて拍に乗っていないように見える。
-	const periodBeats = roundTo(plan.baseBeats * opts.rateMul, 2);
-	// スロットによる均等な位相ずらしに、「ずれ方」(裏拍/半小節/1.5小節/…)の
-	// 追加オフセットを重ねる。周期でmodulo済みにしておかないと、遅い要素
-	// （periodBeatsが大きい）で足したぶんが周期を超えて位相が意図とズレる。
+	const periodBeats = roundTo(opts.combo.periodBeats, 2);
+	// スロットによる均等な位相ずらしに、コンボの表拍/裏拍オフセットを重ねる。
+	// 周期でmodulo済みにしておかないと、遅い要素（periodBeatsが大きい）で
+	// 足したぶんが周期を超えて位相が意図とズレる。
 	const rawPhaseOffset =
-		(opts.slot % plan.slots) * (periodBeats / plan.slots) +
-		syncOffsetBeats(plan.syncStyle);
+		(opts.slot % plan.slots) * (periodBeats / plan.slots) + opts.combo.phaseBeats;
 	const phaseOffset = roundTo(
 		((rawPhaseOffset % periodBeats) + periodBeats) % periodBeats,
 		2,
@@ -710,7 +716,11 @@ function makePlan(options: SymmetricShapeGroupOptions): GroupPlan {
 		accentColor,
 		useRound,
 		slots: pick([2, 2, 4]),
-		syncStyle: options.syncStyle ?? "mixed",
+		beatCombos: thinBeatCombos(
+			buildBeatCombos(baseBeats),
+			options.comboDensity ?? DEFAULT_BEAT_COMBO_DENSITY,
+			baseBeats,
+		),
 	};
 }
 
@@ -740,12 +750,9 @@ export function buildSymmetricShapeGroupLayers(
 	let slot = 0;
 	const nextSlot = () => slot++;
 
-	// 速さの倍率。内側（＝呼び出し順が早い要素）から 1→2→4 の順で確実に割り当てる。
-	// 1枚目は必ず等倍にして拍を踏む要素を確保しつつ（全部が遅い側に振れると拍に
-	// 乗っていないグループになる）、2枚目以降は確率任せにせず ladder を回して
-	// 2拍・4拍が実際に構成要素として混ざることを保証する。
-	let rateIdx = 0;
-	const nextRate = () => RATE_LADDER[Math.min(rateIdx++, RATE_LADDER.length - 1)];
+	// 要素ごとの周期・位相。`plan.beatCombos`（ベース拍以上の周期×表拍/裏拍を
+	// 密度で間引いたプール）を巡回で割り当てる。
+	const nextCombo = makeComboCycler(plan.beatCombos);
 
 	if (clusterType === "duet") {
 		// ── 1拍の中で「横並びの列」と「中央エンブレム」が交互に出る構図 ──
@@ -865,19 +872,18 @@ export function buildSymmetricShapeGroupLayers(
 
 	if (clusterType === "ripple") {
 		// ── 波紋（form:'ripple'）を複数周期で重ねる ──
-		// 単一周期だと「毎小節同じ輪」の単調な絵にしかならない。RATE_LADDER
-		// （1/2/4/8倍）で周期を分け、`syncOffsetBeats` で頭出しの位置もずらして、
-		// 遅く大きい輪の中を速く小さい輪がくぐるような多層のリズムを作る。
-		const ringCount = options.pairCount
-			? Math.min(4, Math.max(2, options.pairCount))
-			: pick([3, 3, 4]);
+		// 単一周期だと「毎小節同じ輪」の単調な絵にしかならない。`plan.beatCombos`
+		// （ベース拍以上の周期×表拍/裏拍を密度で間引いたプール）を1つずつ輪へ
+		// 割り当て、遅く大きい輪の中を速く小さい輪がくぐるような多層のリズムを作る。
+		const ringCount = Math.min(8, plan.beatCombos.length);
 		const palette = [plan.mainColor, plan.accentColor];
 		for (let i = 0; i < ringCount; i++) {
-			const rateMul = RATE_LADDER[Math.min(i, RATE_LADDER.length - 1)];
-			const rippleBeats = roundTo(plan.baseBeats * rateMul, 2);
+			const combo = nextCombo();
 			// 遅い(=大きい周期の)輪ほど大きく描く——速い輪が外まで広がりきる前に
 			// 遅い輪の内側をくぐる、という重なりの階層を作るため。
-			const outerSize = randRange(70, 150) * (1 + i * 0.35);
+			const periodRank = BEAT_COMBO_LEVELS.indexOf(combo.periodBeats);
+			const outerSize =
+				randRange(70, 150) * (1 + Math.max(0, periodRank) * 0.35);
 			layers.push({
 				kind: "shape",
 				form: "ripple",
@@ -896,8 +902,8 @@ export function buildSymmetricShapeGroupLayers(
 				spin: 0,
 				blend: "normal",
 				pathBox: [0, 0, 100, 100],
-				rippleBeats,
-				ripplePhaseOffset: roundTo(syncOffsetBeats(plan.syncStyle), 2),
+				rippleBeats: combo.periodBeats,
+				ripplePhaseOffset: roundTo(combo.phaseBeats, 2),
 				modulators: [],
 			});
 		}
@@ -932,7 +938,7 @@ export function buildSymmetricShapeGroupLayers(
 					cycleShift: i,
 					// 段ごとに速さも変える。内側が拍を刻み、外側がゆっくり形を
 					// 変えていく層になると、同心の入れ子に厚みが出る。
-					rateMul: nextRate(),
+					combo: nextCombo(),
 					z: nextZ(),
 				}),
 			);
@@ -1005,6 +1011,9 @@ export function buildSymmetricShapeGroupLayers(
 			const idx = Math.floor(Math.random() * barCount);
 			if (usedIdx.has(idx)) continue;
 			usedIdx.add(idx);
+			// 差し色の棒は本体の列(baseBeats固定)と違う周期・位相を割り当てる
+			// ——「選んだ拍以上の組み合わせ」が列の中にも混ざるようにするため。
+			const combo = nextCombo();
 			layers.push({
 				kind: "shape",
 				form: "bar",
@@ -1029,8 +1038,8 @@ export function buildSymmetricShapeGroupLayers(
 						target: "size",
 						op: "add",
 						amount: roundTo(baseSize * randRange(2.4, 4), 1),
-						periodBeats: roundTo(plan.baseBeats, 2),
-						phaseOffset: roundTo(randRange(0, plan.baseBeats, 2), 2),
+						periodBeats: roundTo(combo.periodBeats, 2),
+						phaseOffset: roundTo(combo.phaseBeats, 2),
 						curve: 2,
 					},
 				],
@@ -1063,7 +1072,7 @@ export function buildSymmetricShapeGroupLayers(
 						accent: chance(0.35),
 						filled: chance(0.25),
 						cycleShift: 0,
-						rateMul: nextRate(),
+						combo: nextCombo(),
 						z: nextZ(),
 					}),
 				);
@@ -1073,7 +1082,7 @@ export function buildSymmetricShapeGroupLayers(
 				if (cursor > MV_W / 2 - 16) break;
 				const size = randRange(18, 54);
 				const s = nextSlot();
-				const rate = nextRate();
+				const combo = nextCombo();
 				const shift = 1 + i;
 				layers.push(
 					buildElement(plan, groupId, {
@@ -1084,7 +1093,7 @@ export function buildSymmetricShapeGroupLayers(
 						accent: chance(0.2),
 						filled: false,
 						cycleShift: shift,
-						rateMul: rate,
+						combo,
 						z: nextZ(),
 					}),
 				);
@@ -1097,7 +1106,7 @@ export function buildSymmetricShapeGroupLayers(
 						accent: chance(0.2),
 						filled: false,
 						cycleShift: shift,
-						rateMul: rate,
+						combo,
 						z: nextZ(),
 					}),
 				);
@@ -1123,7 +1132,7 @@ export function buildSymmetricShapeGroupLayers(
 						accent: chance(0.25),
 						filled: chance(0.15),
 						cycleShift: i,
-						rateMul: nextRate(),
+						combo: nextCombo(),
 						z: nextZ(),
 					}),
 				);

@@ -190,11 +190,10 @@ import {
 import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import {
 	buildSymmetricShapeGroupLayers,
+	DEFAULT_BEAT_COMBO_DENSITY,
 	generateArrangementForGroup,
 	generateSymmetricShapeGroup,
 	MV_SHAPE_BASE_BEATS_OPTIONS,
-	MV_SHAPE_SYNC_STYLE_OPTIONS,
-	type MvShapeSyncStyle,
 	type SymmetricShapeGroupOptions,
 } from "@/lib/mv-shape-group-macro";
 import {
@@ -6047,27 +6046,34 @@ export default function MvMaker({
 								速い図形が拍を刻む裏でゆっくり形が変わる層ができます（すべて整数倍なので小節の頭で必ず揃います）。
 							</Hint>
 							<label className="flex items-center justify-between">
-								<span>ずれ方</span>
-								<select
-									value={macroSettings.syncStyle ?? "mixed"}
-									onChange={(e) =>
-										setMacroSettings((s) => ({
-											...s,
-											syncStyle: e.target.value as MvShapeSyncStyle,
-										}))
-									}
-									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
-								>
-									{MV_SHAPE_SYNC_STYLE_OPTIONS.map((o) => (
-										<option key={o.value} value={o.value}>
-											{o.label}
-										</option>
-									))}
-								</select>
+								<span>拍の組み合わせ密度</span>
+								<span className="flex items-center gap-1.5">
+									<input
+										type="range"
+										min={0}
+										max={1}
+										step={0.1}
+										value={macroSettings.comboDensity ?? DEFAULT_BEAT_COMBO_DENSITY}
+										onChange={(e) =>
+											setMacroSettings((s) => ({
+												...s,
+												comboDensity: Number(e.target.value),
+											}))
+										}
+										className="w-24 accent-purple-400"
+									/>
+									<span className="w-8 text-right tabular-nums">
+										{Math.round(
+											(macroSettings.comboDensity ?? DEFAULT_BEAT_COMBO_DENSITY) * 100,
+										)}
+										%
+									</span>
+								</span>
 							</label>
 							<Hint>
-								要素ごとの拍位相のずらし方です。「自動で組み合わせ」なら裏拍・半小節・
-								1.5小節ずれ・表拍のままを図形ごとに混ぜます。特定のずれだけに揃えたいときは個別に選べます。
+								「ベースの拍」以上の周期（1/2/4/8/16/32拍）×表拍/裏拍の全組み合わせ
+								（ベース1拍なら12種、4拍なら8種）から、実際に使う割合です。100%だと
+								全種類を一度に踏むので賑やかすぎになりがちです（既定50%）。
 							</Hint>
 							<label className="flex items-center justify-between">
 								<span>図形の傾向</span>
