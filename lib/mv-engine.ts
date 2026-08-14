@@ -1372,7 +1372,7 @@ function drawPostEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				);
 				ctx.globalCompositeOperation = "lighter";
 				ctx.globalAlpha = env * 0.35;
-				ctx.fillStyle = fx.color ?? "#ffffff";
+				ctx.fillStyle = fx.color || "#ffffff";
 				ctx.fillRect(0, 0, MV_W, MV_H);
 				break;
 			}
@@ -1495,7 +1495,7 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 		ctx.save();
 		switch (fx.style) {
 			case "flash":
-				ctx.fillStyle = withAlpha(fx.color ?? "#ffffff", env);
+				ctx.fillStyle = withAlpha(fx.color || "#ffffff", env);
 				ctx.fillRect(0, 0, MV_W, MV_H);
 				break;
 			case "invert":
@@ -1509,7 +1509,7 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				const period = Math.max(1, (fx.decayBeats ?? 0.5) * MV_STEPS_PER_BEAT);
 				const on = Math.floor(d.step / period) % 2 === 0;
 				if (on) {
-					ctx.fillStyle = withAlpha(fx.color ?? "#ffffff", env * 0.8);
+					ctx.fillStyle = withAlpha(fx.color || "#ffffff", env * 0.8);
 					ctx.fillRect(0, 0, MV_W, MV_H);
 				}
 				break;
@@ -1519,7 +1519,7 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				// 単色で塗りつぶすと絵が潰れるので、夕焼けへの切り替えはこちらで作る。
 				ctx.globalCompositeOperation = "color";
 				ctx.globalAlpha = env;
-				ctx.fillStyle = fx.color ?? "#f7b82c";
+				ctx.fillStyle = fx.color || "#f7b82c";
 				ctx.fillRect(0, 0, MV_W, MV_H);
 				break;
 			}
@@ -1532,8 +1532,8 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 					MV_H / 2,
 					MV_H * 0.78,
 				);
-				g.addColorStop(0, withAlpha(fx.color ?? "#000000", 0));
-				g.addColorStop(1, withAlpha(fx.color ?? "#000000", env));
+				g.addColorStop(0, withAlpha(fx.color || "#000000", 0));
+				g.addColorStop(1, withAlpha(fx.color || "#000000", env));
 				ctx.fillStyle = g;
 				ctx.fillRect(0, 0, MV_W, MV_H);
 				break;
@@ -1541,7 +1541,7 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 			case "scanlines": {
 				// 2pxおきに1px落とす。ブラウン管は「線が見える」ことが本体なので、
 				// 間隔は強さで変えず固定にして、濃さだけを env に任せる。
-				ctx.fillStyle = withAlpha(fx.color ?? "#000000", env * 0.55);
+				ctx.fillStyle = withAlpha(fx.color || "#000000", env * 0.55);
 				for (let y = 0; y < MV_H; y += 3) ctx.fillRect(0, y, MV_W, 1);
 				// ゆっくり降りてくる明るい帯。これが無いと「ただの縞」で止まってしまう。
 				const bandY = ((d.timeSec * 42) % (MV_H + 90)) - 90;
@@ -1571,7 +1571,7 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 			}
 			case "letterbox": {
 				const h = env * MV_H * 0.15;
-				ctx.fillStyle = fx.color ?? "#000000";
+				ctx.fillStyle = fx.color || "#000000";
 				ctx.fillRect(0, 0, MV_W, h);
 				ctx.fillRect(0, MV_H - h, MV_W, h);
 				break;
@@ -1604,23 +1604,23 @@ function drawTransition(d: DrawCtx): void {
 		case "flash":
 			// 光は一瞬で落ちるほうが「切り替わった」に見える。
 			// 不透明度1.0まで振り切ると眩しすぎるので、既定の強さは0.3止まりにする。
-			ctx.fillStyle = withAlpha(t.color ?? "#ffffff", rest * rest * 0.3);
+			ctx.fillStyle = withAlpha(t.color || "#ffffff", rest * rest * 0.3);
 			ctx.fillRect(0, 0, MV_W, MV_H);
 			break;
 		case "wipeLeft":
-			ctx.fillStyle = t.color ?? "#000000";
+			ctx.fillStyle = t.color || "#000000";
 			ctx.fillRect(0, 0, MV_W * rest, MV_H);
 			break;
 		case "wipeRight":
-			ctx.fillStyle = t.color ?? "#000000";
+			ctx.fillStyle = t.color || "#000000";
 			ctx.fillRect(MV_W * (1 - rest), 0, MV_W * rest, MV_H);
 			break;
 		case "wipeUp":
-			ctx.fillStyle = t.color ?? "#000000";
+			ctx.fillStyle = t.color || "#000000";
 			ctx.fillRect(0, 0, MV_W, MV_H * rest);
 			break;
 		case "wipeDown":
-			ctx.fillStyle = t.color ?? "#000000";
+			ctx.fillStyle = t.color || "#000000";
 			ctx.fillRect(0, MV_H * (1 - rest), MV_W, MV_H * rest);
 			break;
 		case "dissolve": {
@@ -1645,7 +1645,7 @@ function drawTransition(d: DrawCtx): void {
 		}
 		case "fade":
 		default:
-			ctx.fillStyle = withAlpha(t.color ?? "#000000", Math.pow(rest, 1.6));
+			ctx.fillStyle = withAlpha(t.color || "#000000", Math.pow(rest, 1.6));
 			ctx.fillRect(0, 0, MV_W, MV_H);
 			break;
 	}
@@ -3718,7 +3718,22 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 					// evenodd にしておくと、重なったサブパスが穴として抜ける（ドーナツ形などが作れる）
 					if (layer.filled) ctx.fill(p, "evenodd");
 					else {
-						ctx.lineWidth = thickness / s;
+						// lineWidth はこの拡縮済み座標系（scale(s,s)後）の中で指定するため、
+						// 画面上の太さを常に `thickness` px に保つには `thickness/s` を渡す必要がある
+						// ——ここまでは正しい設計。だが `size`（ひいては半径・s）はモジュレータの
+						// 「頭で縮んで基準へ育つ」演出（sub）で意図的に一瞬 0 近くまで小さくなる
+						// （同時に thickness は add で太くなる、という組み合わせそのものが仕様）。
+						// s が極小になると `thickness/s` は数千〜数万に達し、Canvas 内部のストローク
+						// 輪郭計算（極端に太い線をローカル座標で作ってから極小scaleで縮める）が
+						// 浮動小数点精度を失って破綻し、輪郭が画面全体を覆う塗り面のように描画される
+						// ——これが「1拍ごとに全画面が白くなる」バグの実体だった。数値としては
+						// scale後にthickness pxへ収束するはずが、計算過程で発散してしまう。
+						// ローカル座標側の太さに上限を設けて発散を防ぐ（screen上のthicknessが
+						// 有限のうちは見た目に影響しない）。
+						const localLineWidth = thickness / s;
+						ctx.lineWidth = Number.isFinite(localLineWidth)
+							? Math.min(localLineWidth, 2000)
+							: 2000;
 						ctx.stroke(p);
 					}
 				} catch {
@@ -4554,10 +4569,20 @@ function parseHex(color: string): [number, number, number] | null {
 	return isNaN(r) || isNaN(g) || isNaN(b) ? null : [r, g, b];
 }
 
-/** #rgb / #rrggbb / rgb() を alpha 付き rgba() へ。解釈できなければそのまま返す。 */
+/**
+ * #rgb / #rrggbb / rgb() を alpha 付き rgba() へ。解釈できなければそのまま返す。
+ *
+ * `color` が未指定・空文字（`fx.color ?? "#000000"` のような `??` フォールバックは
+ * `null`/`undefined` にしか効かず、空文字はすり抜ける——呼び出し側は `||` に
+ * 直した）のときは**白を返さない**。
+ * 以前は `rgba(255,255,255,${a})` を返していたため、呼び出し側が色を解決できずに
+ * 空文字を渡すと、意図せず白（しかも指定した `alpha` で不透明に）で塗られてしまう
+ * ——ビネットなど画面全体を覆うエフェクトでこれが起きると全画面が白くなる。
+ * 色が解決できないなら「何も描かない」が唯一安全な既定なので、常に透明を返す。
+ */
 export function withAlpha(color: string, alpha: number): string {
 	const a = clamp01(alpha);
-	if (!color) return `rgba(255,255,255,${a})`;
+	if (!color) return `rgba(0,0,0,0)`;
 	const rgb = parseHex(color);
 	if (rgb) return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
 	if (color.startsWith("rgb("))
