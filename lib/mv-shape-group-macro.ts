@@ -1517,7 +1517,7 @@ type MathExpr =
 	| { t: "add"; l: MathExpr; r: MathExpr }
 	| { t: "mul"; l: MathExpr; r: MathExpr }
 	| { t: "sin"; a: MathExpr; freq: number }
-	| { t: "noise"; l: MathExpr; r: MathExpr };
+	| { t: "cos"; a: MathExpr; freq: number };
 
 /** 乱数で数式の木（AST）を自動生成する。 */
 function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
@@ -1527,11 +1527,11 @@ function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
 		return { t: "var", n: pick(["x", "y", "r", "th", "t"] as const) };
 	}
 	
-	const types = ["add", "mul", "sin", "noise"];
+	const types = ["add", "mul", "sin", "cos"];
 	const type = pick(types);
 	
-	if (type === "sin") {
-		return { t: "sin", a: buildRandomMathExpr(depth - 1, requireT), freq: randRange(1, 4, 1) };
+	if (type === "sin" || type === "cos") {
+		return { t: type, a: buildRandomMathExpr(depth - 1, requireT), freq: randRange(1, 4, 1) };
 	}
 	
 	const leftRequiresT = requireT ? chance(0.5) : false;
@@ -1551,12 +1551,7 @@ function evaluateMathExpr(expr: MathExpr, env: { x: number; y: number; r: number
 		case "add": return (evaluateMathExpr(expr.l, env) + evaluateMathExpr(expr.r, env)) / 2;
 		case "mul": return evaluateMathExpr(expr.l, env) * evaluateMathExpr(expr.r, env);
 		case "sin": return Math.sin(evaluateMathExpr(expr.a, env) * expr.freq * Math.PI);
-		case "noise": {
-			const vx = evaluateMathExpr(expr.l, env);
-			const vy = evaluateMathExpr(expr.r, env);
-			const h = Math.sin(vx * 12.9898 + vy * 78.233) * 43758.5453;
-			return (h - Math.floor(h)) * 2 - 1; // [-1, 1] に正規化
-		}
+		case "cos": return Math.cos(evaluateMathExpr(expr.a, env) * expr.freq * Math.PI);
 	}
 }
 
@@ -1570,8 +1565,9 @@ function opProceduralMath(): PointOp {
 	const astX = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
 	const astY = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
 	
-	const ampX = randRange(10, 60);
-	const ampY = randRange(10, 60);
+	// 飛び散りすぎないように振幅は控えめにする
+	const ampX = randRange(5, 25);
+	const ampY = randRange(5, 25);
 	const reverse = chance(0.5);
 
 	return (x, y, t) => {
@@ -2869,30 +2865,36 @@ export function generateArrangementForGroup(
 		return pool[pool.length - 1];
 	};
 
-	// ── ランダムウォーク: 状態数も各状態の長さも整数の「幕」に量子化しない。
-	// 状態数は多めに取り、参考動画のような「細かく切り替わり続ける」密度にする
-	// （同じ状態が連続しないようにだけ気を配る）。
-	const stateCount = Math.round(randRange(12, 26, 0));
-	const weights: number[] = [];
-	const picks: (typeof STATE_POOL)[number][] = [];
-	let prevLabel: string | undefined;
-	for (let i = 0; i < stateCount; i++) {
-		const s = pickState(prevLabel);
-		picks.push(s);
-		prevLabel = s.label;
-		weights.push(randRange(0.4, 1.6));
-	}
-	const totalW = weights.reduce((a, b) => a + b, 0);
+	// ── 状態の割り当て: 0.5拍、1拍、2拍などの意味のある単位（拍）で切り出す。
+	// 以前は個数ベース（12〜26個に等分）だったため、全体の尺が短いと極端に短いコマ切れが
+	// 量産される問題があった。ここでは拍単位で進めることで、全体の尺に関わらず
+	// 指定した長さ（0.5拍, 1拍, 2拍）のアニメーションがランダムに繋がるようにする。
+	const totalBeats = durationBars * MV_BEATS_PER_BAR;
+	let currentBeat = 0;
 	const segments: { label: string; from: number; to: number }[] = [];
-	let cursor = 0;
-	picks.forEach((s, i) => {
-		const isLast = i === picks.length - 1;
-		const segFrom = cursor;
-		const segTo = isLast ? 1 : roundTo(cursor + weights[i] / totalW, 4);
-		cursor = segTo;
+	let prevLabel: string | undefined;
+
+	while (currentBeat < totalBeats) {
+		const s = pickState(prevLabel);
+		prevLabel = s.label;
+		
+		// 0.5拍, 1拍, 2拍の中からランダムに選ぶ
+		let stepBeats = pick([0.5, 0.5, 1, 1, 2]);
+		if (currentBeat + stepBeats > totalBeats) {
+			stepBeats = totalBeats - currentBeat;
+		}
+		
+		// 尺が極端に短く残ってしまった場合（0.05未満）は、誤差として無視して終了
+		if (stepBeats < 0.05) break;
+
+		const segFrom = currentBeat / totalBeats;
+		const segTo = (currentBeat + stepBeats) / totalBeats;
+		
 		layers.push(...s.build(segFrom, segTo));
 		segments.push({ label: s.label, from: segFrom, to: segTo });
-	});
+		
+		currentBeat += stepBeats;
+	}
 
 	return { group, layers, segments };
 }
