@@ -627,13 +627,18 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			// （`bars` と同じ単位に揃えてある）。特殊アレンジの割り込み小節のような
 			// 曲頭からの絶対位置に山（またはその頂点）を正確に合わせたいときに使う。
 			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BAR;
-			const stepAdj = d.step - offsetSteps;
+			// once: `bars` を過ぎたら折り返さず、周期の終端の値で固定する。
+			// `period` ちょうどだと `step % period` が0に巻き戻って山の頂点
+			// （＝値1）に逆戻りしてしまうので、終端側はごくわずかに手前でクランプする。
+			const stepAdj = m.once
+				? Math.min(Math.max(d.step - offsetSteps, 0), period - 1e-6)
+				: d.step - offsetSteps;
 			const curve = m.curve ?? 2;
 			if (!m.symmetric) return shapedEnvelope(stepAdj, period, curve, m.shape);
 			// symmetric: いちばん近い境目からの距離で山を作る（境目=1、中央=0）。
 			// 減衰のみだと境目の手前で0のままになり、実測にある「境目へ向かう
 			// 立ち上がり」が出せずカクッと不連続になる。
-			const phase = ((stepAdj % period) + period) % period;
+			const phase = m.once ? stepAdj : ((stepAdj % period) + period) % period;
 			const dist = Math.min(phase, period - phase) / (period / 2);
 			const hump = Math.pow(1 - dist, curve);
 			if (m.shape !== "bounce") return clamp01(hump);

@@ -16,6 +16,7 @@ import {
 	type ArrangementGenOptions,
 	DEFAULT_ARRANGEMENT_BEATS,
 	generateArrangementForGroup,
+	type MvArrangementGlyphKind,
 } from "@/lib/mv-shape-group-macro";
 
 /** 何拍を1周に選べるか。 */
@@ -25,10 +26,13 @@ const BEATS_OPTIONS = [2, 4, 8, 16];
 const ACT4_COUNT_OPTIONS: (4 | 5 | 6 | "auto")[] = ["auto", 4, 5, 6];
 
 /** 第4幕に出すグリフ種のトグル候補。 */
-const ACT4_KIND_OPTIONS: { value: "bar" | "can" | "tick"; label: string }[] = [
+const ACT4_KIND_OPTIONS: { value: MvArrangementGlyphKind; label: string }[] = [
 	{ value: "bar", label: "バーチャート" },
 	{ value: "can", label: "縞箱" },
 	{ value: "tick", label: "目盛り" },
+	{ value: "cross", label: "十字" },
+	{ value: "dots", label: "ドット集合" },
+	{ value: "frame", label: "四隅枠" },
 ];
 
 const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSpeed"]>; label: string }[] = [
@@ -148,7 +152,9 @@ export default function MvArrangementModal({
 	// 主要パラメータだけモーダルで固定できるようにしてある。指定していない
 	// 部分（グリフの配置・色味の細部など）は引き続き乱数で振れる。
 	const [act4Count, setAct4Count] = useState<4 | 5 | 6 | "auto">("auto");
-	const [act4Kinds, setAct4Kinds] = useState<("bar" | "can" | "tick")[]>(["bar", "can", "tick"]);
+	const [act4Kinds, setAct4Kinds] = useState<MvArrangementGlyphKind[]>(
+		ACT4_KIND_OPTIONS.map((o) => o.value),
+	);
 	const [growthSpeed, setGrowthSpeed] =
 		useState<NonNullable<ArrangementGenOptions["growthSpeed"]>>("normal");
 	const [centerPop, setCenterPop] = useState(true);
@@ -184,7 +190,7 @@ export default function MvArrangementModal({
 		);
 	};
 
-	const toggleAct4Kind = (kind: "bar" | "can" | "tick") => {
+	const toggleAct4Kind = (kind: MvArrangementGlyphKind) => {
 		setAct4Kinds((prev) => {
 			// 最後の1つは外させない（全種類ゼロだと第4幕に何も出なくなり分かりにくい）。
 			if (prev.includes(kind) && prev.length === 1) return prev;

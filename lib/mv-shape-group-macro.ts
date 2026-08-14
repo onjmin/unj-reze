@@ -1184,6 +1184,84 @@ function renderTicks(plan: TicksPlan[], t: number): string {
 	return plan.map((s) => growFromCenterYRect(s.x, s.w, 50, s.h, t)).join(" ");
 }
 
+/** 自身の中心点を軸に、縦横とも進度tぶん伸びる正方形（ドット向け）。 */
+function growFromCenterRect(cx: number, cy: number, fullSize: number, t: number): string {
+	const min = 1.5;
+	const s = min + (fullSize - min) * easeOutCubic(t);
+	return rectPath(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2);
+}
+
+interface CrossPlan {
+	armW: number;
+	armLen: number;
+}
+
+/** 中心で交差する十字。 */
+function planCross(): CrossPlan {
+	return { armW: randRange(8, 14), armLen: randRange(30, 42) };
+}
+
+/** 横棒は中心(x=50)から左右へ、縦棒は中心線(y=50)から上下へ、それぞれ伸ばす。 */
+function renderCross(plan: CrossPlan, t: number): string {
+	const { armW, armLen } = plan;
+	return [
+		growFromCenterXRect(50, 50 - armW / 2, 50 + armW / 2, armLen * 2, t),
+		growFromCenterYRect(50 - armW / 2, armW, 50, armLen * 2, t),
+	].join(" ");
+}
+
+interface DotsPlan {
+	dots: { x: number; y: number; size: number }[];
+}
+
+/** 不規則な間隔で散らばる小さな点の集まり。 */
+function planDots(): DotsPlan {
+	const cols = 2 + Math.floor(Math.random() * 2); // 2〜3列
+	const rows = 2 + Math.floor(Math.random() * 2); // 2〜3行
+	const dots: { x: number; y: number; size: number }[] = [];
+	for (let r = 0; r < rows; r++) {
+		for (let c = 0; c < cols; c++) {
+			if (Math.random() < 0.25) continue; // 均等な格子に見えすぎないよう間引く
+			dots.push({
+				x: 15 + (c / Math.max(1, cols - 1)) * 70 + randRange(-4, 4),
+				y: 15 + (r / Math.max(1, rows - 1)) * 70 + randRange(-4, 4),
+				size: randRange(7, 14),
+			});
+		}
+	}
+	if (dots.length === 0) dots.push({ x: 50, y: 50, size: 10 });
+	return { dots };
+}
+
+/** 各点が自分の中心から進度tぶん膨らむ。 */
+function renderDots(plan: DotsPlan, t: number): string {
+	return plan.dots.map((d) => growFromCenterRect(d.x, d.y, d.size, t)).join(" ");
+}
+
+interface FramePlan {
+	corners: { x: number; y: number }[];
+	size: number;
+}
+
+/** 四隅に置かれた小さな正方形（カメラのフォーカス枠のような構図）。 */
+function planFrame(): FramePlan {
+	const inset = randRange(14, 22);
+	return {
+		corners: [
+			{ x: inset, y: inset },
+			{ x: 100 - inset, y: inset },
+			{ x: inset, y: 100 - inset },
+			{ x: 100 - inset, y: 100 - inset },
+		],
+		size: randRange(10, 16),
+	};
+}
+
+/** 各隅の正方形が自分の中心から進度tぶん膨らむ。 */
+function renderFrame(plan: FramePlan, t: number): string {
+	return plan.corners.map((c) => growFromCenterRect(c.x, c.y, plan.size, t)).join(" ");
+}
+
 /** かぎ括弧（コーナーブラケット）。`flip` で対角側の向きになる。破線混じり。 */
 function cornerBracketGlyph(flip: boolean): string {
 	const arm = randRange(55, 75);
@@ -1221,15 +1299,23 @@ function sizePopModulator(fullSize: number, phaseOffset: number, bars: number, c
 		phaseOffset,
 		symmetric: false,
 		curve,
+		// このポップは「育ちきったらそこで止まる」一発もの。layer の barRange は
+		// 次の幕まで（＝bars よりずっと長く）続くので、once を外すと bars を
+		// 過ぎるたびに1→0→1…と折り返して「ズーム→縮小→再ズーム」を繰り返す
+		// バグになる（ユーザー報告どおりの現象）。
+		once: true,
 	};
 }
+
+/** 第4幕で使えるグリフ種。 */
+export type MvArrangementGlyphKind = "bar" | "can" | "tick" | "cross" | "dots" | "frame";
 
 /** 特殊アレンジ生成の見た目パラメータ。未指定分はこれまでどおりの既定挙動。 */
 export interface ArrangementGenOptions {
 	/** 第4幕（画面各所にグリフが同時多発）で使う個数。未指定は4〜6を乱数で。 */
 	act4Count?: 4 | 5 | 6;
-	/** 第4幕で許可するグリフ種。未指定は全種類（bar/can/tick）から選ぶ。 */
-	act4Kinds?: ("bar" | "can" | "tick")[];
+	/** 第4幕で許可するグリフ種。未指定は全種類から選ぶ。 */
+	act4Kinds?: MvArrangementGlyphKind[];
 	/**
 	 * 第4幕のグリフが種から本来の形へ育つ速さ。fast: 幕頭の15%で育ちきる／
 	 * normal(既定): 30%／slow: 45%。長いほど「育っている最中」がよく見える。
@@ -1357,6 +1443,7 @@ export function generateArrangementForGroup(
 					phaseOffset: at(0),
 					symmetric: false,
 					curve: 1,
+					once: true,
 				},
 				...(centerPop ? [sizePopModulator(act1Size, at(0), act1Bars)] : []),
 			],
@@ -1400,6 +1487,7 @@ export function generateArrangementForGroup(
 					bars: pulseBars,
 					phaseOffset: at(from),
 					curve: pick([3, 4]),
+					once: true,
 				},
 				// 各フラッシュも「中心から湧く」ポップインを併用（各パルスは短命な
 				// 単発図形なので、部品アンカー成長ではなく中心スケールで問題ない）。
@@ -1455,6 +1543,7 @@ export function generateArrangementForGroup(
 					bars: Math.max(0.05, durationBars * 0.25),
 					phaseOffset: at(0.5),
 					curve: 1.2,
+					once: true,
 				},
 				...(centerPop
 					? [sizePopModulator(act3SquareSize, at(0.5), act3BracketBars)]
@@ -1505,6 +1594,7 @@ export function generateArrangementForGroup(
 					phaseOffset: at(boundary),
 					symmetric: false,
 					curve: 1,
+					once: true,
 				},
 			],
 		});
@@ -1531,6 +1621,7 @@ export function generateArrangementForGroup(
 					phaseOffset: at(boundary - xfade),
 					symmetric: false,
 					curve: 1,
+					once: true,
 				},
 				// 出ていく側(outPath)は既存図形の残像なのでポップは付けない。入ってくる
 				// 側だけ「中心から湧く」ポップインを併用する。
@@ -1556,14 +1647,19 @@ export function generateArrangementForGroup(
 	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
 	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
 	// 大きめの縞箱、上下はバーチャート、それ以外は目盛り、という参考動画の
-	// 役割分担に寄せつつ、形の中身は毎回乱数で起こす。
-	const allSlots: { x: number; y: number; kind: "bar" | "can" | "tick"; size: number }[] = [
+	// 役割分担に寄せつつ、形の中身は毎回乱数で起こす。bar/can/tickの3種だけだと
+	// 何度出しても同じ語彙の繰り返しに見えるため、十字・ドット集合・四隅枠を
+	// 追加して語彙を広げてある。
+	const allSlots: { x: number; y: number; kind: MvArrangementGlyphKind; size: number }[] = [
 		{ x: MV_W * 0.42, y: MV_H * 0.16, kind: "bar", size: randRange(38, 52) },
 		{ x: MV_W * 0.87, y: MV_H * 0.32, kind: "tick", size: randRange(24, 34) },
 		{ x: MV_W * 0.16, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
 		{ x: MV_W * 0.84, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
 		{ x: MV_W * 0.1, y: MV_H * 0.78, kind: "tick", size: randRange(22, 32) },
 		{ x: MV_W * 0.56, y: MV_H * 0.85, kind: "bar", size: randRange(36, 50) },
+		{ x: MV_W * 0.5, y: MV_H * 0.12, kind: "cross", size: randRange(30, 44) },
+		{ x: MV_W * 0.24, y: MV_H * 0.86, kind: "dots", size: randRange(46, 60) },
+		{ x: MV_W * 0.76, y: MV_H * 0.14, kind: "frame", size: randRange(50, 64) },
 	];
 	const slots = allSlots.filter(
 		(s) => !genOptions?.act4Kinds || genOptions.act4Kinds.includes(s.kind),
@@ -1589,13 +1685,34 @@ export function generateArrangementForGroup(
 	const growthBars = Math.max(0.02, durationBars * 0.25 * growthFraction);
 	const growthFrameCount = 5;
 	const growthProgress = [0.12, 0.32, 0.54, 0.78, 1];
+	const buildGlyphRender: Record<MvArrangementGlyphKind, () => (t: number) => string> = {
+		bar: () => {
+			const plan = planBarChart();
+			return (t) => renderBarChart(plan, t);
+		},
+		can: () => {
+			const plan = planCanister();
+			return (t) => renderCanister(plan, t);
+		},
+		tick: () => {
+			const plan = planTicks();
+			return (t) => renderTicks(plan, t);
+		},
+		cross: () => {
+			const plan = planCross();
+			return (t) => renderCross(plan, t);
+		},
+		dots: () => {
+			const plan = planDots();
+			return (t) => renderDots(plan, t);
+		},
+		frame: () => {
+			const plan = planFrame();
+			return (t) => renderFrame(plan, t);
+		},
+	};
 	for (const s of chosen) {
-		const render: (t: number) => string =
-			s.kind === "bar"
-				? ((plan) => (t: number) => renderBarChart(plan, t))(planBarChart())
-				: s.kind === "can"
-					? ((plan) => (t: number) => renderCanister(plan, t))(planCanister())
-					: ((plan) => (t: number) => renderTicks(plan, t))(planTicks());
+		const render = buildGlyphRender[s.kind]();
 		const sliceLen = growthBars / growthFrameCount;
 		for (let i = 0; i < growthFrameCount; i++) {
 			const frameStart = at(0.75) + sliceLen * i;
@@ -1628,6 +1745,7 @@ export function generateArrangementForGroup(
 									phaseOffset: roundTo(frameStart, 4),
 									symmetric: false,
 									curve: 1,
+									once: true as const,
 								},
 							]
 						: []),
@@ -1660,6 +1778,7 @@ export function generateArrangementForGroup(
 					phaseOffset: at(1) - durationBars * 0.15,
 					symmetric: false,
 					curve: 1,
+					once: true,
 				},
 			],
 		});
