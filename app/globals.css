@@ -299,6 +299,13 @@
   src: url('https://rorigaifont.pages.dev/PBfont.woff2') format('woff2');
 }
 
+@font-face {
+  font-family: 'chupakafont';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://rorigaifont.pages.dev/chupakafont.woff2') format('woff2');
+}
+
 @utility font-misaki {
   font-family: 'misaki_gothic', monospace;
 }

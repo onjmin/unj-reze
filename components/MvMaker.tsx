@@ -13,8 +13,6 @@ import {
 	FolderX,
 	Grid3x3,
 	Hash,
-	SquareStack,
-	Timer,
 	History,
 	Image as ImageIcon,
 	Layers,
@@ -23,12 +21,14 @@ import {
 	Play,
 	Plus,
 	Redo2,
+	Settings,
 	Shapes,
 	Shuffle,
-	Settings,
 	SlidersHorizontal,
 	Smile,
 	Sparkles,
+	SquareStack,
+	Timer,
 	Trash2,
 	Type,
 	Undo2,
@@ -39,15 +39,6 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildPsdRef, parseWalkRef, refLabel } from "@/lib/asset-ref";
 import { handleImgError } from "@/lib/cors-proxy";
-import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
-import {
-	ensureCustomFontLoaded,
-	loadCustomFonts,
-	type MvCustomFont,
-	removeCustomFont,
-	upsertCustomFont,
-} from "@/lib/mv-custom-fonts";
-import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import {
 	clearAutosave,
 	getAutosave,
@@ -55,6 +46,7 @@ import {
 	saveAutosave,
 	saveHistory,
 } from "@/lib/history";
+import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
 import {
 	DEFAULT_MV_BLINK,
 	DEFAULT_MV_LIPSYNC_TRACK,
@@ -146,6 +138,13 @@ import {
 	resolveExitStyle,
 	resolveLyricStack,
 } from "@/lib/mv-config";
+import {
+	ensureCustomFontLoaded,
+	loadCustomFonts,
+	type MvCustomFont,
+	removeCustomFont,
+	upsertCustomFont,
+} from "@/lib/mv-custom-fonts";
 import type {
 	MvEffectTemplateDef,
 	MvEffectTemplateParams,
@@ -182,17 +181,18 @@ import {
 	toggleGroupCollapsed,
 	ungroupLayers,
 } from "@/lib/mv-layer-group";
+import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
+import {
+	buildSymmetricShapeGroupLayers,
+	generateArrangementForGroup,
+	generateSymmetricShapeGroup,
+	MV_SHAPE_BASE_BEATS_OPTIONS,
+	type SymmetricShapeGroupOptions,
+} from "@/lib/mv-shape-group-macro";
 import {
 	DEFAULT_SCENE_MOTION,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
-import {
-	buildSymmetricShapeGroupLayers,
-	generateSymmetricShapeGroup,
-	generateArrangementForGroup,
-	MV_SHAPE_BASE_BEATS_OPTIONS,
-	type SymmetricShapeGroupOptions,
-} from "@/lib/mv-shape-group-macro";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvArrangementModal from "./MvArrangementModal";
@@ -3347,9 +3347,10 @@ export default function MvMaker({
 						{ value: "'Hachi Maru Pop', cursive", label: "Hachi Maru Pop" },
 						{ value: "'rorigaifont', sans-serif", label: "ロリガイフォント" },
 						{ value: "'PBfont', sans-serif", label: "PBfont(かわいい)" },
+						{ value: "'chupakafont', sans-serif", label: "チュパカブラフォント" },
 						...customFonts.map((f) => ({
 							value: `'${f.name}', sans-serif`,
-							label: `⭐ ${f.name}`,
+							label: `${f.name}`,
 						})),
 					]}
 					onChange={(v) => {
