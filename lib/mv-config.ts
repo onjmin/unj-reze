@@ -607,6 +607,13 @@ export interface MvStage {
 	fadeOut?: boolean;
 	/** 動画全体のフォント（未指定時はドット字） */
 	fontFamily?: string;
+	/**
+	 * fontFamily がユーザー登録のカスタムフォントを指す場合の実体（@font-face 用）。
+	 * manifest 自体に焼き込むことで、投稿を見る側の端末が同じ localStorage を
+	 * 持っていなくても再生できる。
+	 */
+	customFontName?: string;
+	customFontUrl?: string;
 }
 
 /**

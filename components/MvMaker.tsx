@@ -40,6 +40,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildPsdRef, parseWalkRef, refLabel } from "@/lib/asset-ref";
 import { handleImgError } from "@/lib/cors-proxy";
 import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
+import {
+	ensureCustomFontLoaded,
+	loadCustomFonts,
+	type MvCustomFont,
+	removeCustomFont,
+	upsertCustomFont,
+} from "@/lib/mv-custom-fonts";
 import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import {
 	clearAutosave,
@@ -1943,6 +1950,13 @@ export default function MvMaker({
 	const [tab, setTab] = useState<Tab>(initialManifest ? "song" : "preset");
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
+	// ユーザー登録のカスタムフォント（localStorage、別のMVでも選び直せる）
+	const [customFonts, setCustomFonts] = useState<MvCustomFont[]>([]);
+	const [customFontNameInput, setCustomFontNameInput] = useState("");
+	const [customFontUrlInput, setCustomFontUrlInput] = useState("");
+	useEffect(() => {
+		setCustomFonts(loadCustomFonts());
+	}, []);
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 	const [effectStylePickerLayerId, setEffectStylePickerLayerId] = useState<
 		string | null
@@ -3331,14 +3345,104 @@ export default function MvMaker({
 						{ value: "'Dela Gothic One', cursive", label: "Dela Gothic One" },
 						{ value: "'Potta One', cursive", label: "Potta One" },
 						{ value: "'Hachi Maru Pop', cursive", label: "Hachi Maru Pop" },
+						{ value: "'rorigaifont', sans-serif", label: "ロリガイフォント" },
+						{ value: "'PBfont', sans-serif", label: "PBfont(かわいい)" },
+						...customFonts.map((f) => ({
+							value: `'${f.name}', sans-serif`,
+							label: `⭐ ${f.name}`,
+						})),
 					]}
-					onChange={(v) =>
+					onChange={(v) => {
+						const hit = customFonts.find((f) => `'${f.name}', sans-serif` === v);
+						if (hit) ensureCustomFontLoaded(hit.name, hit.url);
 						update((m) => ({
 							...m,
-							stage: { ...m.stage, fontFamily: v === '""' ? undefined : v },
-						}))
-					}
+							stage: {
+								...m.stage,
+								fontFamily: v === '""' ? undefined : v,
+								customFontName: hit?.name,
+								customFontUrl: hit?.url,
+							},
+						}));
+					}}
 				/>
+
+				<Details label="カスタムフォントを登録">
+					<div className="space-y-2">
+						<p className="text-[10px] text-gray-500">
+							woff2 等のフォントURLを登録すると、上の一覧から選べるようになる。登録はこの端末に保存され、他のMV作成でも使い回せる。
+						</p>
+						<input
+							type="text"
+							placeholder="フォント名（例: myfont）"
+							value={customFontNameInput}
+							onChange={(e) => setCustomFontNameInput(e.target.value)}
+							className={FIELD_INPUT_CLASS}
+						/>
+						<input
+							type="text"
+							placeholder="フォントURL（例: https://.../font.woff2）"
+							value={customFontUrlInput}
+							onChange={(e) => setCustomFontUrlInput(e.target.value)}
+							className={FIELD_INPUT_CLASS}
+						/>
+						<button
+							type="button"
+							disabled={!customFontNameInput.trim() || !customFontUrlInput.trim()}
+							onClick={() => {
+								const name = customFontNameInput.trim();
+								const url = customFontUrlInput.trim();
+								if (!name || !url) return;
+								const next = upsertCustomFont({ name, url });
+								setCustomFonts(next);
+								ensureCustomFontLoaded(name, url);
+								setCustomFontNameInput("");
+								setCustomFontUrlInput("");
+							}}
+							className="w-full rounded bg-blue-600 py-1.5 text-[11px] font-bold text-white disabled:opacity-40"
+						>
+							登録
+						</button>
+						{customFonts.length > 0 && (
+							<div className="space-y-1">
+								{customFonts.map((f) => (
+									<div
+										key={f.name}
+										className="flex items-center justify-between gap-2 rounded border border-gray-700 px-2 py-1"
+									>
+										<span
+											className="truncate text-[11px] text-gray-300"
+											title={f.url}
+										>
+											{f.name}
+										</span>
+										<button
+											type="button"
+											onClick={() => {
+												const next = removeCustomFont(f.name);
+												setCustomFonts(next);
+												if (manifest.stage.customFontName === f.name) {
+													update((m) => ({
+														...m,
+														stage: {
+															...m.stage,
+															fontFamily: undefined,
+															customFontName: undefined,
+															customFontUrl: undefined,
+														},
+													}));
+												}
+											}}
+											className="shrink-0 text-gray-500 hover:text-red-400"
+										>
+											<X size={12} />
+										</button>
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+				</Details>
 			</div>
 		</div>
 	);

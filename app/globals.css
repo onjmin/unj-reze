@@ -285,6 +285,20 @@
   src: url('https://unpkg.com/font-misaki@1.1.0/misaki/misaki_gothic.ttf') format('truetype');
 }
 
+@font-face {
+  font-family: 'rorigaifont';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://rorigaifont.pages.dev/rorigai.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'PBfont';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://rorigaifont.pages.dev/PBfont.woff2') format('woff2');
+}
+
 @utility font-misaki {
   font-family: 'misaki_gothic', monospace;
 }
