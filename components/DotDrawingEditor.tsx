@@ -1571,6 +1571,10 @@ export default function DotDrawingEditor({
 	});
 
 	const handleSave = () => {
+		const state = getCurrentState();
+		if (state) {
+			saveHistory(storageKey, state, "dotdrawing", 50);
+		}
 		clearAutosave(storageKey);
 		const canvas = oekaki.render();
 		onSave(canvas.toDataURL("image/png"));

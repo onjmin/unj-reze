@@ -26,6 +26,7 @@ import { usePostActions } from "@/lib/hooks/usePostActions";
 import { pollInterval, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
+import { createGame, createMv } from "@/lib/game-mv-client";
 import {
 	countUnreadMessages,
 	MESSAGES_READ_EVENT,
@@ -629,39 +630,23 @@ export default function App() {
 				const result = await api.upload.image({ image: attachedImage });
 				imageSrc = result.url;
 			}
-			let gameId: number | undefined;
+			let gameId: string | undefined;
 			if (gameDraft) {
-				const res = await fetch("/api/games", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						preset: gameDraft.preset,
-						title: gameDraft.title,
-						manifest: gameDraft.manifest,
-						creatorSlug: currentUser?.slug,
-					}),
+				const savedGame = await createGame({
+					preset: gameDraft.preset,
+					title: gameDraft.title,
+					manifest: gameDraft.manifest,
 				});
-				if (res.ok) {
-					const savedGame = await res.json();
-					gameId = savedGame.id;
-				}
+				gameId = savedGame.id;
 			}
-			let mvId: number | undefined;
+			let mvId: string | undefined;
 			if (mvDraft) {
-				const res = await fetch("/api/mvs", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						preset: mvDraft.preset,
-						title: mvDraft.title,
-						manifest: mvDraft.manifest,
-						creatorSlug: currentUser?.slug,
-					}),
+				const savedMv = await createMv({
+					preset: mvDraft.preset,
+					title: mvDraft.title,
+					manifest: mvDraft.manifest,
 				});
-				if (res.ok) {
-					const savedMv = await res.json();
-					mvId = savedMv.id;
-				}
+				mvId = savedMv.id;
 			}
 
 			const reply = await api.posts.replies.create(postId, {
@@ -783,37 +768,21 @@ export default function App() {
 			}
 			let gameId: string | undefined;
 			if (gameDraft) {
-				const res = await fetch("/api/games", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						preset: gameDraft.preset,
-						title: gameDraft.title,
-						manifest: gameDraft.manifest,
-						creatorSlug: currentUser?.slug,
-					}),
+				const savedGame = await createGame({
+					preset: gameDraft.preset,
+					title: gameDraft.title,
+					manifest: gameDraft.manifest,
 				});
-				if (res.ok) {
-					const savedGame = await res.json();
-					gameId = savedGame.id;
-				}
+				gameId = savedGame.id;
 			}
 			let mvId: string | undefined;
 			if (mvDraft) {
-				const res = await fetch("/api/mvs", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						preset: mvDraft.preset,
-						title: mvDraft.title,
-						manifest: mvDraft.manifest,
-						creatorSlug: currentUser?.slug,
-					}),
+				const savedMv = await createMv({
+					preset: mvDraft.preset,
+					title: mvDraft.title,
+					manifest: mvDraft.manifest,
 				});
-				if (res.ok) {
-					const savedMv = await res.json();
-					mvId = savedMv.id;
-				}
+				mvId = savedMv.id;
 			}
 			const post = await api.posts.create({
 				displayName: userId,

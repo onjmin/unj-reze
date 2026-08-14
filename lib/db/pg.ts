@@ -1647,17 +1647,19 @@ export const pgStore: DataStore = {
 	// ゲーム / MV
 	// ==========================================================================
 	async createGame(data: CreateGameParams) {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
 		const { rows } = await q(
-			`INSERT INTO games (preset,title,manifest_url,manifest_delete_id,manifest_delete_hash,bg_ref,creator_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+			`INSERT INTO games (id,preset,title,manifest_url,manifest_delete_id,manifest_delete_hash,bg_ref,creator_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
 			[
+				id,
 				data.preset,
 				data.title,
 				data.manifestUrl,
 				data.manifestDeleteId ?? null,
 				data.manifestDeleteHash ?? null,
 				data.bgRef ?? null,
-				data.creatorSlug ? Number(data.creatorSlug) : null,
+				toUid(data.creatorSlug),
 			],
 		);
 		return rowToGame(rows[0]);
@@ -1708,17 +1710,19 @@ export const pgStore: DataStore = {
 	},
 
 	async createMv(data: CreateMvParams) {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
 		const { rows } = await q(
-			`INSERT INTO mvs (preset,title,manifest_url,manifest_delete_id,manifest_delete_hash,bg_url,creator_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+			`INSERT INTO mvs (id,preset,title,manifest_url,manifest_delete_id,manifest_delete_hash,bg_url,creator_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
 			[
+				id,
 				data.preset,
 				data.title,
 				data.manifestUrl,
 				data.manifestDeleteId ?? null,
 				data.manifestDeleteHash ?? null,
 				data.bgUrl ?? null,
-				data.creatorSlug ? Number(data.creatorSlug) : null,
+				toUid(data.creatorSlug),
 			],
 		);
 		return rowToMv(rows[0]);

@@ -1103,6 +1103,10 @@ export default function DrawingEditor({
 	}, []);
 
 	const handleSave = () => {
+		const state = getCurrentState();
+		if (state) {
+			saveHistory(storageKey, state, "drawing", 50);
+		}
 		clearAutosave(storageKey);
 		onSave(oekaki.render().toDataURL());
 	};

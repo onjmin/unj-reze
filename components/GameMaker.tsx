@@ -12942,9 +12942,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   });
 
   const handleSave = () => {
+    const manifest = buildManifest();
+    if (manifest) saveHistory(editStorageKey, manifest, 'gamemaker', 50);
     clearAutosave(editStorageKey);
     playSfx(sfxRef.current.save);
-    onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
+    onSave?.(manifest, { title: title.trim() || gameData.name, preset: gameData.id });
   };
 
   /** 他人のゲームを自分の下書きとして開き直す（改造）。元ネタ表記は投稿側で付ける。 */

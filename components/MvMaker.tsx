@@ -2577,9 +2577,11 @@ export default function MvMaker({
 	// ── 保存 ──────────────────────────────────────────────
 	const handleSave = () => {
 		const title = manifest.title.trim() || "無題のMV";
+		const finalManifest = { ...manifest, title };
+		saveHistory(storageKey, finalManifest, "mv", 30);
 		clearAutosave(storageKey);
 		onSave({
-			manifest: { ...manifest, title },
+			manifest: finalManifest,
 			title,
 			preset: manifest.preset,
 		});

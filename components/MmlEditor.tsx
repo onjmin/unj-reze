@@ -270,10 +270,12 @@ export default function MmlEditor({
 		if (!daw) return;
 		const mml = daw.getMML().minified.trim();
 		if (mml) {
+			const savedMml = withMmlVolume(mml, syncAuthoredVolume());
+			saveHistory(storageKey, savedMml, "mml", 50);
 			// Clear autosave on manual save/post
 			clearAutosave(storageKey);
 			// サイト音量を掛けた値ではなく、MML自身のマスター音量で保存する
-			onSave(withMmlVolume(mml, syncAuthoredVolume()));
+			onSave(savedMml);
 		}
 	}, [onSave, storageKey, syncAuthoredVolume]);
 
