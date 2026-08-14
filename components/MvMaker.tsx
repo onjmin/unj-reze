@@ -1472,11 +1472,8 @@ export default function MvMaker({
 	 * （消えた後のIDへ多重に削除操作を投げないよう、毎回 manifest.groups と突き合わせる）。
 	 */
 	const [autoGroupIds, setAutoGroupIds] = useState<string[]>([]);
-	// 既定値は参考動画（チョウチン少女）の実測構造そのもの——1拍の中で
-	// 「横並びの列」と「中央エンブレム」が交互に出る "duet" 構図。
-	// （全249フレームの定量解析で、通常ループは複数レイヤーの同時表示ではなく
-	// 画面まるごとの構図の交互切り替えだと確認したため。詳細は
-	// lib/mv-shape-group-macro.ts の clusterType ドキュメント参照。）
+	// 既定値は参考動画（チョウチン少女）の実測構造に基づく "duet" 構図
+	// （1拍の中で「横並びの列」と「中央エンブレム」が交互に出る）。
 	const [macroSettings, setMacroSettings] =
 		useState<SymmetricShapeGroupOptions>({
 			clusterType: "duet",

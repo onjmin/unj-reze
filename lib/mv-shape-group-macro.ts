@@ -1207,6 +1207,10 @@ export function generateArrangementForGroup(
 
 	// ── 第1幕: 小さな塗り四角のタメ → 完全暗転 ──
 	// [0, 0.19] だけレイヤーを置き、[0.19, 0.25] は何も置かない＝暗転。
+	// アレンジ元からの切り替わりが「パッと現れる」ハードカットにならないよう、
+	// 頭の一瞬（この幕の最初の15%）だけ不透明度0→1のフェードインを掛ける
+	// （減衰の周期をこの幕の最初の15%ぶんに揃えてあるので、幕の外へループして
+	// 点滅する心配は無い）。
 	layers.push({
 		...common,
 		form: "path",
@@ -1219,7 +1223,18 @@ export function generateArrangementForGroup(
 		size: roundTo(baseSize * randRange(0.32, 0.42), 1),
 		path: rectPath(25, 25, 75, 75),
 		barRange: [at(0), at(0.19)],
-		modulators: [],
+		modulators: [
+			{
+				source: "phrase",
+				target: "opacity",
+				op: "sub",
+				amount: 1,
+				bars: Math.max(0.01, durationBars * 0.15),
+				phaseOffset: at(0),
+				symmetric: false,
+				curve: 1,
+			},
+		],
 	});
 
 	// ── 第2幕: 太い中央エンブレムの2連フラッシュ ──
@@ -1419,7 +1434,21 @@ export function generateArrangementForGroup(
 			size: roundTo(s.size, 1),
 			path: glyph,
 			barRange: [at(0.75), at(1)],
-			modulators: [],
+			// 区間の終わりはアレンジ元へ戻る＝ハードカットなので、この幕の最後の
+			// 15%だけ不透明度1→0のフェードアウトを掛けて、復帰の瞬間の
+			// ポップを和らげる（第1幕のフェードインと対になる措置）。
+			modulators: [
+				{
+					source: "phrase",
+					target: "opacity",
+					op: "mul",
+					amount: 1,
+					bars: Math.max(0.01, durationBars * 0.15),
+					phaseOffset: at(1) - durationBars * 0.15,
+					symmetric: false,
+					curve: 1,
+				},
+			],
 		});
 	}
 

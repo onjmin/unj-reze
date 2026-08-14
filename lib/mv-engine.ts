@@ -562,7 +562,16 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 		case "phrase": {
 			// フレーズ(既定8小節)の頭で1、終わりへ向かってなめらかに0へ。
 			// op:"sub" で使うと逆向き＝終わりに向かって育つカーブになる。
-			const period = Math.max(1, m.bars ?? 8) * MV_STEPS_PER_BAR;
+			//
+			// 下限は「0除算を避けるため」だけの意味で、以前は 1（小節）だった。
+			// これは「フレーズ＝数小節単位の演出」という元々の用途を前提にした値で、
+			// 特殊アレンジの一発フェード（`bars` に区間幅の数%＝1小節よりずっと短い
+			// 値を渡す）を後から作った際、この下限のせいで**指定した短い周期が常に
+			// 1小節へ強制的に伸ばされ、区間の中では位相がほとんど進まないまま
+			// （＝値がほぼ固定されたまま）になっていた**——「フェードを足したのに
+			// 繋ぎ目が滑らかにならない」の実体はここ（ユーザー指摘で特定）。
+			// 0除算さえ避ければよいので、下限を実用上ゼロに近い値まで下げる。
+			const period = Math.max(0.01, m.bars ?? 8) * MV_STEPS_PER_BAR;
 			// beat と同じ考え方の位相ずらし。ただし単位は「小節」
 			// （`bars` と同じ単位に揃えてある）。特殊アレンジの割り込み小節のような
 			// 曲頭からの絶対位置に山（またはその頂点）を正確に合わせたいときに使う。
@@ -3428,9 +3437,16 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		const offsetX = modulate(d, mods, "offsetX", layer.offsetX ?? 0, delay);
 		const offsetY = modulate(d, mods, "offsetY", layer.offsetY ?? 0, delay);
 
-		// 連動を重ねすぎても画面を覆い尽くさないよう、描画半径は画面サイズの2倍で頭打ちにする
+		// 連動を重ねすぎても画面を覆い尽くさないよう、描画半径は画面サイズの2倍で頭打ちにする。
+		// `size`/`spread` はモジュレータの掛け算・割り算の連鎖で NaN や Infinity になり得る
+		// （割り算のゼロ除算・未定義値の伝播など）。`Math.min(NaN, x)` は NaN を返し、
+		// 直後の `radius <= 0.2` は NaN との比較が常に false になるためこのガードを
+		// すり抜けて描画まで進んでしまう——その後 `ctx.scale(NaN, NaN)` が実質のno-opに
+		// なる一方、直前の変形（translate等）だけが残った状態で `fill()` が走ると、
+		// 極端に巨大な塗りつぶしとして画面全体が単色になる（「全画面が白一色になる」
+		// バグの実体）。ここで明示的に弾く。
 		const radius = Math.min(size + spread * i, MV_W * 2);
-		if (radius <= 0.2 || opacity <= 0.004) continue;
+		if (!Number.isFinite(radius) || radius <= 0.2 || opacity <= 0.004) continue;
 
 		ctx.globalAlpha = baseAlpha * opacity;
 		ctx.lineWidth = thickness;
@@ -3447,9 +3463,13 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		if (layer.form === "path" && activePath) {
 			// 設計座標系（pathBox）の中心を原点に、長辺が size×2 になるよう拡縮して描く
 			const box = layer.pathBox ?? [0, 0, 100, 100];
-			const bw = Math.max(1e-3, box[2]);
-			const bh = Math.max(1e-3, box[3]);
+			const bw = Math.max(1e-3, Number.isFinite(box[2]) ? box[2] : 100);
+			const bh = Math.max(1e-3, Number.isFinite(box[3]) ? box[3] : 100);
 			const s = (radius * 2) / Math.max(bw, bh);
+			if (!Number.isFinite(s) || s <= 0) {
+				ctx.restore();
+				continue;
+			}
 			ctx.scale(s, s);
 			ctx.translate(-(box[0] + bw / 2), -(box[1] + bh / 2));
 			const frames = cycleFrames ?? [{ path: activePath, alpha: 1 }];
