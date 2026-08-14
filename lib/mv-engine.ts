@@ -499,6 +499,27 @@ function bounceEnvelope(step: number, period: number, curve = 2): number {
 	return clamp01(decay * osc);
 }
 
+/**
+ * `periodSteps` ごとに発火し、その頭から `attackSteps` ぶんだけ
+ * `envelope`/`bounceEnvelope` で減衰、それ以降は0（静止）で次の発火まで待つ。
+ * 周期(period)を長くしても減衰そのものの速さは変わらない——「発火の間隔」と
+ * 「1回の鳴りの速さ」を独立に指定するための版（`attackBeats` の実体）。
+ */
+function gatedEnvelope(
+	step: number,
+	periodSteps: number,
+	attackSteps: number,
+	curve: number,
+	shape: "decay" | "bounce" | undefined,
+): number {
+	if (periodSteps <= 0) return 0;
+	const phase = ((step % periodSteps) + periodSteps) % periodSteps;
+	if (phase >= attackSteps) return 0;
+	return shape === "bounce"
+		? bounceEnvelope(phase, Math.max(1, attackSteps), curve)
+		: envelope(phase, Math.max(1, attackSteps), curve);
+}
+
 /** `shape` に応じて `envelope`/`bounceEnvelope` を切り替える。 */
 function shapedEnvelope(
 	step: number,
@@ -593,9 +614,22 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			// periodBeats未指定/1なら従来どおり1拍周期。指定時は周期を伸縮する
 			// （0.5で2倍速、2で半分の速さ、というように小さいほど速い）。
 			const beatPeriod = Math.max(1, MV_STEPS_PER_BEAT * (m.periodBeats ?? 1));
+			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BEAT;
+			// attackBeats: 周期(発火の間隔)とは独立に、減衰そのものの速さを指定する。
+			// これが無いと「周期を伸ばす」＝「動きそのものが遅くなる」しかできない
+			// （8拍周期の要素は8拍かけてゆっくり減衰する、というスローモーション化）。
+			if (m.attackBeats !== undefined) {
+				const attackSteps = Math.max(1, MV_STEPS_PER_BEAT * m.attackBeats);
+				return gatedEnvelope(
+					d.step - offsetSteps,
+					beatPeriod,
+					attackSteps,
+					m.curve ?? 2,
+					m.shape,
+				);
+			}
 			// 裏拍などの位相ずらし。0かつ既定波形なら従来どおり d.beatEnv の速い経路を
 			// そのまま使う（毎フレーム envelope() を呼び直さずに済む）。
-			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BEAT;
 			if (offsetSteps === 0 && m.shape === undefined) {
 				if (m.periodBeats === undefined || m.periodBeats === 1) {
 					return m.curve === undefined

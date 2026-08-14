@@ -430,8 +430,16 @@ export interface SymmetricShapeGroupOptions {
 interface MotionOptions {
 	size: number;
 	thickness: number;
-	/** 拍の踏み込みの周期（拍）。 */
+	/** 拍の踏み込みの周期（拍）＝発火の間隔。 */
 	periodBeats: number;
+	/**
+	 * 1回の発火にかける減衰の長さ（拍）。`periodBeats` は「どれだけ間隔を
+	 * 空けて発火するか」だけを決め、動きそのものの速さはここが決める——
+	 * 分けないと「周期(=combo由来。1/2/4/8/16/32拍)を伸ばす」がそのまま
+	 * 「動きがスローモーションになる」に直結してしまう
+	 * （8拍間隔の要素でも、鳴る瞬間は1拍相当の速さでサッと決まってほしい）。
+	 */
+	attackBeats: number;
 	/** この要素が受け持つスロット（拍数ぶん遅れて発火する）。 */
 	phaseOffset: number;
 	/** 連続した揺れの周期（小節）。smooth でのみ使う。 */
@@ -451,6 +459,7 @@ interface MotionOptions {
 function flooredOpacity(
 	floor: number,
 	periodBeats: number,
+	attackBeats: number,
 	phaseOffset: number,
 	curve: number,
 ): MvModulator[] {
@@ -461,6 +470,7 @@ function flooredOpacity(
 			op: "mul",
 			amount: roundTo(1 - floor, 2),
 			periodBeats: roundTo(periodBeats, 2),
+			attackBeats: roundTo(attackBeats, 2),
 			phaseOffset: roundTo(phaseOffset, 2),
 			curve,
 		},
@@ -488,6 +498,7 @@ function crispModulators(o: MotionOptions): MvModulator[] {
 			op: "add",
 			amount: roundTo(o.thickness * (o.swell - 1), 1),
 			periodBeats: roundTo(o.periodBeats, 2),
+			attackBeats: roundTo(o.attackBeats, 2),
 			phaseOffset: roundTo(o.phaseOffset, 2),
 			curve: 3,
 		},
@@ -521,13 +532,14 @@ function smoothModulators(o: MotionOptions): MvModulator[] {
 			symmetric: true,
 			curve: 1.2,
 		},
-		...flooredOpacity(0.45, o.periodBeats, o.phaseOffset, 1.2),
+		...flooredOpacity(0.45, o.periodBeats, o.attackBeats, o.phaseOffset, 1.2),
 		{
 			source: "beat",
 			target: "thickness",
 			op: "add",
 			amount: roundTo(o.thickness * (o.swell - 1) * 0.4, 1),
 			periodBeats: roundTo(o.periodBeats, 2),
+			attackBeats: roundTo(o.attackBeats, 2),
 			phaseOffset: roundTo(o.phaseOffset, 2),
 			curve: 2,
 		},
@@ -624,10 +636,20 @@ function buildElement(
 	const size = roundTo(opts.size, 1);
 	const x = roundTo(opts.x, 1);
 	const y = roundTo(opts.y, 1);
+	// 発火の間隔(periodBeats)と、鳴る瞬間の速さ(attackBeats)は別物。既定は
+	// 常に`baseBeats`相当の速さ（＝「1拍のタイミングで組んだときと同じ速さ」）で
+	// サッと決まり、periodBeatsが長い要素ほど「間を長く空けて同じ速さで鳴る」
+	// だけになる。ごく一部（周期がbaseBeatsより長い要素の20%）だけ、シンバルの
+	// ように長く尾を引く減衰にする——毎回全部が同じ速さで鳴ると単調なため。
+	const attackBeats =
+		periodBeats > plan.baseBeats && chance(0.2)
+			? Math.min(periodBeats * 0.5, randRange(2, 4))
+			: plan.baseBeats;
 	const motion: MotionOptions = {
 		size,
 		thickness,
 		periodBeats,
+		attackBeats,
 		phaseOffset,
 		phraseBars: plan.phraseBars,
 		swell: plan.swell,
@@ -675,7 +697,12 @@ function buildElement(
 		pathBox: [0, 0, 100, 100],
 		iconCycle: {
 			paths,
-			beats: periodBeats,
+			// コマ送り自体は常に基準の拍(baseBeats)相当の速さで回し続ける。
+			// ここに periodBeats（combo由来。1/2/4/8/16/32拍）を渡すと、周期が
+			// 長い要素ほどコマ送りそのものが何拍もかけてゆっくり進む
+			// 「スローモーション」になってしまう——周期は発火の間隔だけを
+			// 決めるもので、動きの速さ自体は常に一定であるべき。
+			beats: plan.baseBeats,
 			crossfade: plan.crossfade,
 		},
 	};
@@ -808,6 +835,7 @@ export function buildSymmetricShapeGroupLayers(
 				size: emblemSize,
 				thickness: plan.baseThickness,
 				periodBeats: baseBeats,
+				attackBeats: baseBeats,
 				phaseOffset: 0,
 				phraseBars: plan.phraseBars,
 				swell: plan.swell,
