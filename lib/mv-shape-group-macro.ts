@@ -1507,6 +1507,88 @@ function staggerWrap(inner: FragTransform): FragTransform {
 		});
 }
 
+/** 
+ * 完全自律型の数式AST（抽象構文木）。
+ * 人間がカテゴリを定義するのではなく、エンジン自身が数学的な変形を毎度新しく組み立てる。
+ */
+type MathExpr =
+	| { t: "const"; v: number }
+	| { t: "var"; n: "x" | "y" | "r" | "th" | "t" }
+	| { t: "add"; l: MathExpr; r: MathExpr }
+	| { t: "mul"; l: MathExpr; r: MathExpr }
+	| { t: "sin"; a: MathExpr; freq: number }
+	| { t: "noise"; l: MathExpr; r: MathExpr };
+
+/** 乱数で数式の木（AST）を自動生成する。 */
+function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
+	if (depth <= 0) {
+		if (requireT) return { t: "var", n: "t" };
+		if (chance(0.4)) return { t: "const", v: randRange(-1, 1, 3) };
+		return { t: "var", n: pick(["x", "y", "r", "th", "t"] as const) };
+	}
+	
+	const types = ["add", "mul", "sin", "noise"];
+	const type = pick(types);
+	
+	if (type === "sin") {
+		return { t: "sin", a: buildRandomMathExpr(depth - 1, requireT), freq: randRange(1, 4, 1) };
+	}
+	
+	const leftRequiresT = requireT ? chance(0.5) : false;
+	const rightRequiresT = requireT && !leftRequiresT;
+	return {
+		t: type as any,
+		l: buildRandomMathExpr(depth - 1, leftRequiresT),
+		r: buildRandomMathExpr(depth - 1, rightRequiresT),
+	};
+}
+
+/** ASTを実行して座標の変位を求める。 */
+function evaluateMathExpr(expr: MathExpr, env: { x: number; y: number; r: number; th: number; t: number }): number {
+	switch (expr.t) {
+		case "const": return expr.v;
+		case "var": return env[expr.n];
+		case "add": return (evaluateMathExpr(expr.l, env) + evaluateMathExpr(expr.r, env)) / 2;
+		case "mul": return evaluateMathExpr(expr.l, env) * evaluateMathExpr(expr.r, env);
+		case "sin": return Math.sin(evaluateMathExpr(expr.a, env) * expr.freq * Math.PI);
+		case "noise": {
+			const vx = evaluateMathExpr(expr.l, env);
+			const vy = evaluateMathExpr(expr.r, env);
+			const h = Math.sin(vx * 12.9898 + vy * 78.233) * 43758.5453;
+			return (h - Math.floor(h)) * 2 - 1; // [-1, 1] に正規化
+		}
+	}
+}
+
+/** 
+ * 手書きの変形（Translate/Twist等）とは異なり、
+ * 実行のたびに未知の数式を合成して「オリジナルな変形」を発明する PointOp。
+ */
+function opProceduralMath(): PointOp {
+	// 完全に独立したX方向・Y方向の数式ツリーを生成（深さ2〜3）。
+	// 静止画にならないよう、必ず時間 t を式のどこかに組み込む。
+	const astX = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
+	const astY = buildRandomMathExpr(2 + Math.floor(Math.random() * 2), true);
+	
+	const ampX = randRange(10, 60);
+	const ampY = randRange(10, 60);
+	const reverse = chance(0.5);
+
+	return (x, y, t) => {
+		const nx = (x - 50) / 50;
+		const ny = (y - 50) / 50;
+		const r = Math.min(1.5, Math.hypot(nx, ny));
+		const th = Math.atan2(ny, nx) / Math.PI; 
+		
+		const env = { x: nx, y: ny, r, th, t };
+		const dx = evaluateMathExpr(astX, env);
+		const dy = evaluateMathExpr(astY, env);
+		
+		const k = reverse ? easeOutCubic(t) : 1 - easeOutCubic(t);
+		return [x + dx * ampX * k, y + dy * ampY * k];
+	};
+}
+
 /** 原子演算の生成器プール。呼ぶたびにパラメータをランダムに振った新しい個体を返す。 */
 const FRAG_OP_FACTORIES: (() => FragTransform)[] = [
 	() => liftPointOp(opTranslate()),
@@ -1517,6 +1599,11 @@ const FRAG_OP_FACTORIES: (() => FragTransform)[] = [
 	() => liftPointOp(opRadialPulse()),
 	() => liftPointOp(opNoiseJitter()),
 	() => opFragSpread(),
+	// 完全に自律生成される数式変形（未知のオペレータ）が頻繁に選ばれるよう確率を高める
+	() => liftPointOp(opProceduralMath()),
+	() => liftPointOp(opProceduralMath()),
+	() => liftPointOp(opProceduralMath()),
+	() => liftPointOp(opProceduralMath()),
 ];
 
 /**
