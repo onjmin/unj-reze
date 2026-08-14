@@ -7855,10 +7855,31 @@ export default function MvMaker({
 				>
 					<X size={18} />
 				</button>
-				{/* いま何を編集中かだけをテキストで残す（折り返さず、狭ければ省略記号にする） */}
-				<span className="min-w-0 flex-1 truncate text-[11px] text-gray-400">
+				<span className="min-w-0 truncate text-[11px] text-gray-400">
 					MV作成
 				</span>
+				{exportingMp4 && (
+					<div className="flex flex-1 items-center justify-center gap-2 overflow-hidden px-2">
+						<div className="flex items-center gap-2 rounded-full border border-blue-500/50 bg-blue-950/80 px-3 py-1 text-xs text-blue-200 shadow-md">
+							<Loader2 className="animate-spin text-blue-400" size={13} />
+							<span className="font-semibold text-[11px]">MP4出力中...</span>
+							<span className="font-mono text-[11px] text-blue-300">{exportProgress}%</span>
+							<div className="h-1.5 w-20 overflow-hidden rounded-full bg-blue-900">
+								<div
+									className="h-full bg-blue-400 transition-all duration-200"
+									style={{ width: `${exportProgress}%` }}
+								/>
+							</div>
+							<span className="hidden font-mono text-[10px] text-gray-400 sm:inline">{exportStatusText}</span>
+							<button
+								onClick={handleCancelExportMp4}
+								className="ml-1 rounded bg-red-950/80 border border-red-800 px-1.5 py-0.5 text-[10px] text-red-200 transition hover:bg-red-900"
+							>
+								キャンセル
+							</button>
+						</div>
+					</div>
+				)}
 				<div className="flex shrink-0 items-center gap-1">
 					<button
 						onClick={undoEdit}
@@ -8595,34 +8616,7 @@ export default function MvMaker({
 				/>
 			)}
 
-			{exportingMp4 && (
-				<div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-					<div className="w-80 space-y-4 rounded-xl border border-gray-700 bg-gray-900 p-5 text-center shadow-2xl">
-						<div className="flex items-center justify-center gap-2.5 text-sm font-semibold text-blue-400">
-							<Loader2 className="animate-spin" size={18} />
-							MP4動画を出力中...
-						</div>
-						<p className="text-xs leading-relaxed text-gray-400">
-							MVを再生しながらキャプチャしています。終わるまでブラウザを開いたままにしてください。
-						</p>
-						<div className="h-2.5 w-full overflow-hidden rounded-full border border-gray-700 bg-gray-800">
-							<div
-								className="h-full bg-blue-500 transition-all duration-200"
-								style={{ width: `${Math.min(100, Math.max(0, exportProgress))}%` }}
-							/>
-						</div>
-						<div className="font-mono text-xs text-gray-300">
-							{exportStatusText}
-						</div>
-						<button
-							onClick={handleCancelExportMp4}
-							className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
-						>
-							録画をキャンセル
-						</button>
-					</div>
-				</div>
-			)}
+
 		</div>
 	);
 }
