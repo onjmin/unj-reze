@@ -7,6 +7,10 @@
 //    url:https://...     画像URL(直リンク or embed対応サイト)
 //    tile:#2d5a27        単色タイル
 //    emoji:🍄            絵文字スプライト
+//    psd:<encodeURIComponent(url)>#<path1>|<path2>|...
+//                        psdファイルをクライアント側でパースし、指定レイヤー(複数可、重ね合成)を
+//                        1枚の画像として使う。解決は lib/mv-psd.ts（client-only）が担当するため、
+//                        imageRefToUrl はここでは常に null を返す（post: と同様、別途解決が必要）。
 //  BGM/SE:
 //    youtube:VIDEO_ID    (素のYouTube URLも可)
 //    mml:post:123        既存MML投稿(id=123)を参照
@@ -36,6 +40,7 @@ export function parseRef(raw: string): ParsedRef | null {
 		"url",
 		"tile",
 		"emoji",
+		"psd",
 		"youtube",
 		"nicovideo",
 		"soundcloud",
@@ -71,9 +76,38 @@ export function imageRefToUrl(raw: string): string | null {
 		}
 		case "post":
 			return null; // 投稿解決が必要
+		case "psd":
+			return null; // psdパース解決が必要（lib/mv-psd.ts、client-only）
 		default:
 			return null;
 	}
+}
+
+/** `psd:<encodeURIComponent(url)>#<path1>|<path2>|...` を構築。単一レイヤーなら paths=[path] でよい。 */
+export function buildPsdRef(url: string, paths: string[]): string {
+	return `psd:${encodeURIComponent(url)}#${paths.join("|")}`;
+}
+
+export function isPsdRef(raw: string): boolean {
+	return raw.startsWith("psd:");
+}
+
+/** psd: 参照を { url, paths } へ分解。psd参照でない/urlが空なら null。 */
+export function parsePsdRef(raw: string): { url: string; paths: string[] } | null {
+	if (!raw.startsWith("psd:")) return null;
+	const rest = raw.slice(4);
+	const hashIdx = rest.indexOf("#");
+	const urlPart = hashIdx === -1 ? rest : rest.slice(0, hashIdx);
+	const pathsPart = hashIdx === -1 ? "" : rest.slice(hashIdx + 1);
+	let url: string;
+	try {
+		url = decodeURIComponent(urlPart);
+	} catch {
+		return null;
+	}
+	if (!url) return null;
+	const paths = pathsPart ? pathsPart.split("|").filter(Boolean) : [];
+	return { url, paths };
 }
 
 export function isImageRef(raw: string): boolean {

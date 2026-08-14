@@ -10,7 +10,11 @@
 // 詳細: docs/mv-feature-design.md
 
 import { parseChord } from "@onjmin/chord-parser";
+import type { MvBlinkSetting } from "./mv-blink";
 import type { WayKey } from "./walk-sprite";
+
+export type { MvBlinkSetting } from "./mv-blink";
+export { DEFAULT_MV_BLINK, resolveBlinkState } from "./mv-blink";
 
 /** MVの論理解像度(16:9)。描画は常にこの座標系で行い、表示側が CSS transform で拡大する。 */
 export const MV_W = 640;
@@ -811,6 +815,84 @@ export interface MvImageLayer extends MvLayerBase {
 		alphaStep?: number;
 		/** 1体ごとに歩行アニメの位相をずらす秒数（バラけた足踏みになる） */
 		phase?: number;
+	};
+}
+
+/** 差し替え可能な1枚絵。asset-ref とその解決済みURL（post: 参照は保存時に焼く）。 */
+export interface MvAssetRef {
+	ref: string;
+	url?: string;
+}
+
+/** 母音6種（ローマ字の子音を除いた母音本体＋撥音「ん」）。 */
+export type MvVowel = "a" | "i" | "u" | "e" | "o" | "n";
+
+export const MV_VOWEL_LABELS: Record<MvVowel, string> = {
+	a: "あ",
+	i: "い",
+	u: "う",
+	e: "え",
+	o: "お",
+	n: "ん（口を閉じる）",
+};
+
+/**
+ * 口パクの動かし方。
+ * - track : 指定トラック(@n)の発音中(trackEnergy)だけ口を開く。しきい値(threshold)を跨いだかどうかの2値。
+ * - vowel : 指定した歌詞トラック(@@n)の歌詞から母音を推定し、mouth.vowels の絵へ切り替える
+ *           （lib/mv-vowel.ts の estimateVowel を参照。参考: https://rpgen3.github.io/ust2lab/ ）。
+ */
+export type MvLipsyncSetting =
+	| { mode: "track"; trackId: number; threshold?: number }
+	| { mode: "vowel"; trackId: number };
+
+export const DEFAULT_MV_LIPSYNC_TRACK: MvLipsyncSetting = {
+	mode: "track",
+	trackId: 0,
+	threshold: 0.12,
+};
+
+/**
+ * キャラクター表示レイヤー。土台画像の上に、目・口のパーツ画像をユーザーが明示的に選んで重ね描く。
+ * 「目開」「目閉」のようなファイル名から自動で関連付けることはしない
+ * （ユーザーが開/閉それぞれの画像をアセットピッカーで割り当てる）。
+ *
+ * 既定の目/口分離素材が欲しい場合は、束音ロゼ V1.01 の psd
+ * (https://res.cloudinary.com/dbld5kqtz/image/upload/v1786677313/TabaneLozeV101_jnj7yb.psd) の
+ * URLをそのまま asset-ref の `psd:` スキーム（`lib/asset-ref.ts` の `buildPsdRef`/`parsePsdRef`、
+ * 解決は client-only の `lib/mv-psd.ts`）で参照できる。事前にPNGへ書き出して
+ * `public/assets/` にバンドルする運用はしない——ブラウザ側でpsdをその場でパースし、
+ * 目開/閉・口開/閉などのレイヤーをレイヤー一覧から選んで割り当てる。
+ */
+export interface MvCharacterLayer extends MvLayerBase {
+	kind: "character";
+	/** 常に描かれる土台画像。 */
+	base: MvAssetRef;
+	x: number;
+	y: number;
+	scale: number;
+	anchor: MvAnchor;
+	motion: MvMotion;
+	motionAmount?: number;
+	walk?: MvWalkSetting;
+	frame?: { color: string; width: number; padding: number };
+	pixelated?: boolean;
+	flipH?: boolean;
+	flipV?: boolean;
+	repeat?: MvImageLayer["repeat"];
+	/** 瞬き。目開/目閉の2枚を base と同じ位置に重ねる。未指定＝瞬きなし。 */
+	eyes?: {
+		open: MvAssetRef;
+		closed: MvAssetRef;
+		blink: MvBlinkSetting;
+	};
+	/** 口パク。口開/口閉（＋母音6種）を base と同じ位置に重ねる。未指定＝口パクなし。 */
+	mouth?: {
+		closed: MvAssetRef;
+		open: MvAssetRef;
+		/** vowelモード用。未設定の母音は open/closed へフォールバックする。 */
+		vowels?: Partial<Record<MvVowel, MvAssetRef>>;
+		lipsync: MvLipsyncSetting;
 	};
 }
 
@@ -1814,6 +1896,7 @@ export interface MvBeatChordLabelLayer extends MvLayerBase {
 
 export type MvLayer =
 	| MvImageLayer
+	| MvCharacterLayer
 	| MvTextLayer
 	| MvVisualizerLayer
 	| MvLyricsLayer
@@ -2062,6 +2145,7 @@ export const MV_VISUALIZER_LABELS: Record<MvVisualizerStyle, string> = {
 
 export const MV_LAYER_KIND_LABELS: Record<MvLayer["kind"], string> = {
 	image: "画像",
+	character: "キャラクター（瞬き・口パク）",
 	text: "文字",
 	visualizer: "ビジュアライザ",
 	lyrics: "歌詞",

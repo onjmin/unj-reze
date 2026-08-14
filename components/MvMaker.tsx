@@ -27,6 +27,7 @@ import {
 	Shuffle,
 	Settings,
 	SlidersHorizontal,
+	Smile,
 	Sparkles,
 	Trash2,
 	Type,
@@ -36,9 +37,10 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseWalkRef, refLabel } from "@/lib/asset-ref";
+import { buildPsdRef, parseWalkRef, refLabel } from "@/lib/asset-ref";
 import { handleImgError } from "@/lib/cors-proxy";
 import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
+import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import {
 	clearAutosave,
 	getAutosave,
@@ -47,6 +49,8 @@ import {
 	saveHistory,
 } from "@/lib/history";
 import {
+	DEFAULT_MV_BLINK,
+	DEFAULT_MV_LIPSYNC_TRACK,
 	DEFAULT_MV_NOTE_LIGHT,
 	DEFAULT_MV_NOTE_LIGHT_3D,
 	DEFAULT_MV_RING,
@@ -83,13 +87,16 @@ import {
 	MV_TRANSITION_STYLE_LABELS,
 	MV_TRIGGER_LABELS,
 	MV_VISUALIZER_LABELS,
+	MV_VOWEL_LABELS,
 	MV_W,
+	type MvAssetRef,
 	type MvAudioMode,
 	type MvBeatChordLabelLayer,
 	type MvBeatCounterLayer,
 	type MvBeatDigitLayer,
 	type MvBeatPipsLayer,
 	type MvBlend,
+	type MvCharacterLayer,
 	type MvChordBarLayer,
 	type MvChordColorMode,
 	type MvDegreeLayer,
@@ -121,6 +128,7 @@ import {
 	type MvTrigger,
 	type MvVisualizerLayer,
 	type MvVisualizerStyle,
+	type MvVowel,
 	type MvWalkSetting,
 	type MvWidgetLayer,
 	mvAudioMode,
@@ -1164,6 +1172,7 @@ const AUDIO_MODE_OPTIONS = (
 
 const LAYER_ICON = {
 	image: ImageIcon,
+	character: Smile,
 	text: Type,
 	visualizer: BarChart3,
 	lyrics: Music,
@@ -1177,6 +1186,559 @@ const LAYER_ICON = {
 	beatDigit: Hash,
 	beatChordLabel: ListMusic,
 } as const;
+
+const MV_VOWELS: MvVowel[] = ["a", "i", "u", "e", "o", "n"];
+
+/** character レイヤーのどのパーツ画像を選んでいるか（picker連携用）。MvMaker本体と同じ型。 */
+type CharacterAssetFieldExternal =
+	| "base"
+	| "eyesOpen"
+	| "eyesClosed"
+	| "mouthClosed"
+	| "mouthOpen"
+	| `vowel_${MvVowel}`;
+
+/** 小さな参照ボタン＋サムネイル。base/eyes/mouth の各パーツ選択で使い回す。 */
+function AssetRefButton({
+	label,
+	asset,
+	onPick,
+}: {
+	label: string;
+	asset?: MvAssetRef;
+	onPick: () => void;
+}) {
+	return (
+		<div className="flex items-center gap-2">
+			<button type="button" onClick={onPick} className={`${REF_BTN_CLASS} flex-1`}>
+				<ImageIcon size={12} />
+				{label}
+			</button>
+			{asset?.url && (
+				<img
+					src={asset.url}
+					onError={handleImgError}
+					alt=""
+					className="h-9 w-9 shrink-0 rounded border border-gray-700 object-contain"
+				/>
+			)}
+		</div>
+	);
+}
+
+const PSD_SAMPLE_URL =
+	"https://res.cloudinary.com/dbld5kqtz/image/upload/v1786677313/TabaneLozeV101_jnj7yb.psd";
+
+/** 現在有効な項目に応じた割り当て先の一覧（無効な目/口の項目は出さない）。 */
+function psdAssignTargets(
+	layer: MvCharacterLayer,
+): { value: CharacterAssetFieldExternal; label: string }[] {
+	const targets: { value: CharacterAssetFieldExternal; label: string }[] = [
+		{ value: "base", label: "土台" },
+	];
+	if (layer.eyes) {
+		targets.push({ value: "eyesOpen", label: "開いた目" });
+		targets.push({ value: "eyesClosed", label: "閉じた目" });
+	}
+	if (layer.mouth) {
+		targets.push({ value: "mouthClosed", label: "閉じた口" });
+		targets.push({ value: "mouthOpen", label: "開いた口" });
+		if (layer.mouth.lipsync.mode === "vowel") {
+			for (const v of MV_VOWELS) {
+				targets.push({ value: `vowel_${v}`, label: MV_VOWEL_LABELS[v] });
+			}
+		}
+	}
+	return targets;
+}
+
+/**
+ * psdファイルをブラウザ側でその場で読み込み、レイヤーをキャラクターレイヤーの各パーツへ
+ * 割り当てるパネル。「開/閉」等のレイヤー名からの自動関連付けはしない――一覧から選んで、
+ * 割り当て先（土台/目開/目閉/口開/口閉/母音6種）を指定してもらう2段の操作。
+ * 土台は色塗り+線画のような複数レイヤー合成が要るため、チェックボックスで複数選択できる。
+ */
+function PsdAssetPanel({
+	layer,
+	onAssign,
+}: {
+	layer: MvCharacterLayer;
+	onAssign: (field: CharacterAssetFieldExternal, assetRef: MvAssetRef) => void;
+}) {
+	const [url, setUrl] = useState("");
+	const [layers, setLayers] = useState<PsdLayerInfo[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+	const targets = psdAssignTargets(layer);
+	const [target, setTarget] = useState<CharacterAssetFieldExternal>("base");
+
+	const handleLoad = async () => {
+		const trimmed = url.trim();
+		if (!trimmed) return;
+		setLoading(true);
+		setError(null);
+		try {
+			const list = await listPsdLayerPaths(trimmed);
+			setLayers(list);
+			setSelectedPaths([]);
+		} catch {
+			setError("psdの読み込みに失敗しました（URL・CORS設定を確認してください）");
+			setLayers([]);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	const togglePath = (path: string) => {
+		setSelectedPaths((prev) =>
+			prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path],
+		);
+	};
+
+	const handleAssign = () => {
+		const trimmed = url.trim();
+		if (!trimmed || selectedPaths.length === 0) return;
+		onAssign(target, { ref: buildPsdRef(trimmed, selectedPaths) });
+	};
+
+	return (
+		<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
+			<div className="text-[11px] font-medium text-gray-300">
+				psdから素材を選ぶ
+			</div>
+			<Hint>
+				目/口が個別レイヤーに分かれたpsdファイルを、ブラウザ側でその場で読み込みます（事前の
+				アップロード不要）。「開/閉」のようなレイヤー名からの自動割り当てはしません――一覧
+				から選んで、割り当て先を指定してください。
+			</Hint>
+			<input
+				type="text"
+				value={url}
+				onChange={(e) => setUrl(e.target.value)}
+				placeholder="psdファイルのURL"
+				className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+			/>
+			<button
+				type="button"
+				onClick={() => setUrl(PSD_SAMPLE_URL)}
+				className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-2 text-[11px] text-gray-300 hover:bg-gray-700"
+			>
+				サンプル（束音ロゼ V1.01）のURLを使う
+			</button>
+			<button
+				type="button"
+				onClick={handleLoad}
+				disabled={!url.trim() || loading}
+				className="min-h-9 w-full rounded border border-blue-700 bg-blue-900/40 px-2 text-[11px] text-blue-200 hover:bg-blue-900/70 disabled:opacity-40"
+			>
+				{loading ? "読み込み中…" : "レイヤー一覧を読み込む"}
+			</button>
+			{error && <div className="text-[11px] text-red-400">{error}</div>}
+			{layers.length > 0 && (
+				<>
+					<div className="max-h-40 space-y-1 overflow-y-auto rounded border border-gray-700/70 bg-gray-900/60 p-2">
+						{layers.map((l) => (
+							<label
+								key={l.path}
+								className="flex min-h-8 items-center gap-2 text-[11px] text-gray-300"
+							>
+								<input
+									type="checkbox"
+									checked={selectedPaths.includes(l.path)}
+									onChange={() => togglePath(l.path)}
+									className="h-4 w-4 accent-blue-500"
+								/>
+								<span className="truncate">{l.path}</span>
+								<span className="ml-auto shrink-0 text-gray-500">
+									{l.width}x{l.height}
+								</span>
+							</label>
+						))}
+					</div>
+					<SelectField
+						label="割り当て先"
+						value={target}
+						options={targets}
+						onChange={setTarget}
+					/>
+					<button
+						type="button"
+						onClick={handleAssign}
+						disabled={selectedPaths.length === 0}
+						className="min-h-9 w-full rounded border border-emerald-700 bg-emerald-900/40 px-2 text-[11px] text-emerald-200 hover:bg-emerald-900/70 disabled:opacity-40"
+					>
+						選んだレイヤー（{selectedPaths.length}枚）を割り当てる
+					</button>
+				</>
+			)}
+		</div>
+	);
+}
+
+/**
+ * character レイヤーの編集パネル。土台画像は image レイヤーと同じ操作感にしつつ、
+ * 目（瞬き）・口（口パク）は「有効化トグル→パーツ画像を選ぶ」という2段の操作にしてある。
+ * 「目開」「目閉」のようなファイル名からの自動関連付けは行わない
+ * （常にユーザーがアセットピッカーで明示的に選ぶ）。
+ */
+function CharacterLayerFields({
+	layer,
+	song,
+	onUpdate,
+	onPickAsset,
+}: {
+	layer: MvCharacterLayer;
+	song: MvSong;
+	onUpdate: (patch: Partial<MvCharacterLayer>) => void;
+	onPickAsset: (field: CharacterAssetFieldExternal) => void;
+}) {
+	const lipsyncTracks = song.tracks;
+	const vowelTracks = song.lyricTrackIds;
+
+	const assignPsdAsset = (
+		field: CharacterAssetFieldExternal,
+		assetRef: MvAssetRef,
+	) => {
+		if (field === "base") {
+			onUpdate({ base: assetRef });
+			return;
+		}
+		if (field === "eyesOpen" && layer.eyes) {
+			onUpdate({ eyes: { ...layer.eyes, open: assetRef } });
+			return;
+		}
+		if (field === "eyesClosed" && layer.eyes) {
+			onUpdate({ eyes: { ...layer.eyes, closed: assetRef } });
+			return;
+		}
+		if (field === "mouthClosed" && layer.mouth) {
+			onUpdate({ mouth: { ...layer.mouth, closed: assetRef } });
+			return;
+		}
+		if (field === "mouthOpen" && layer.mouth) {
+			onUpdate({ mouth: { ...layer.mouth, open: assetRef } });
+			return;
+		}
+		if (field.startsWith("vowel_") && layer.mouth) {
+			const vowel = field.slice(6) as MvVowel;
+			onUpdate({
+				mouth: {
+					...layer.mouth,
+					vowels: { ...layer.mouth.vowels, [vowel]: assetRef },
+				},
+			});
+		}
+	};
+
+	return (
+		<>
+			<AssetRefButton
+				label="土台の画像を参照"
+				asset={layer.base}
+				onPick={() => onPickAsset("base")}
+			/>
+			<PsdAssetPanel layer={layer} onAssign={assignPsdAsset} />
+			<NumField label="X" value={layer.x} onChange={(v) => onUpdate({ x: v })} />
+			<NumField label="Y" value={layer.y} onChange={(v) => onUpdate({ y: v })} />
+			<NumField
+				label="拡大率"
+				value={layer.scale}
+				min={0.1}
+				step={0.1}
+				onChange={(v) => onUpdate({ scale: v })}
+			/>
+			<CheckField
+				label="ドット絵として粗く表示"
+				checked={!!layer.pixelated}
+				onChange={(v) => onUpdate({ pixelated: v })}
+			/>
+			<CheckField
+				label="左右反転（鏡像）"
+				checked={!!layer.flipH}
+				onChange={(v) => onUpdate({ flipH: v || undefined })}
+			/>
+			<CheckField
+				label="上下反転（逆さま）"
+				checked={!!layer.flipV}
+				onChange={(v) => onUpdate({ flipV: v || undefined })}
+			/>
+
+			{/* ── 瞬き ───────────────────────────────── */}
+			<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
+				<CheckField
+					label="瞬き（自動でまばたきさせる）"
+					checked={!!layer.eyes}
+					onChange={(v) =>
+						onUpdate({
+							eyes: v
+								? {
+										open: layer.eyes?.open ?? { ref: "" },
+										closed: layer.eyes?.closed ?? { ref: "" },
+										blink: layer.eyes?.blink ?? {
+											...DEFAULT_MV_BLINK,
+											enabled: true,
+										},
+									}
+								: undefined,
+						})
+					}
+				/>
+				{layer.eyes && (
+					<>
+						<Hint>
+							「目開」「目閉」のようなファイル名では自動関連付けされません。開いた目・閉じた目、それぞれの画像を選んでください。
+						</Hint>
+						<AssetRefButton
+							label="開いた目の画像"
+							asset={layer.eyes.open}
+							onPick={() => onPickAsset("eyesOpen")}
+						/>
+						<AssetRefButton
+							label="閉じた目の画像"
+							asset={layer.eyes.closed}
+							onPick={() => onPickAsset("eyesClosed")}
+						/>
+						<div className="flex items-center gap-2">
+							<NumField
+								label="乱数の種（seed）"
+								value={layer.eyes.blink.seed}
+								step={1}
+								onChange={(v) =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: { ...layer.eyes.blink, seed: Math.round(v) },
+										},
+									})
+								}
+							/>
+							<button
+								type="button"
+								title="別のパターンで抽選し直す"
+								onClick={() =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: {
+												...layer.eyes.blink,
+												seed: Math.floor(Math.random() * 1_000_000),
+											},
+										},
+									})
+								}
+								className="mt-4 shrink-0 grid h-9 w-9 place-items-center rounded border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700"
+							>
+								<Shuffle size={14} />
+							</button>
+						</div>
+						<Details label="瞬きの間隔・長さを調整する">
+							<NumField
+								label="間隔（拍）の最短"
+								value={layer.eyes.blink.intervalBeatsMin ?? 12}
+								min={0.5}
+								onChange={(v) =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: { ...layer.eyes.blink, intervalBeatsMin: v },
+										},
+									})
+								}
+							/>
+							<NumField
+								label="間隔（拍）の最長"
+								value={layer.eyes.blink.intervalBeatsMax ?? 28}
+								min={0.5}
+								onChange={(v) =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: { ...layer.eyes.blink, intervalBeatsMax: v },
+										},
+									})
+								}
+							/>
+							<NumField
+								label="閉じている長さ（拍）"
+								value={layer.eyes.blink.closedBeats ?? 0.6}
+								min={0.05}
+								step={0.05}
+								onChange={(v) =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: { ...layer.eyes.blink, closedBeats: v },
+										},
+									})
+								}
+							/>
+							<NumField
+								label="2連瞬きの確率 (0〜1)"
+								value={layer.eyes.blink.doubleBlinkChance ?? 0.2}
+								min={0}
+								max={1}
+								step={0.05}
+								onChange={(v) =>
+									onUpdate({
+										eyes: layer.eyes && {
+											...layer.eyes,
+											blink: { ...layer.eyes.blink, doubleBlinkChance: v },
+										},
+									})
+								}
+							/>
+						</Details>
+					</>
+				)}
+			</div>
+
+			{/* ── 口パク ───────────────────────────────── */}
+			<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
+				<CheckField
+					label="口パク"
+					checked={!!layer.mouth}
+					onChange={(v) =>
+						onUpdate({
+							mouth: v
+								? {
+										closed: layer.mouth?.closed ?? { ref: "" },
+										open: layer.mouth?.open ?? { ref: "" },
+										vowels: layer.mouth?.vowels,
+										lipsync: layer.mouth?.lipsync ?? DEFAULT_MV_LIPSYNC_TRACK,
+									}
+								: undefined,
+						})
+					}
+				/>
+				{layer.mouth && (
+					<>
+						<Hint>
+							「口開」「口閉」のようなファイル名では自動関連付けされません。開いた口・閉じた口、それぞれの画像を選んでください。
+						</Hint>
+						<AssetRefButton
+							label="閉じた口の画像"
+							asset={layer.mouth.closed}
+							onPick={() => onPickAsset("mouthClosed")}
+						/>
+						<AssetRefButton
+							label="開いた口の画像"
+							asset={layer.mouth.open}
+							onPick={() => onPickAsset("mouthOpen")}
+						/>
+						<SelectField
+							label="口パクの方式"
+							value={layer.mouth.lipsync.mode}
+							options={[
+								{ value: "track", label: "トラック連動（発音中だけ開く）" },
+								{ value: "vowel", label: "母音対応（歌詞から母音を推定）" },
+							]}
+							onChange={(mode) =>
+								onUpdate({
+									mouth: layer.mouth && {
+										...layer.mouth,
+										lipsync:
+											mode === "track"
+												? { mode: "track", trackId: lipsyncTracks[0] ?? 0, threshold: 0.12 }
+												: { mode: "vowel", trackId: vowelTracks[0] ?? 0 },
+									},
+								})
+							}
+						/>
+						{layer.mouth.lipsync.mode === "track" && (
+							<>
+								<SelectField
+									label="対象トラック"
+									value={String(layer.mouth.lipsync.trackId)}
+									options={lipsyncTracks.map((t) => ({
+										value: String(t),
+										label: `@${t}`,
+									}))}
+									onChange={(v) =>
+										onUpdate({
+											mouth: layer.mouth && {
+												...layer.mouth,
+												lipsync: {
+													mode: "track",
+													trackId: Number(v),
+													threshold:
+														layer.mouth.lipsync.mode === "track"
+															? layer.mouth.lipsync.threshold
+															: undefined,
+												},
+											},
+										})
+									}
+								/>
+								<NumField
+									label="開くしきい値 (0〜1、小さいほど開きやすい)"
+									value={
+										layer.mouth.lipsync.mode === "track"
+											? (layer.mouth.lipsync.threshold ?? 0.12)
+											: 0.12
+									}
+									min={0}
+									max={1}
+									step={0.02}
+									onChange={(v) =>
+										onUpdate({
+											mouth: layer.mouth && {
+												...layer.mouth,
+												lipsync:
+													layer.mouth.lipsync.mode === "track"
+														? { ...layer.mouth.lipsync, threshold: v }
+														: layer.mouth.lipsync,
+											},
+										})
+									}
+								/>
+							</>
+						)}
+						{layer.mouth.lipsync.mode === "vowel" && (
+							<>
+								{vowelTracks.length > 0 ? (
+									<SelectField
+										label="対象の歌詞トラック"
+										value={String(layer.mouth.lipsync.trackId)}
+										options={vowelTracks.map((t) => ({
+											value: String(t),
+											label: `@@${t}`,
+										}))}
+										onChange={(v) =>
+											onUpdate({
+												mouth: layer.mouth && {
+													...layer.mouth,
+													lipsync: { mode: "vowel", trackId: Number(v) },
+												},
+											})
+										}
+									/>
+								) : (
+									<Hint>
+										この曲には歌詞トラックが無いので、母音対応の口パクは動きません。
+									</Hint>
+								)}
+								<Hint>
+									あ/い/う/え/お/ん の画像を割り当てられます。設定しなかった母音は「あ」は開いた口、「ん」は閉じた口へ自動でフォールバックします。既定素材が無い場合は、上の「psdから素材を選ぶ」で束音ロゼ V1.01 のpsd URLを読み込み、レイヤー一覧から割り当ててください。
+								</Hint>
+								<div className="grid grid-cols-3 gap-2">
+									{MV_VOWELS.map((v) => (
+										<AssetRefButton
+											key={v}
+											label={MV_VOWEL_LABELS[v]}
+											asset={layer.mouth?.vowels?.[v]}
+											onPick={() => onPickAsset(`vowel_${v}`)}
+										/>
+									))}
+								</div>
+							</>
+						)}
+					</>
+				)}
+			</div>
+		</>
+	);
+}
 
 /** 図形の「音との連動」1行ぶんの編集UI。 */
 function ModulatorRow({
@@ -1310,6 +1872,8 @@ function layerKindLabel(layer: MvLayer): string {
 	switch (layer.kind) {
 		case "image":
 			return refLabel(layer.ref);
+		case "character":
+			return refLabel(layer.base.ref);
 		case "text":
 			return layer.text.split("\n")[0] || "テキスト";
 		case "visualizer":
@@ -1397,9 +1961,20 @@ export default function MvMaker({
 	const [shapeFormPickerLayerId, setShapeFormPickerLayerId] = useState<
 		string | null
 	>(null);
+	/** character レイヤーのどのパーツ画像を選んでいるか。未指定は image レイヤーの `ref`。 */
+	type CharacterAssetField =
+		| "base"
+		| "eyesOpen"
+		| "eyesClosed"
+		| "mouthClosed"
+		| "mouthOpen"
+		| `vowel_${MvVowel}`;
 	const [picker, setPicker] = useState<{
 		mode: "image" | "bgm";
-		target: "stageBg" | { layerId: string } | { sectionId: string };
+		target:
+			| "stageBg"
+			| { layerId: string; field?: CharacterAssetField }
+			| { sectionId: string };
 	} | null>(null);
 	const playerRef = useRef<MvPlayerHandle>(null);
 	const [lyricTimingIndexMap, setLyricTimingIndexMap] = useState<
@@ -1708,6 +2283,34 @@ export default function MvMaker({
 		} else if ("sectionId" in picker.target) {
 			const sectionId = picker.target.sectionId;
 			updateSectionStage(sectionId, { bgRef: result.ref, bgUrl: result.url });
+		} else if (picker.target.field) {
+			// character レイヤーの目/口パーツ画像。土台と違ってコマ割りは持たない静止画。
+			const layerId = picker.target.layerId;
+			const field = picker.target.field;
+			const assetRef: MvAssetRef = { ref: result.ref, url: result.url };
+			updateLayer(layerId, (l) => {
+				if (l.kind !== "character") return l;
+				if (field === "base") return { ...l, base: assetRef };
+				if (field === "eyesOpen" && l.eyes)
+					return { ...l, eyes: { ...l.eyes, open: assetRef } };
+				if (field === "eyesClosed" && l.eyes)
+					return { ...l, eyes: { ...l.eyes, closed: assetRef } };
+				if (field === "mouthClosed" && l.mouth)
+					return { ...l, mouth: { ...l.mouth, closed: assetRef } };
+				if (field === "mouthOpen" && l.mouth)
+					return { ...l, mouth: { ...l.mouth, open: assetRef } };
+				if (field.startsWith("vowel_") && l.mouth) {
+					const vowel = field.slice(6) as MvVowel;
+					return {
+						...l,
+						mouth: {
+							...l.mouth,
+							vowels: { ...l.mouth.vowels, [vowel]: assetRef },
+						},
+					};
+				}
+				return l;
+			});
 		} else {
 			const layerId = picker.target.layerId;
 			// walk: 参照はコマ割り（クロップ・コマ数・行）を参照文字列に持っている。
@@ -1842,6 +2445,24 @@ export default function MvMaker({
 		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 		setPicker({ mode: "image", target: { layerId: layer.id } });
+	};
+
+	const addCharacterLayer = () => {
+		const layer: MvCharacterLayer = {
+			kind: "character",
+			id: mvUid("chr"),
+			base: { ref: "" },
+			x: MV_W / 2,
+			y: MV_H / 2,
+			scale: 1,
+			anchor: "center",
+			motion: "none",
+			pixelated: true,
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
+		setSelectedLayerId(layer.id);
+		setPicker({ mode: "image", target: { layerId: layer.id, field: "base" } });
 	};
 
 	const addTextLayer = () => {
@@ -3004,6 +3625,19 @@ export default function MvMaker({
 						</Details>
 					)}
 				</>
+			)}
+
+			{layer.kind === "character" && (
+				<CharacterLayerFields
+					layer={layer}
+					song={song}
+					onUpdate={(patch) =>
+						updateLayer(layer.id, (l) => ({ ...l, ...patch }) as MvLayer)
+					}
+					onPickAsset={(field) =>
+						setPicker({ mode: "image", target: { layerId: layer.id, field } })
+					}
+				/>
 			)}
 
 			{layer.kind === "text" && (
@@ -4737,7 +5371,9 @@ export default function MvMaker({
 				</>
 			)}
 
-			{(layer.kind === "image" || layer.kind === "text") && (
+			{(layer.kind === "image" ||
+				layer.kind === "text" ||
+				layer.kind === "character") && (
 				<Details label="常時の動きを調整する (上下ゆれ・drift等)">
 					<SelectField
 						label="動き"
@@ -4908,6 +5544,7 @@ export default function MvMaker({
 					placeholder="+ レイヤーを追加"
 					options={[
 						{ value: "image", label: "画像" },
+						{ value: "character", label: "キャラクター（瞬き・口パク）" },
 						{ value: "text", label: "文字" },
 						{ value: "visualizer", label: "ビジュアライザ" },
 						{ value: "shape", label: "図形" },
@@ -4918,6 +5555,7 @@ export default function MvMaker({
 					onPick={(v) => {
 						if (v === "template") setTemplatePickerOpen(true);
 						else if (v === "image") addImageLayer();
+						else if (v === "character") addCharacterLayer();
 						else if (v === "text") addTextLayer();
 						else if (v === "visualizer") addVisualizerLayer();
 						else if (v === "shape") addShapeLayer();

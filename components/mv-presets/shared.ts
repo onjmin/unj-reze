@@ -30,7 +30,19 @@ export const DEFAULT_IMAGE_URL = "/icon-192.png";
 
 const ROZE_DIR = "/assets/mv/roze";
 
-/** 1コマ384pxのループGIF由来。どれも同じキャラの別の動き。 */
+/**
+ * 1コマ384pxのループGIF由来。どれも同じキャラの別の動き。
+ *
+ * 注意: `beat-a`〜`g` は目開閉・口開閉が**合成済みの一枚絵**（例: "beat-a" = 目開口閉）。
+ * `MvCharacterLayer`（キャラクター表示レイヤー）が行う「土台＋目/口の別レイヤー合成」とは
+ * 別物なので、character レイヤーの base/eyes/mouth にこれらをそのまま流用しないこと。
+ * 目/口を分離したデフォルト素材が欲しい場合は、MvMakerのキャラクターレイヤー編集で
+ * 束音ロゼ V1.01 の psd
+ * (https://res.cloudinary.com/dbld5kqtz/image/upload/v1786677313/TabaneLozeV101_jnj7yb.psd) の
+ * URLを直接指定できる——psdはブラウザ側で `lib/mv-psd.ts` がその場でパースし、
+ * 目開/閉・口開/閉などのレイヤーをレイヤー一覧から選んで割り当てる（事前のPNG書き出しや
+ * `public/assets/` へのバンドルは不要）。
+ */
 export const ROZE_BEATS = {
 	a: { file: "beat-a", frames: 4 },
 	b: { file: "beat-b", frames: 4 },

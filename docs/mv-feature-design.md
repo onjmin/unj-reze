@@ -37,17 +37,82 @@ MVの時間はすべて `@onjmin/dtm` の再生ステップ（1小節=192ステ�
 
 ---
 
-## 2. レイヤーは7種だけ
+## 2. レイヤーは8種だけ
 
 | 種類 | 何をするか |
 |---|---|
 | `image` | 画像・ドット絵・歩行グラ。`repeat` で1レイヤーのまま何体も並べられる |
+| `character` | キャラクター表示。土台画像＋目（瞬き）・口（口パク）の重ね描き。詳細は下記 |
 | `text` | 文字（縦書き対応） |
 | `visualizer` | `pianoRoll` / `stepGrid` / `rings` / `bars` |
 | `lyrics` | MMLの歌詞トラック(`@@n`)から自動同期、または小節指定の手入力 |
 | `shape` | 音に反応する図形。モジュレータで複雑な動きを作る |
 | `effect` | 画面全体の演出（フラッシュ・反転・ゆれ・ズームパンチ・ストロボ・周辺減光） |
 | `chordBar` | 画面下のコード進行バー |
+
+（ほかに `degree`/`widget`/`beatCounter`/`beatPips`/`beatDigit`/`beatChordLabel` の
+ウィジェット系レイヤーがある。いずれも「拍・コード進行に連動する小さな表示」で、
+このセクションでは代表的な8種だけを挙げている。）
+
+### キャラクター表示レイヤー（`MvCharacterLayer`、瞬き・口パク）
+
+`image` レイヤーは1枚絵か歩行グラのどちらかしか出せず、「瞬きしながら喋るキャラ」を
+1レイヤーで作れなかった。`character` レイヤーは `image` と同じ位置・拡大・motion・
+repeat・flip・frame・entrance/exit の仕組みをそのまま持ちつつ、**土台画像の上に
+目・口のパーツ画像を重ねて描く**（`lib/mv-engine.ts` の `drawCharacterLayer`）。
+
+- `base: MvAssetRef` … 常に描かれる土台画像。必須。
+- `eyes?: { open, closed, blink }` … 瞬き。`open`/`closed` は base と同じ矩形へそのまま
+  重ねる静止画（コマ割りは持たない）。`blink`（`MvBlinkSetting`、型・既定値・
+  スケジューリングは `lib/mv-blink.ts`）は seed 付きの決定論的な発生スケジュール——
+  毎フレーム乱数を振ると同じ位置へシークするたびに瞬きの有無が変わってしまうため、
+  「seedから曲頭基準の発生拍位置を1回だけ計算し、いまの拍位置(`beatPos = step /
+  MV_STEPS_PER_BEAT`)から開閉状態を引く」方式にしてある（`resolveBlinkState`）。
+  間隔（`intervalBeatsMin`/`Max`）・閉じている長さ（`closedBeats`）・2連瞬きの確率
+  （`doubleBlinkChance`、当たると直後にもう一度閉じる瞬きを差し込む）を調整できる。
+- `mouth?: { closed, open, vowels?, lipsync }` … 口パク。`lipsync.mode` で2方式:
+  - `"track"` … 指定トラック(`@n`)の `trackEnergy` がしきい値(`threshold`)を超えている
+    間だけ `open` を出す（超えていなければ `closed`）。
+  - `"vowel"` … 指定した歌詞トラック(`@@n`)の現在発音中の行から、経過割合で文字位置を
+    見積もり（音節ごとの正確なタイミングは持っていない近似）、`lib/mv-vowel.ts` の
+    `estimateVowel`（一般的な五十音表ベースの簡易母音推定。
+    https://rpgen3.github.io/ust2lab/ の考え方を参考にした自前実装で、外部取得はしない）
+    で母音(`MvVowel = "a"|"i"|"u"|"e"|"o"|"n"`)へ落とし、`vowels[母音]` の画像を出す。
+    **未設定の母音は `open`/`closed` へフォールバックする**（`"n"` は口を閉じる方向、
+    それ以外は開く方向）——6種すべて揃えなくても動くようにするため。
+
+**「目開」「目閉」「口開」「口閉」のようなファイル名からの自動関連付けは行わない。**
+`components/mv-presets/shared.ts` の `ROZE_BEATS`（`beat-a`〜`g`）は目/口が
+**合成済みの一枚絵**で、この別レイヤー合成方式とは別物——流用しない。
+
+目/口を分離したデフォルト素材（束音ロゼ V1.01 の psd、
+https://res.cloudinary.com/dbld5kqtz/image/upload/v1786677313/TabaneLozeV101_jnj7yb.psd）は
+**事前にPNGへ書き出して `public/assets/` にバンドルすることはしない**。代わりに、
+`lib/mv-psd.ts`（client-only）が psd URL をブラウザ側で直接 `fetch` し、`ag-psd` でその場で
+パースしてレイヤーをレイヤー名パス（例: `"!目/*開"`。グループは `!`、表情差分レイヤーは `*`
+というアーティスト独自命名。`/` 区切りでネストを表す）ごとの `HTMLCanvasElement` として
+切り出す。個々のレイヤーは `left`/`top` オフセットがズレているため、psd全体と同じ幅・高さの
+canvasへオフセット込みで描き直してから使う。土台（色塗り+線画）のように複数レイヤーを
+1枚に合成したい場合は `resolvePsdBaseImage(url, layerPaths)` に合成したいパスの配列を渡す。
+
+これを asset-ref の新スキーム `psd:<encodeURIComponent(url)>#<path1>|<path2>|...`
+（`lib/asset-ref.ts` の `buildPsdRef`/`parsePsdRef`/`isPsdRef`。`|`区切りで複数レイヤーを
+重ね合成できる）として `MvAssetRef.ref` に持たせる。`lib/mv-engine.ts` の
+`resolveAssetRefImage` が `psd:` 参照かどうかで解決経路を振り分け（psd: なら
+`peekPsdImage`、それ以外は既存の `loadImage`/`peekImage`）、`collectMvPsdRefs` +
+`preloadMvImages` が事前に `preloadPsdRef` で解決しておく。fetch失敗・パース失敗時は
+`console.warn` してそのフレームは何も描かない（既存の画像ロード失敗時と同じ挙動）。
+
+Node実行時（SSR・`pnpm typecheck`/`pnpm lint`・ビルドスクリプト）で `ag-psd` や
+`document`/`HTMLCanvasElement` を評価しないよう、`lib/mv-psd.ts` は関数呼び出し時にのみ
+`ag-psd` を動的importし、`typeof window === "undefined"` なら例外を投げる。この
+モジュールはブラウザ実行時（`useEffect` 等）からのみ呼び出すこと。
+
+MvMaker編集UIでも、目/口それぞれのパーツ画像は必ずユーザーが選ぶ——
+「開いた目」「閉じた目」等のラベルからの自動関連付けはしない。`CharacterLayerFields` に
+psd URL入力欄＋「レイヤー一覧を読み込む」ボタン（`listPsdLayerPaths`）を追加し、
+一覧からパスを選んで各用途（土台/目開/目閉/口開/口閉/母音6種）へ明示的に割り当てる
+（既存の `ContentPicker` による画像投稿/歩行グラ選択とは別経路）。
 
 動きは `MvMotion` の enum から選ぶ（数値キーフレームは無い）。
 時間軸の分岐は「小節番号で区切ったセクション」だけで、レイヤーは表示するセクションIDを持つ。

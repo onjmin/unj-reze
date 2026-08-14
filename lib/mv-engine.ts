@@ -7,7 +7,9 @@
 // 実装を二重化しない）。
 
 import { detectProgression } from "@onjmin/chord-parser";
-import { imageRefToUrl } from "./asset-ref";
+import { imageRefToUrl, isPsdRef } from "./asset-ref";
+import { resolveBlinkState } from "./mv-blink";
+import { peekPsdImage, preloadPsdRef } from "./mv-psd";
 import {
 	chordRootName,
 	chordToneLabel,
@@ -38,10 +40,12 @@ import {
 	MV_STEPS_PER_BEAT,
 	MV_W,
 	type MvAnchor,
+	type MvAssetRef,
 	type MvBeatChordLabelLayer,
 	type MvBeatCounterLayer,
 	type MvBeatDigitLayer,
 	type MvBeatPipsLayer,
+	type MvCharacterLayer,
 	type MvChordBarLayer,
 	type MvChordStep,
 	type MvDegreeLayer,
@@ -80,6 +84,7 @@ import {
 	resolveShapeModulators,
 	sectionAtBar,
 } from "./mv-config";
+import { estimateVowelAtProgress } from "./mv-vowel";
 import {
 	animatedCellInRect,
 	detectStandard,
@@ -374,6 +379,20 @@ export function collectMvImageUrls(manifest: MvManifest): string[] {
 	}
 	for (const layer of manifest.layers) {
 		if (layer.kind === "image") push(layerImageUrl(layer));
+		if (layer.kind === "character") {
+			push(assetRefUrl(layer.base));
+			if (layer.eyes) {
+				push(assetRefUrl(layer.eyes.open));
+				push(assetRefUrl(layer.eyes.closed));
+			}
+			if (layer.mouth) {
+				push(assetRefUrl(layer.mouth.closed));
+				push(assetRefUrl(layer.mouth.open));
+				for (const v of Object.values(layer.mouth.vowels ?? {})) {
+					push(assetRefUrl(v));
+				}
+			}
+		}
 		if (
 			layer.entrance?.style === "particle" ||
 			layer.exit?.style === "particle"
@@ -390,15 +409,47 @@ function stageBgUrl(stage: { bgUrl?: string; bgRef?: string }): string | null {
 	return stage.bgUrl ?? (stage.bgRef ? imageRefToUrl(stage.bgRef) : null);
 }
 
+/** manifest が参照する psd: レイヤー参照(ref文字列そのもの)を列挙する。character レイヤーのみ。 */
+export function collectMvPsdRefs(manifest: MvManifest): string[] {
+	const refs: string[] = [];
+	const push = (ref?: MvAssetRef) => {
+		if (ref && isPsdRef(ref.ref)) refs.push(ref.ref);
+	};
+	for (const layer of manifest.layers) {
+		if (layer.kind !== "character") continue;
+		push(layer.base);
+		if (layer.eyes) {
+			push(layer.eyes.open);
+			push(layer.eyes.closed);
+		}
+		if (layer.mouth) {
+			push(layer.mouth.closed);
+			push(layer.mouth.open);
+			for (const v of Object.values(layer.mouth.vowels ?? {})) push(v);
+		}
+	}
+	return [...new Set(refs)];
+}
+
 /** manifest の画像を全部読み込む。失敗した画像は無視して他を待つ。 */
 export async function preloadMvImages(manifest: MvManifest): Promise<void> {
-	await Promise.all(
-		collectMvImageUrls(manifest).map((u) => loadImage(u).catch(() => null)),
-	);
+	await Promise.all([
+		...collectMvImageUrls(manifest).map((u) => loadImage(u).catch(() => null)),
+		...collectMvPsdRefs(manifest).map((ref) =>
+			preloadPsdRef(ref).catch((err) => {
+				console.warn("[mv] psdレイヤーの読み込みに失敗しました", ref, err);
+			}),
+		),
+	]);
 }
 
 function layerImageUrl(layer: MvImageLayer): string | null {
 	return layer.url ?? imageRefToUrl(layer.ref);
+}
+
+function assetRefUrl(ref: MvAssetRef | undefined): string | null {
+	if (!ref) return null;
+	return ref.url ?? imageRefToUrl(ref.ref);
 }
 
 // ───────────────── フレーム状態 ─────────────────
@@ -830,7 +881,7 @@ export function layerHitRect(
 	if (layer.kind === "visualizer") {
 		return { x: layer.rect.x, y: layer.rect.y, w: layer.rect.w, h: layer.rect.h };
 	}
-	if (layer.kind === "image") {
+	if (layer.kind === "image" || layer.kind === "character") {
 		const s = (layer.scale ?? 1) * 80;
 		return { x: layer.x - s / 2, y: layer.y - s / 2, w: s, h: s };
 	}
@@ -1681,6 +1732,9 @@ function drawLayer(d: DrawCtx, layer: MvLayer): void {
 	switch (layer.kind) {
 		case "image":
 			drawImageLayer(d, layer);
+			break;
+		case "character":
+			drawCharacterLayer(d, layer);
 			break;
 		case "text":
 			drawTextLayer(d, layer);
@@ -2907,6 +2961,189 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 				h,
 			);
 		}
+	}
+
+	ctx.globalAlpha = baseAlpha;
+	ctx.imageSmoothingEnabled = prevSmoothing;
+}
+
+// ───────────────── キャラクターレイヤー(瞬き・口パク) ─────────────────
+
+/**
+ * base/eyes/mouth の asset-ref を「いま描画に使える画像ソース」へ解決する。
+ * psd: 参照は lib/mv-psd.ts が事前解決した canvas(preloadPsdRef→peekPsdImage、同期)を、
+ * それ以外は既存の walk-sprite.ts の画像キャッシュ(loadImage→peekImage、同期)を見る。
+ * どちらも「事前ロードが済んでいなければ null」――描画ループはpollingで待つのではなく、
+ * このフレームは何も描かず次フレームで再試行する（画像ロード失敗時の既存挙動と同じ）。
+ */
+function resolveAssetRefImage(
+	ref: MvAssetRef | undefined,
+): CanvasImageSource | null {
+	if (!ref) return null;
+	if (isPsdRef(ref.ref)) {
+		const canvas = peekPsdImage(ref.ref);
+		return canvas && canvas.width > 0 ? canvas : null;
+	}
+	const url = assetRefUrl(ref);
+	if (!url) return null;
+	const img = peekImage(url);
+	return img && img.naturalWidth > 0 ? img : null;
+}
+
+/** CanvasImageSource(HTMLImageElement/HTMLCanvasElement)の実寸。 */
+function canvasImageSize(src: CanvasImageSource): { w: number; h: number } {
+	if (src instanceof HTMLImageElement) {
+		return { w: src.naturalWidth, h: src.naturalHeight };
+	}
+	if (src instanceof HTMLCanvasElement) {
+		return { w: src.width, h: src.height };
+	}
+	const anySrc = src as { width?: number; height?: number };
+	return { w: anySrc.width ?? 0, h: anySrc.height ?? 0 };
+}
+
+/** 現在の目の開閉状態に対応する asset-ref。`eyes` 未設定なら null（重ね描きしない）。 */
+function resolveEyeRef(
+	layer: MvCharacterLayer,
+	d: DrawCtx,
+): MvAssetRef | null {
+	const eyes = layer.eyes;
+	if (!eyes) return null;
+	const beatPos = d.step / MV_STEPS_PER_BEAT;
+	const state = resolveBlinkState(eyes.blink, beatPos);
+	return state === "closed" ? eyes.closed : eyes.open;
+}
+
+/** 歌詞トラックの現在発音中とおぼしき行を、行の中の経過割合つきで返す。 */
+function activeLyricLineProgress(
+	d: DrawCtx,
+	trackId: number,
+): { line: MvLyricLine; progress: number } | null {
+	const line = d.song.lyricLines.find(
+		(l) =>
+			l.trackId === trackId &&
+			d.bar >= l.bar &&
+			d.bar < (l.endBar ?? l.bar + 0.01),
+	);
+	if (!line) return null;
+	const span = Math.max(0.001, (line.endBar ?? line.bar) - line.bar);
+	return { line, progress: (d.bar - line.bar) / span };
+}
+
+/** 現在の口の開閉/母音状態に対応する asset-ref。`mouth` 未設定なら null（重ね描きしない）。 */
+function resolveMouthRef(layer: MvCharacterLayer, d: DrawCtx): MvAssetRef | null {
+	const mouth = layer.mouth;
+	if (!mouth) return null;
+	if (mouth.lipsync.mode === "track") {
+		const energy = trackEnergy(d.song, d.step, mouth.lipsync.trackId);
+		const threshold = mouth.lipsync.threshold ?? 0.12;
+		return energy > threshold ? mouth.open : mouth.closed;
+	}
+	// vowel モード: 歌詞トラックから現在発音中の1文字を推定して母音へ落とす
+	const active = activeLyricLineProgress(d, mouth.lipsync.trackId);
+	if (!active) return mouth.closed;
+	const vowel = estimateVowelAtProgress(active.line.text, active.progress);
+	const vowelRef = mouth.vowels?.[vowel];
+	if (vowelRef) return vowelRef;
+	// 個別素材が無い母音は開/閉へフォールバック（"n"=閉じる、それ以外=開く）
+	return vowel === "n" ? mouth.closed : mouth.open;
+}
+
+/**
+ * キャラクター表示レイヤー。`drawImageLayer` と同じ変換(位置・拡大・motion・repeat・
+ * flip・frame)で土台画像を描いたあと、同じ矩形へ目/口の現在の画像を重ねる。
+ */
+function drawCharacterLayer(d: DrawCtx, layer: MvCharacterLayer): void {
+	const baseImg = resolveAssetRefImage(layer.base);
+	if (!baseImg) return;
+	const baseSize = canvasImageSize(baseImg);
+	if (baseSize.w === 0 || baseSize.h === 0) return;
+
+	const eyeRef = resolveEyeRef(layer, d);
+	const eyeImg = eyeRef ? resolveAssetRefImage(eyeRef) : null;
+	const mouthRef = resolveMouthRef(layer, d);
+	const mouthImg = mouthRef ? resolveAssetRefImage(mouthRef) : null;
+
+	const { ctx } = d;
+
+	let src: SpriteRect = {
+		sx: 0,
+		sy: 0,
+		sw: baseSize.w,
+		sh: baseSize.h,
+	};
+	const walkSpeed = mvWalkSpeed(d.manifest);
+	if (layer.walk) {
+		const crop = layer.walk.crop ?? [0, 0, baseSize.w, baseSize.h];
+		src = spriteFrameRect(layer.walk, crop, d.timeSec, d.song.bpm, walkSpeed);
+	}
+
+	const scale = layer.scale || 1;
+	const motion = applyMotion(
+		d,
+		layer.motion,
+		layer.motionAmount ?? 0,
+		src.sw * scale,
+	);
+	const enter = entranceState(d, layer, layer.entrance);
+	if (enter.alpha <= 0.004) return;
+	const rep = layer.repeat;
+	const copies = Math.max(1, Math.min(64, Math.round(rep?.count ?? 1)));
+	const baseAlpha = ctx.globalAlpha;
+
+	const prevSmoothing = ctx.imageSmoothingEnabled;
+	if (layer.pixelated) ctx.imageSmoothingEnabled = false;
+
+	for (let i = 0; i < copies; i++) {
+		const copyScale = scale + (rep?.scaleStep ?? 0) * i;
+		if (copyScale <= 0) continue;
+		const w = src.sw * copyScale * motion.scale;
+		const h = src.sh * copyScale * motion.scale;
+		const [ax, ay] = anchorOffset(layer.anchor, w, h);
+		const x = layer.x + ax + motion.dx + enter.dx + (rep?.dx ?? 0) * i;
+		const y = layer.y + ay + motion.dy + enter.dy + (rep?.dy ?? 0) * i;
+
+		const alpha = (baseAlpha + (rep?.alphaStep ?? 0) * i) * enter.alpha;
+		if (alpha <= 0.004) continue;
+		ctx.globalAlpha = clamp01(alpha);
+
+		if (layer.frame) {
+			const p = layer.frame.padding;
+			ctx.strokeStyle = layer.frame.color;
+			ctx.lineWidth = layer.frame.width;
+			ctx.strokeRect(
+				Math.round(x - p) + 0.5,
+				Math.round(y - p) + 0.5,
+				Math.round(w + p * 2),
+				Math.round(h + p * 2),
+			);
+		}
+
+		ctx.save();
+		ctx.translate(x + w / 2, y + h / 2);
+		ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+		const dw = w;
+		const dh = h;
+		ctx.drawImage(
+			baseImg,
+			src.sx,
+			src.sy,
+			src.sw,
+			src.sh,
+			-dw / 2,
+			-dh / 2,
+			dw,
+			dh,
+		);
+		// 目・口は土台と同じ矩形（等倍・全体）へ重ねる。土台がスプライトシートの1コマを
+		// 切り出していても、パーツ画像はその1コマぶんの静止画として同じ大きさで重なる。
+		if (eyeImg) {
+			ctx.drawImage(eyeImg, -dw / 2, -dh / 2, dw, dh);
+		}
+		if (mouthImg) {
+			ctx.drawImage(mouthImg, -dw / 2, -dh / 2, dw, dh);
+		}
+		ctx.restore();
 	}
 
 	ctx.globalAlpha = baseAlpha;
