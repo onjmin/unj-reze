@@ -2668,12 +2668,9 @@ export function generateArrangementForGroup(
 	 */
 	const stateShapeRipple = (from: number, to: number): MvShapeLayer[] => {
 		const span = to - from;
-		const pulseCount = pick([2, 3, 3, 4]);
-		const pulseBars = Math.max(0.01, (durationBars * span) / pulseCount);
-		const out: MvShapeLayer[] = [];
-		for (let i = 0; i < pulseCount; i++) {
-			const phase = roundTo(at(from) + (i / pulseCount) * pulseBars, 4);
-			out.push({
+		const pulseBars = Math.max(0.01, durationBars * span);
+		return [
+			{
 				...common,
 				form: "path",
 				id: mvUid("shp"),
@@ -2686,16 +2683,16 @@ export function generateArrangementForGroup(
 				path: emblemPath,
 				barRange: [at(from), at(to)],
 				modulators: [
-					// once を付けない＝区間の中で pulseBars ごとに繰り返す。
 					{
 						source: "phrase",
 						target: "size",
 						op: "sub",
 						amount: roundTo(baseSize * 0.65, 1),
 						bars: pulseBars,
-						phaseOffset: phase,
+						phaseOffset: at(from),
 						symmetric: false,
 						curve: 2,
+						once: true,
 					},
 					{
 						source: "phrase",
@@ -2703,14 +2700,14 @@ export function generateArrangementForGroup(
 						op: "mul",
 						amount: 1,
 						bars: pulseBars,
-						phaseOffset: phase,
+						phaseOffset: at(from),
 						symmetric: false,
 						curve: 1,
+						once: true,
 					},
 				],
-			});
-		}
-		return out;
+			},
+		];
 	};
 
 	/**

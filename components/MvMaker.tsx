@@ -6412,6 +6412,16 @@ export default function MvMaker({
 																		l.barRange[0] + shift,
 																		l.barRange[1] + shift,
 																	] as [number, number],
+																	modulators: l.modulators?.map((mod) => {
+																		if (mod.source === "phrase") {
+																			return { ...mod, phaseOffset: (mod.phaseOffset ?? 0) + shift };
+																		}
+																		if (mod.source === "beat") {
+																			return { ...mod, phaseOffset: (mod.phaseOffset ?? 0) + shift * 4 };
+																		}
+																		return mod;
+																	}),
+																	ripplePhaseOffset: l.ripplePhaseOffset !== undefined ? l.ripplePhaseOffset + shift * 4 : undefined,
 																}
 															: l,
 													),
