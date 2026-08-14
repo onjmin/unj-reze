@@ -7880,112 +7880,114 @@ export default function MvMaker({
 						</div>
 					</div>
 				)}
-				<div className="flex shrink-0 items-center gap-1">
+				<div className="ml-auto flex shrink-0 items-center gap-1.5">
+					<div className="flex shrink-0 items-center gap-1">
+						<button
+							onClick={undoEdit}
+							disabled={undoDepth === 0}
+							aria-label="元に戻す"
+							title={`元に戻す（Ctrl+Z）${undoDepth ? ` ${undoDepth}` : ""}`}
+							className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
+						>
+							<Undo2 size={14} />
+						</button>
+						<button
+							onClick={redoEdit}
+							disabled={redoDepth === 0}
+							aria-label="やり直す"
+							title={`やり直す（Ctrl+Y）${redoDepth ? ` ${redoDepth}` : ""}`}
+							className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
+						>
+							<Redo2 size={14} />
+						</button>
+					</div>
+					<div className="shrink-0">
+						<VolumeControl />
+					</div>
+					{/* 設定（歯車）：履歴・スナップショット／エクスポート・インポート／MV切り替え・まっさら */}
+					<div className="relative shrink-0" ref={settingsRef}>
+						<button
+							onClick={() => setSettingsOpen((v) => !v)}
+							aria-label="設定"
+							title="設定"
+							className={`grid h-8 w-8 place-items-center rounded-lg transition-colors ${settingsOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
+						>
+							<Settings size={14} />
+						</button>
+						<input
+							ref={importFileRef}
+							type="file"
+							accept=".json"
+							className="hidden"
+							onChange={handleImport}
+						/>
+						{settingsOpen && (
+							<div className="absolute right-0 top-full z-[100] mt-1 w-52 space-y-1 border border-gray-700 bg-[#1a1a2e] p-2 shadow-2xl">
+								<button
+									onClick={() => {
+										setShowHistory(true);
+										setSettingsOpen(false);
+									}}
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+								>
+									<History size={13} />
+									履歴・スナップショット
+								</button>
+								<div className="my-1 border-t border-gray-700" />
+								<button
+									onClick={() => {
+										handleExport();
+										setSettingsOpen(false);
+									}}
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+								>
+									<Download size={13} />
+									データをエクスポート (.json)
+								</button>
+								<button
+									onClick={() => {
+										handleExportMp4();
+										setSettingsOpen(false);
+									}}
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+								>
+									<Film size={13} />
+									MP4動画としてエクスポート (.mp4)
+								</button>
+								<button
+									onClick={() => {
+										importFileRef.current?.click();
+										setSettingsOpen(false);
+									}}
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+								>
+									<Upload size={13} />
+									データをインポート (.json)
+								</button>
+								<div className="my-1 border-t border-gray-700" />
+								<button
+									onClick={() => {
+										setSwitchOpen(true);
+										setSettingsOpen(false);
+									}}
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+								>
+									<Clapperboard size={13} />
+									MVを切り替え・まっさらをする
+								</button>
+							</div>
+						)}
+					</div>
 					<button
-						onClick={undoEdit}
-						disabled={undoDepth === 0}
-						aria-label="元に戻す"
-						title={`元に戻す（Ctrl+Z）${undoDepth ? ` ${undoDepth}` : ""}`}
-						className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
+						onClick={handleSave}
+						disabled={!canSave}
+						aria-label={isEditing ? "再編集" : "投稿"}
+						title={isEditing ? "再編集" : "投稿"}
+						className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
 					>
-						<Undo2 size={14} />
-					</button>
-					<button
-						onClick={redoEdit}
-						disabled={redoDepth === 0}
-						aria-label="やり直す"
-						title={`やり直す（Ctrl+Y）${redoDepth ? ` ${redoDepth}` : ""}`}
-						className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
-					>
-						<Redo2 size={14} />
+						<Clapperboard size={14} />
 					</button>
 				</div>
-				<div className="shrink-0">
-					<VolumeControl />
-				</div>
-				{/* 設定（歯車）：履歴・スナップショット／エクスポート・インポート／MV切り替え・まっさら */}
-				<div className="relative shrink-0" ref={settingsRef}>
-					<button
-						onClick={() => setSettingsOpen((v) => !v)}
-						aria-label="設定"
-						title="設定"
-						className={`grid h-8 w-8 place-items-center rounded-lg transition-colors ${settingsOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
-					>
-						<Settings size={14} />
-					</button>
-					<input
-						ref={importFileRef}
-						type="file"
-						accept=".json"
-						className="hidden"
-						onChange={handleImport}
-					/>
-					{settingsOpen && (
-						<div className="absolute right-0 top-full z-[100] mt-1 w-52 space-y-1 border border-gray-700 bg-[#1a1a2e] p-2 shadow-2xl">
-							<button
-								onClick={() => {
-									setShowHistory(true);
-									setSettingsOpen(false);
-								}}
-								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
-							>
-								<History size={13} />
-								履歴・スナップショット
-							</button>
-							<div className="my-1 border-t border-gray-700" />
-							<button
-								onClick={() => {
-									handleExport();
-									setSettingsOpen(false);
-								}}
-								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
-							>
-								<Download size={13} />
-								データをエクスポート (.json)
-							</button>
-							<button
-								onClick={() => {
-									handleExportMp4();
-									setSettingsOpen(false);
-								}}
-								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
-							>
-								<Film size={13} />
-								MP4動画としてエクスポート (.mp4)
-							</button>
-							<button
-								onClick={() => {
-									importFileRef.current?.click();
-									setSettingsOpen(false);
-								}}
-								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
-							>
-								<Upload size={13} />
-								データをインポート (.json)
-							</button>
-							<div className="my-1 border-t border-gray-700" />
-							<button
-								onClick={() => {
-									setSwitchOpen(true);
-									setSettingsOpen(false);
-								}}
-								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
-							>
-								<Clapperboard size={13} />
-								MVを切り替え・まっさらにする
-							</button>
-						</div>
-					)}
-				</div>
-				<button
-					onClick={handleSave}
-					disabled={!canSave}
-					aria-label={isEditing ? "再編集" : "投稿"}
-					title={isEditing ? "再編集" : "投稿"}
-					className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
-				>
-					<Clapperboard size={14} />
-				</button>
 			</div>
 
 			{hasAutosave && (
