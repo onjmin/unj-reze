@@ -35,21 +35,19 @@ const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSp
  * `triggerBar` は常に0で生成しているので（実際の割り込み位置は後から編集できる）、
  * ここでは `groups` を渡さず——`isLayerVisible` はグループの連動判定を素通りし、
  * アレンジ側のレイヤーが常に見える——`beats` 拍ぶんで単純にループさせるだけでいい。
+ *
+ * `segments` は `generateArrangementForGroup` が実際に生成した区間（ラベルと
+ * 0..1の位置）——構成（セグメントの個数・種類・配分）は毎回変わるため、
+ * 固定の幕名を決め打ちで持たず、生成結果をそのまま読んで表示する。
  */
-/** 4幕それぞれのラベルと、進捗バー上での区間(0..1)。 */
-const ARRANGEMENT_ACTS = [
-	{ label: "第1幕：タメ→暗転", from: 0, to: 0.25 },
-	{ label: "第2幕：エンブレム連続フラッシュ", from: 0.25, to: 0.5 },
-	{ label: "第3幕：対角の角括弧", from: 0.5, to: 0.75 },
-	{ label: "第4幕：グリフ同時多発", from: 0.75, to: 1 },
-];
-
 function ArrangementLivePreview({
 	layers,
+	segments,
 	beats,
 	bpm,
 }: {
 	layers: MvShapeLayer[];
+	segments: { label: string; from: number; to: number }[];
 	beats: number;
 	bpm?: number;
 }) {
@@ -102,18 +100,15 @@ function ArrangementLivePreview({
 
 			const frac = loopSec > 0 ? elapsed / loopSec : 0;
 			if (playheadRef.current) playheadRef.current.style.left = `${frac * 100}%`;
-			const actIndex = Math.min(
-				ARRANGEMENT_ACTS.length - 1,
-				Math.floor(frac * ARRANGEMENT_ACTS.length),
-			);
-			if (actLabelRef.current) {
-				actLabelRef.current.textContent = ARRANGEMENT_ACTS[actIndex].label;
+			const current = segments.find((s) => frac >= s.from && frac < s.to) ?? segments[0];
+			if (actLabelRef.current && current) {
+				actLabelRef.current.textContent = current.label;
 			}
 			raf = requestAnimationFrame(loop);
 		};
 		raf = requestAnimationFrame(loop);
 		return () => cancelAnimationFrame(raf);
-	}, [layers, beats, bpm]);
+	}, [layers, segments, beats, bpm]);
 
 	// バー上のクリック/ドラッグで頭出し。時計の原点(startRef)を
 	// 「その位置に相当する経過時間ぶん過去」へずらすだけで、以降は普通に
@@ -154,11 +149,11 @@ function ArrangementLivePreview({
 				aria-label="再生位置をシーク"
 			>
 				<div className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
-					{ARRANGEMENT_ACTS.map((act) => (
+					{segments.map((seg, i) => (
 						<div
-							key={act.label}
+							key={`${seg.label}-${i}`}
 							className="h-full border-r border-gray-900 bg-purple-600/40 last:border-r-0"
-							style={{ width: `${(act.to - act.from) * 100}%` }}
+							style={{ width: `${(seg.to - seg.from) * 100}%` }}
 						/>
 					))}
 				</div>
@@ -169,7 +164,7 @@ function ArrangementLivePreview({
 				/>
 			</button>
 			<span ref={actLabelRef} className="block text-[10px] text-gray-400">
-				第1幕：タメ→暗転
+				{segments[0]?.label ?? ""}
 			</span>
 		</div>
 	);
@@ -271,7 +266,12 @@ export default function MvArrangementModal({
 				{/* プレビューはスクロール外＝常に画面内固定（生成しなおすたびに毎回スクロールして
 					戻るのを避けるため、`MvShapeMotionModal` と同じ構成にしてある）。 */}
 				<div className="shrink-0 space-y-2 border-b border-gray-800 p-3">
-					<ArrangementLivePreview layers={result.layers} beats={beats} bpm={bpm} />
+					<ArrangementLivePreview
+						layers={result.layers}
+						segments={result.segments}
+						beats={beats}
+						bpm={bpm}
+					/>
 					<div className="rounded border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-gray-300 leading-relaxed">
 						アレンジ元のグループを加工して、割り込み用の変化を作ります。
 						第4幕のグリフは決め打ちの型リストではなく、生成アルゴリズムが毎回

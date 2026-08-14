@@ -320,8 +320,13 @@ function buildBeatCombos(baseBeats: number): BeatCombo[] {
 export const DEFAULT_BEAT_COMBO_DENSITY = 0.5;
 
 /**
- * 密度(0..1)ぶんだけ組み合わせを間引く。1個も残らなかった場合はベースの表拍
- * だけを保証で残す（間引きすぎて「何も動かないグループ」になるのを防ぐ）。
+ * 密度(0..1)ぶんだけ組み合わせを間引く。
+ *
+ * 「指定したベースの拍（表拍）は必ず抽選される」を保証するため、
+ * `periodBeats===baseBeats && phaseBeats===0` の組だけは密度のふるいに掛けず
+ * 常に残す——これが無いと、ベースを1拍に指定しても密度次第でその1拍そのものが
+ * 一度も選ばれず、8拍や32拍だけのグループになりうるという事故があった。
+ * それ以外（ベース自身の裏拍も含む）はこれまでどおり密度で間引く。
  */
 function thinBeatCombos(
 	combos: BeatCombo[],
@@ -329,9 +334,12 @@ function thinBeatCombos(
 	baseBeats: number,
 ): BeatCombo[] {
 	const d = Math.min(1, Math.max(0, density));
-	const kept = combos.filter(() => chance(d));
-	if (kept.length > 0) return kept;
-	return [{ periodBeats: baseBeats, phaseBeats: 0 }];
+	const isGuaranteed = (c: BeatCombo) =>
+		c.periodBeats === baseBeats && c.phaseBeats === 0;
+	const kept = combos.filter((c) => isGuaranteed(c) || chance(d));
+	if (kept.some(isGuaranteed)) return kept;
+	// baseBeats がそもそも候補リストに無かった（呼び出し側の異常値）場合の保険。
+	return [{ periodBeats: baseBeats, phaseBeats: 0 }, ...kept];
 }
 
 function pick<T>(arr: readonly T[]): T {
@@ -558,8 +566,15 @@ interface GroupPlan {
  * 必ず全種類が最低1回は使われることを保証するため、確率抽選ではなく巡回にしてある）。
  */
 function makeComboCycler(combos: BeatCombo[]): () => BeatCombo {
+	// `buildBeatCombos` は周期の遅い順（1,2,4,8,16,32拍）に並んでいる。多くの
+	// 構図は要素数が2〜6個程度しか無く、順番のまま先頭から消費すると常に
+	// 速い周期(1〜4拍)だけが使われ、16拍・32拍は「プールには入っているのに
+	// 要素数が足りず一度も引かれない」——密度を100%にしても遅い周期が
+	// 実質出現しないバグになっていた。生成のたびにシャッフルしてから巡回する
+	// ことで、要素数が少なくても遅い周期に当たる機会を残す。
+	const shuffled = [...combos].sort(() => Math.random() - 0.5);
 	let i = 0;
-	return () => combos[i++ % combos.length];
+	return () => shuffled[i++ % shuffled.length];
 }
 
 /** コマ列を k コマぶん回す。脇役を主役と違うコマから始めるのに使う。 */
@@ -1610,6 +1625,37 @@ function sizePopModulator(fullSize: number, phaseOffset: number, bars: number, c
 	};
 }
 
+/** 区間の頭で不透明度0→1へフェードインする一発もの（once固定）。 */
+function entryFadeInModulator(startAtBar: number, bars: number): MvModulator {
+	return {
+		source: "phrase",
+		target: "opacity",
+		op: "sub",
+		amount: 1,
+		bars: Math.max(0.01, bars),
+		phaseOffset: startAtBar,
+		symmetric: false,
+		curve: 1,
+		once: true,
+	};
+}
+
+/** 区間の終わりで不透明度1→0へフェードアウトする一発もの（once固定）。 */
+function exitFadeOutModulator(endAtBar: number, bars: number): MvModulator {
+	const b = Math.max(0.01, bars);
+	return {
+		source: "phrase",
+		target: "opacity",
+		op: "mul",
+		amount: 1,
+		bars: b,
+		phaseOffset: endAtBar - b,
+		symmetric: false,
+		curve: 1,
+		once: true,
+	};
+}
+
 /**
  * 第4幕グリフの内部生成方式。UIには出さず、`generateArrangementForGroup` が
  * 毎回この中からアルゴリズムで（重み付き）ランダムに選ぶ——「有限リストから
@@ -1657,27 +1703,33 @@ const GROWTH_SPEED_FRACTION: Record<NonNullable<ArrangementGenOptions["growthSpe
  * 既存の図形グループのレイヤー配列を元にして、展開の変化に使える
  * 「特殊アレンジ」のレイヤー配列を生成する。
  *
- * ── 設計は参考動画（チョウチン少女）の割り込み区間（実測1.93〜3.63秒≒4拍）を
- * 30fpsで1フレームずつ定量解析した結果に基づく。観測された台本は4幕構成：
+ * ── 骨格は「オープナー」＋「セグメント2〜4個」の2部構成。
  *
- *   第1幕 [0〜25%]   小さな塗り四角だけが中央に静止（長めのタメ）→ 末尾で完全暗転
- *                    （実測: 73x73の塗り四角が約0.15秒静止 → 白画素0が約0.1秒）
- *   第2幕 [25〜50%]  太い線幅の中央エンブレムが点滅的に2回フラッシュして減衰
- *                    （実測: 白画素17.6k→19.4kと通常最大14.8kを大きく超える太さ）
- *   第3幕 [50〜75%]  対角のかぎ括弧＋中央の塗り四角（バウンディングボックスが
- *                    195x179→247x201と、初めて縦方向へはみ出し始める）
- *   第4幕 [75〜100%] 画面のあちこち（上下左右、bbox 345x261≒画面の9割）に
- *                    塗り主体の別語彙グリフ（バーチャート・縞箱・目盛り）が
- *                    同時多発的に出る → 窓が終わると通常ループへ自動復帰
+ *   オープナー [0〜25%固定]  小さな塗り四角だけが中央に静止（長めのタメ）→
+ *     末尾で完全暗転。参考動画（チョウチン少女）の実測（73x73の塗り四角が
+ *     約0.15秒静止→白画素0が約0.1秒）に基づく——アレンジ元からの切り替わりを
+ *     ハードカットにしないための構造上の必要物なので、ここだけ固定。
  *
- * 幕の骨格は固定（毎回この順で流れる）だが、各幕の中身——グリフの形・本数・
- * 配置・サイズ——は呼ぶたびに乱数で振れる。以前のランダムなイベント抽選では
- * この台本が運任せでしか出なかったため、構成そのものを台本化した。
+ *   セグメント [25〜100%を可変分割]  `SEGMENT_POOL`（対角の角括弧／グリフ同時
+ *     多発／波紋／回転しながら成長）から**毎回2〜4個をシャッフルして選び**、
+ *     残り時間もランダムな比率で配分する。以前は「エンブレム連続フラッシュ→
+ *     角括弧→グリフ同時多発」の3つが毎回同じ順・同じ配分で固定だった
+ *     （＝幕の構成がワンパターン、との指摘）。エンブレムの連続フラッシュ自体も
+ *     不要という指摘で削除し、代わりに波紋・回転成長を新設して語彙を増やした。
+ *     各セグメントは自前で入り(フェードイン/ポップイン)と出(フェードアウト)を
+ *     持つので、`fadeBridge`のような隣接セグメント専用の橋渡しは不要になった
+ *     （セグメントの中身がヘテロなので、形をまたいだクロスモーフィングよりも
+ *     単純な透明度フェードのほうが破綻なく組める）。
  *
  * `sourceGroupId` は割り込み対象（アレンジ元）のグループID。返す `group.arrangement`
  * にそのまま埋め込むので、エンジン側 (`isLayerVisible`) が「アレンジ元を止めて隠す
- * ／アレンジ側を表示する」を自動で連動させられる。第1幕末尾の暗転は「その区間に
- * レイヤーを1枚も置かない」だけで実現している（アレンジ元は窓の間ずっと隠れている）。
+ * ／アレンジ側を表示する」を自動で連動させられる。オープナー末尾の暗転は「その
+ * 区間にレイヤーを1枚も置かない」だけで実現している（アレンジ元は窓の間ずっと
+ * 隠れている）。
+ *
+ * 戻り値の `segments` は実際に生成された区間の位置とラベル（0..1の窓内位置）。
+ * 構成が毎回変わるため、プレビュー側（`MvArrangementModal`）はこれを読んで
+ * 「今どの区間か」を表示する——固定の幕名を決め打ちで持たない。
  */
 export function generateArrangementForGroup(
 	existingLayers: MvShapeLayer[],
@@ -1685,7 +1737,11 @@ export function generateArrangementForGroup(
 	sourceGroupId: string,
 	trigger?: { triggerBar?: number; endBar?: number },
 	genOptions?: ArrangementGenOptions,
-): { group: MvLayerGroup; layers: MvShapeLayer[] } {
+): {
+	group: MvLayerGroup;
+	layers: MvShapeLayer[];
+	segments: { label: string; from: number; to: number }[];
+} {
 	const centerPop = genOptions?.centerPop ?? true;
 	const growthFraction = GROWTH_SPEED_FRACTION[genOptions?.growthSpeed ?? "normal"];
 	const newGroupId = mvUid("grp");
@@ -1768,78 +1824,45 @@ export function generateArrangementForGroup(
 		});
 	}
 
-	// ── 第2幕: 太い中央エンブレムの2連フラッシュ ──
 	// アレンジ元がコマ送りを持っていれば、そのいちばん密なコマ（paths[0]）を使う。
+	// 「回転しながら成長」セグメントで再利用する（以前はエンブレム連続フラッシュ
+	// 専用だったが、そのセグメント自体を削除したので流用先をここへ変えた）。
 	const emblemPath =
 		shapeSources.find((l) => l.iconCycle && l.iconCycle.paths.length > 0)
 			?.iconCycle?.paths[0] ??
 		shapeSources.find((l) => l.path)?.path ??
 		`${rectPath(12, 12, 88, 88)} ${rectPath(34, 34, 66, 66)}`;
-	const pulseCount = pick([2, 2, 3]);
-	const pulseSpan = 0.25 / pulseCount;
-	for (let i = 0; i < pulseCount; i++) {
-		const from = 0.25 + pulseSpan * i;
-		const pulseSize = roundTo(baseSize * randRange(0.95, 1.1), 1);
-		const pulseBars = Math.max(0.05, durationBars * pulseSpan);
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: cx,
-			y: cy,
-			z: nextZ(),
-			filled: false,
-			thickness: roundTo(baseThickness, 1),
-			size: pulseSize,
-			path: emblemPath,
-			barRange: [at(from), at(from + pulseSpan)],
-			// 幕の頭で太さが最大（通常の2.5〜3.5倍）→減衰。実測の「白画素が通常最大を
-			// 大きく超えて出現し、すぐ収縮する」に対応する。phrase の位相は
-			// 絶対小節で指定するので、この幕の開始小節をそのまま渡す。
-			modulators: [
-				{
-					source: "phrase",
-					target: "thickness",
-					op: "add",
-					amount: roundTo(baseThickness * randRange(1.5, 2.5), 1),
-					bars: pulseBars,
-					phaseOffset: at(from),
-					curve: pick([3, 4]),
-					once: true,
-				},
-				// 各フラッシュも「中心から湧く」ポップインを併用（各パルスは短命な
-				// 単発図形なので、部品アンカー成長ではなく中心スケールで問題ない）。
-				...(centerPop ? [sizePopModulator(pulseSize, at(from), pulseBars)] : []),
-			],
-		});
-	}
 
-	// ── 第3幕: 対角のかぎ括弧＋中央の塗り四角 ──
-	const diagDx = randRange(70, 100);
-	const diagDy = randRange(45, 70);
-	const act3BracketBars = Math.max(0.05, durationBars * 0.15);
-	for (const flip of [false, true]) {
-		const bracketSize = randRange(50, 70);
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: roundTo(cx + (flip ? diagDx : -diagDx), 1),
-			y: roundTo(cy + (flip ? diagDy : -diagDy), 1),
-			z: nextZ(),
-			filled: false,
-			thickness: roundTo(baseThickness * randRange(0.5, 0.8), 1),
-			size: roundTo(bracketSize, 1),
-			path: cornerBracketGlyph(flip),
-			barRange: [at(0.5), at(0.75)],
-			modulators: centerPop
-				? [sizePopModulator(bracketSize, at(0.5), act3BracketBars)]
-				: [],
-		});
-	}
-	{
-		const act3SquareSize = roundTo(baseSize * randRange(0.3, 0.4), 1);
-		layers.push({
+	// ── 対角の角括弧＋中央の塗り四角 ──
+	const buildBrackets = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = Math.max(0.02, durationBars * span * 0.15);
+		const exitBars = Math.max(0.02, durationBars * span * 0.15);
+		const diagDx = randRange(70, 100);
+		const diagDy = randRange(45, 70);
+		const out: MvShapeLayer[] = [];
+		for (const flip of [false, true]) {
+			const bracketSize = randRange(50, 70);
+			out.push({
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: roundTo(cx + (flip ? diagDx : -diagDx), 1),
+				y: roundTo(cy + (flip ? diagDy : -diagDy), 1),
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.5, 0.8), 1),
+				size: roundTo(bracketSize, 1),
+				path: cornerBracketGlyph(flip),
+				barRange: [at(from), at(to)],
+				modulators: [
+					...(centerPop ? [sizePopModulator(bracketSize, at(from), entryBars)] : []),
+					exitFadeOutModulator(at(to), exitBars),
+				],
+			});
+		}
+		const squareSize = roundTo(baseSize * randRange(0.3, 0.4), 1);
+		out.push({
 			...common,
 			form: "path",
 			id: mvUid("shp"),
@@ -1848,9 +1871,9 @@ export function generateArrangementForGroup(
 			z: nextZ(),
 			filled: true,
 			thickness: 2,
-			size: act3SquareSize,
+			size: squareSize,
 			path: rectPath(25, 25, 75, 75),
-			barRange: [at(0.5), at(0.75)],
+			barRange: [at(from), at(to)],
 			// ゆっくり暗く沈む（実測: 明灰→暗灰→黒と段階的に落ちる塗り四角）。
 			modulators: [
 				{
@@ -1858,111 +1881,19 @@ export function generateArrangementForGroup(
 					target: "opacity",
 					op: "mul",
 					amount: 1,
-					bars: Math.max(0.05, durationBars * 0.25),
-					phaseOffset: at(0.5),
+					bars: Math.max(0.05, durationBars * span * 0.6),
+					phaseOffset: at(from),
 					curve: 1.2,
 					once: true,
 				},
-				...(centerPop
-					? [sizePopModulator(act3SquareSize, at(0.5), act3BracketBars)]
-					: []),
+				...(centerPop ? [sizePopModulator(squareSize, at(from), entryBars)] : []),
+				exitFadeOutModulator(at(to), exitBars),
 			],
 		});
-	}
-
-	// ── 幕と幕の境目をつなぐクロスフェード ──
-	// 幕はそれぞれ別形状のレイヤーを barRange で頭出しするだけなので、境目では
-	// 前の幕のレイヤーが barRange 終了で消えると同時に次の幕のレイヤーが
-	// barRange 開始で現れる、という完全なハードカットになる（暗転を挟む
-	// 第1幕→第2幕の境目は元々そういう仕様で問題ないが、第2幕→第3幕・
-	// 第3幕→第4幕は参考動画のような滑らかな繋がりが無く、コマが連続していない
-	// という指摘の通りだった）。ここは各幕の中身を直接ブレンドするのではなく、
-	// 境目をまたぐ短い「フェード専用のレイヤー」を追加で足す——出ていく幕の
-	// 代表図形を1枚だけ、境目のちょうど前後で不透明度0↔1に単発で振ることで
-	// ブリッジする。フェード用モジュレータの周期＝そのレイヤー自身の
-	// barRange の長さぴったりに揃えてあるので、ループして点滅する心配は無い
-	// （barRange が切れた瞬間にちょうど減衰しきる／育ちきる）。
-	const fadeBridge = (
-		boundary: number,
-		outPath: string,
-		outSize: number,
-		inPath: string,
-		inSize: number,
-	) => {
-		const xfade = 0.025;
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: cx,
-			y: cy,
-			z: nextZ(),
-			filled: false,
-			thickness: roundTo(baseThickness * 0.7, 1),
-			size: outSize,
-			path: outPath,
-			barRange: [at(boundary), at(boundary + xfade)],
-			modulators: [
-				{
-					source: "phrase",
-					target: "opacity",
-					op: "mul",
-					amount: 1,
-					bars: Math.max(0.01, durationBars * xfade),
-					phaseOffset: at(boundary),
-					symmetric: false,
-					curve: 1,
-					once: true,
-				},
-			],
-		});
-		const inBars = Math.max(0.01, durationBars * xfade);
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: cx,
-			y: cy,
-			z: nextZ(),
-			filled: false,
-			thickness: roundTo(baseThickness * 0.7, 1),
-			size: inSize,
-			path: inPath,
-			barRange: [at(boundary - xfade), at(boundary)],
-			modulators: [
-				{
-					source: "phrase",
-					target: "opacity",
-					op: "sub",
-					amount: 1,
-					bars: inBars,
-					phaseOffset: at(boundary - xfade),
-					symmetric: false,
-					curve: 1,
-					once: true,
-				},
-				// 出ていく側(outPath)は既存図形の残像なのでポップは付けない。入ってくる
-				// 側だけ「中心から湧く」ポップインを併用する。
-				...(centerPop ? [sizePopModulator(inSize, at(boundary - xfade), inBars)] : []),
-			],
-		});
+		return out;
 	};
-	fadeBridge(
-		0.5,
-		emblemPath,
-		roundTo(baseSize * randRange(0.95, 1.1), 1),
-		cornerBracketGlyph(false),
-		randRange(50, 70),
-	);
-	fadeBridge(
-		0.75,
-		cornerBracketGlyph(true),
-		randRange(50, 70),
-		renderBarChart(planBarChart(), 1),
-		randRange(38, 52),
-	);
 
-	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
+	// ── 画面のあちこちに塗りグリフが同時多発 ──
 	// 「決め打ちの語彙リストからユーザーが種類を選ぶ」のをやめ、置く場所（座標の
 	// プール）と生成方式（グリフの中身）を分離した。方式は毎回このリストから
 	// アルゴリズム側で重み付きランダムに選ぶ——`geo`（再帰的矩形分割）と
@@ -2004,27 +1935,6 @@ export function generateArrangementForGroup(
 		{ x: MV_W * 0.5, y: MV_H * 0.5, size: randRange(46, 64) },
 		{ x: MV_W * 0.68, y: MV_H * 0.68, size: randRange(38, 54) },
 	];
-	const useCount = genOptions?.act4Count ?? pick([4, 5, 6, 6]);
-	const chosen = [...positionSlots]
-		.sort(() => Math.random() - 0.5)
-		.slice(0, useCount)
-		.map((slot) => ({ ...slot, kind: pickGlyphKind() }));
-	// 幕の頭でグリフが最終形のまま静止出現していた（参考動画は逆に「部品ごとに
-	// アンカーされた辺から線が伸びて」最終形へ到達する）。size を一様スケール
-	// すると全部品が中心へ向かって縮む＝ズームにしか見えないので、部品分解した
-	// 形状（renderBarChart/renderCanister/renderTicks）を成長進度tで静的パスに
-	// 焼き、幕の頭ぶん（`growthFraction`）を数コマの離散フレームとして barRange
-	// を刻んで積み重ねる（=== 第2/3幕境目の `fadeBridge` と同じ「離散フレーム」
-	// 路線。iconCycle は絶対タイムラインの拍位相でコマが進むため、トリガー位置に
-	// 依存せず「出現の瞬間に必ず種から始まる」保証ができず不採用）。
-	// さらに `centerPop` が有効なら、部品アンカー成長と**併用**で size のポップ
-	// インも重ねる——1コマ目だけの単発ではなく、成長ウィンドウ全体に渡って
-	// 同じ phaseOffset/bars のenvelopeを共有する連続的なポップとして掛ける
-	// （フレームがレイヤーとして切り替わっても、envelope自体は絶対小節基準の
-	// 連続関数なので、コマをまたいでも滑らかにサイズが乗ってくる）。
-	const growthBars = Math.max(0.02, durationBars * 0.25 * growthFraction);
-	const growthFrameCount = 5;
-	const growthProgress = [0.12, 0.32, 0.54, 0.78, 1];
 	const buildGlyphRender: Record<MvArrangementGlyphKind, () => (t: number) => string> = {
 		bar: () => {
 			const plan = planBarChart();
@@ -2059,26 +1969,87 @@ export function generateArrangementForGroup(
 			return (t) => renderSpokes(plan, t);
 		},
 	};
-	for (const s of chosen) {
-		const render = buildGlyphRender[s.kind]();
-		const sliceLen = growthBars / growthFrameCount;
-		// 各コマを完全なハードカットで並べると、部品成長の見た目自体は連続でも
-		// 「コマが変わった瞬間」がそのまま1回のポップに見え、5コマぶん＝
-		// 複数回ポップして見える（ユーザー報告の「2回ポップイン」の実体：
-		// フェードインの掛かる1コマ目→無地の残りのコマへの切り替わりが、
-		// 別々の出現イベントとして視認できてしまっていた）。隣接コマの
-		// barRangeをわずかに重ねて、その重なりぶんだけ前コマがフェードアウト・
-		// 次コマがフェードインするようにし（=== `fadeBridge` と同じ手口）、
-		// 1回の連続した成長に見えるようにする。
-		const xfade = Math.min(sliceLen * 0.4, growthBars * 0.08);
-		for (let i = 0; i < growthFrameCount; i++) {
-			const nominalStart = at(0.75) + sliceLen * i;
-			const nominalEnd = i === growthFrameCount - 1 ? at(0.75) + growthBars : nominalStart + sliceLen;
-			const isFirst = i === 0;
-			const isLast = i === growthFrameCount - 1;
-			const barStart = isFirst ? nominalStart : nominalStart - xfade;
-			const barEnd = isLast ? nominalEnd : nominalEnd + xfade;
-			layers.push({
+	const buildGlyphBurst = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const useCount = genOptions?.act4Count ?? pick([4, 5, 6, 6]);
+		const chosen = [...positionSlots]
+			.sort(() => Math.random() - 0.5)
+			.slice(0, useCount)
+			.map((slot) => ({ ...slot, kind: pickGlyphKind() }));
+		// グリフが最終形のまま静止出現すると「部品ごとにアンカーされた辺から線が
+		// 伸びて」最終形へ到達する参考動画の質感に合わない。size を一様スケール
+		// すると全部品が中心へ向かって縮む＝ズームにしか見えないので、部品分解
+		// した形状を成長進度tで静的パスに焼き、区間頭ぶん（`growthFraction`）を
+		// 数コマの離散フレームとして barRange を刻んで積み重ねる。隣接コマの
+		// barRangeをわずかに重ねてクロスフェードすることで、コマ切り替えが
+		// 別々の出現イベントに見えてしまう（＝複数回ポップして見える）のを防ぐ。
+		// `centerPop` が有効なら、部品アンカー成長と併用で size のポップインも
+		// 区間頭の同じenvelopeを共有して重ねる。
+		const growthBars = Math.max(0.02, durationBars * span * growthFraction);
+		const growthFrameCount = 5;
+		const growthProgress = [0.12, 0.32, 0.54, 0.78, 1];
+		const out: MvShapeLayer[] = [];
+		for (const s of chosen) {
+			const render = buildGlyphRender[s.kind]();
+			const sliceLen = growthBars / growthFrameCount;
+			const xfade = Math.min(sliceLen * 0.4, growthBars * 0.08);
+			for (let i = 0; i < growthFrameCount; i++) {
+				const nominalStart = at(from) + sliceLen * i;
+				const nominalEnd =
+					i === growthFrameCount - 1 ? at(from) + growthBars : nominalStart + sliceLen;
+				const isFirst = i === 0;
+				const isLast = i === growthFrameCount - 1;
+				const barStart = isFirst ? nominalStart : nominalStart - xfade;
+				const barEnd = isLast ? nominalEnd : nominalEnd + xfade;
+				out.push({
+					...common,
+					form: "path",
+					id: mvUid("shp"),
+					x: roundTo(s.x, 1),
+					y: roundTo(s.y, 1),
+					z: nextZ(),
+					filled: true,
+					thickness: 2,
+					size: roundTo(s.size, 1),
+					path: render(growthProgress[i]),
+					barRange: [roundTo(barStart, 4), roundTo(barEnd, 4)],
+					modulators: [
+						...(isFirst
+							? [
+									{
+										source: "phrase" as const,
+										target: "opacity" as const,
+										op: "sub" as const,
+										amount: 1,
+										bars: Math.max(0.01, nominalEnd - nominalStart),
+										phaseOffset: roundTo(barStart, 4),
+										symmetric: false,
+										curve: 1,
+										once: true as const,
+									},
+								]
+							: []),
+						...(isLast
+							? []
+							: [
+									{
+										source: "phrase" as const,
+										target: "opacity" as const,
+										op: "mul" as const,
+										amount: 1,
+										bars: xfade,
+										phaseOffset: roundTo(nominalEnd, 4),
+										symmetric: false,
+										curve: 1,
+										once: true as const,
+									},
+								]),
+						...(centerPop ? [sizePopModulator(s.size, at(from), growthBars)] : []),
+					],
+				});
+			}
+			// 成長が終わった残りは完成形を維持し、区間の終わりだけフェードアウト。
+			out.push({
 				...common,
 				form: "path",
 				id: mvUid("shp"),
@@ -2088,73 +2059,111 @@ export function generateArrangementForGroup(
 				filled: true,
 				thickness: 2,
 				size: roundTo(s.size, 1),
-				path: render(growthProgress[i]),
-				barRange: [roundTo(barStart, 4), roundTo(barEnd, 4)],
+				path: render(1),
+				barRange: [roundTo(at(from) + growthBars, 4), at(to)],
 				modulators: [
-					// 先頭コマは種から0→1、以降のコマは重なり区間ぶんだけ
-					// フェードインして前コマと入れ替わる。
-					{
-						source: "phrase" as const,
-						target: "opacity" as const,
-						op: "sub" as const,
-						amount: 1,
-						bars: Math.max(0.01, isFirst ? nominalEnd - nominalStart : xfade),
-						phaseOffset: roundTo(barStart, 4),
-						symmetric: false,
-						curve: 1,
-						once: true as const,
-					},
-					// 最終コマ以外は、自分の末尾の重なり区間ぶんフェードアウトして
-					// 次コマへ溶け込む。
-					...(isLast
-						? []
-						: [
-								{
-									source: "phrase" as const,
-									target: "opacity" as const,
-									op: "mul" as const,
-									amount: 1,
-									bars: xfade,
-									phaseOffset: roundTo(nominalEnd, 4),
-									symmetric: false,
-									curve: 1,
-									once: true as const,
-								},
-							]),
-					// 部品アンカー成長に、中心からのsizeポップインを併用する。
-					...(centerPop ? [sizePopModulator(s.size, at(0.75), growthBars)] : []),
+					exitFadeOutModulator(at(to), Math.max(0.01, durationBars * span * 0.15)),
 				],
 			});
 		}
-		// 成長が終わった残り（最後のコマ〜幕の終わり）は完成形を維持し、区間の
-		// 終わりだけ不透明度1→0のフェードアウトでアレンジ元への復帰を和らげる。
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: roundTo(s.x, 1),
-			y: roundTo(s.y, 1),
-			z: nextZ(),
-			filled: true,
-			thickness: 2,
-			size: roundTo(s.size, 1),
-			path: render(1),
-			barRange: [roundTo(at(0.75) + growthBars, 4), at(1)],
-			modulators: [
-				{
-					source: "phrase",
-					target: "opacity",
-					op: "mul",
-					amount: 1,
-					bars: Math.max(0.01, durationBars * 0.15),
-					phaseOffset: at(1) - durationBars * 0.15,
-					symmetric: false,
-					curve: 1,
-					once: true,
-				},
-			],
-		});
-	}
+		return out;
+	};
 
-	return { group, layers };
+	// ── 波紋（form:'ripple'）が数個、位相をずらしながら広がる ──
+	const buildRippleSweep = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const segBeats = durationBars * span * MV_BEATS_PER_BAR;
+		const ringCount = pick([2, 3, 3]);
+		const period = Math.max(0.25, roundTo(segBeats / ringCount, 2));
+		const entryBars = Math.max(0.02, durationBars * span * 0.12);
+		const exitBars = Math.max(0.02, durationBars * span * 0.15);
+		const out: MvShapeLayer[] = [];
+		for (let i = 0; i < ringCount; i++) {
+			const size = randRange(60, 140) * (1 + i * 0.3);
+			out.push({
+				...common,
+				form: "ripple",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.6, 1), 1),
+				size: roundTo(size, 1),
+				barRange: [at(from), at(to)],
+				rippleBeats: period,
+				ripplePhaseOffset: roundTo((i / ringCount) * period, 2),
+				modulators: [
+					entryFadeInModulator(at(from), entryBars),
+					exitFadeOutModulator(at(to), exitBars),
+				],
+			});
+		}
+		return out;
+	};
+
+	// ── アレンジ元のモチーフ(emblemPath)が中心から湧いて出て、区間ぶんずっと
+	// 回り続ける ──
+	const buildSpinGrow = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = Math.max(0.02, durationBars * span * 0.2);
+		const exitBars = Math.max(0.02, durationBars * span * 0.15);
+		const size = roundTo(baseSize * randRange(0.85, 1.15), 1);
+		const degPerSec = pick([1, -1]) * randRange(40, 90);
+		return [
+			{
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.8, 1.2), 1),
+				size,
+				path: emblemPath,
+				barRange: [at(from), at(to)],
+				modulators: [
+					entryFadeInModulator(at(from), entryBars),
+					exitFadeOutModulator(at(to), exitBars),
+					...(centerPop ? [sizePopModulator(size, at(from), entryBars)] : []),
+					// "spin" は巻き戻らない経過秒数。op:"add"で足すと途切れず回り続ける。
+					{
+						source: "spin",
+						target: "rotation",
+						op: "add",
+						amount: roundTo(degPerSec, 1),
+					},
+				],
+			},
+		];
+	};
+
+	// ── セグメントを毎回シャッフルして2〜4個選び、残り時間(25%〜100%)を
+	// ランダムな比率で配分する ──
+	const SEGMENT_POOL: { label: string; build: (from: number, to: number) => MvShapeLayer[] }[] =
+		[
+			{ label: "対角の角括弧", build: buildBrackets },
+			{ label: "グリフ同時多発", build: buildGlyphBurst },
+			{ label: "波紋", build: buildRippleSweep },
+			{ label: "回転しながら成長", build: buildSpinGrow },
+		];
+	const segments: { label: string; from: number; to: number }[] = [
+		{ label: "タメ→暗転", from: 0, to: 0.25 },
+	];
+	const segCount = Math.min(SEGMENT_POOL.length, pick([2, 2, 3, 3, 4]));
+	const shuffledPool = [...SEGMENT_POOL].sort(() => Math.random() - 0.5).slice(0, segCount);
+	const weights = shuffledPool.map(() => randRange(0.7, 1.4));
+	const totalW = weights.reduce((a, b) => a + b, 0);
+	let cursor = 0.25;
+	shuffledPool.forEach((seg, i) => {
+		const isLastSeg = i === shuffledPool.length - 1;
+		const segFrom = cursor;
+		const segTo = isLastSeg ? 1 : roundTo(cursor + 0.75 * (weights[i] / totalW), 4);
+		cursor = segTo;
+		layers.push(...seg.build(segFrom, segTo));
+		segments.push({ label: seg.label, from: segFrom, to: segTo });
+	});
+
+	return { group, layers, segments };
 }
