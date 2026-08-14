@@ -1236,6 +1236,309 @@ function easeOutCubic(t: number): number {
 	return 1 - (1 - c) ** 3;
 }
 
+// ═══════════ 汎用パス変形DSL（真の生成的合成） ═══════════
+//
+// 以前の「幾つかの手作り状態(state)を選ぶ」方式は、結局は有限個の完成品を
+// 組み合わせているだけで、新しい変形の種類そのものは生み出せなかった。
+// ここでは逆に、SVGパス文字列の座標をアンカー・軸・方向という**互いに独立な
+// 部品**として扱う変形プリミティブを用意し、実行時にランダムに1〜2個選んで
+// 合成する。プリミティブ自体は少数でも、「どの部品を」「どのアンカーで」
+// 「どの方向へ」「元の形をいくつに割ってから」組み合わせるかの掛け算で、
+// 個別に手作りされたことのない変形の組み合わせが実行時に生まれる——
+// これが `buildGenerativeMove`（後述）の実体。
+// `growUpRect` 等のアンカー成長ヘルパー（矩形専用）とは別物で、こちらは
+// アレンジ元がどんな形（矩形でも多角形でも複合パスでも）でも同じ仕組みで扱える。
+
+/**
+ * SVGパスの座標トークン（M/L/H/V/Zと数値）を読み、各座標に `fn` を適用して
+ * 再構成する。H/V は片方の軸しか持たないので、もう片方は直前の座標を引き継ぐ
+ * （このモジュールが吐くパスは絶対座標のM/L/H/V/Zのみ・小文字コマンド無しなので
+ * これで十分——他所で作られた任意のSVGを想定した汎用パーサではない）。
+ */
+function transformPathCoords(
+	path: string,
+	fn: (x: number, y: number) => [number, number],
+): string {
+	const tokens = path.match(/[MLHVZ]|-?\d*\.?\d+/g) ?? [];
+	const out: string[] = [];
+	let x = 0;
+	let y = 0;
+	let i = 0;
+	while (i < tokens.length) {
+		const t = tokens[i];
+		if (t === "M" || t === "L") {
+			x = Number.parseFloat(tokens[i + 1]);
+			y = Number.parseFloat(tokens[i + 2]);
+			const [nx, ny] = fn(x, y);
+			out.push(`${t}${roundTo(nx, 2)} ${roundTo(ny, 2)}`);
+			i += 3;
+		} else if (t === "H") {
+			x = Number.parseFloat(tokens[i + 1]);
+			const [nx] = fn(x, y);
+			out.push(`H${roundTo(nx, 2)}`);
+			i += 2;
+		} else if (t === "V") {
+			y = Number.parseFloat(tokens[i + 1]);
+			const [, ny] = fn(x, y);
+			out.push(`V${roundTo(ny, 2)}`);
+			i += 2;
+		} else if (t === "Z") {
+			out.push("Z");
+			i += 1;
+		} else {
+			i += 1; // 未知のトークンは無視
+		}
+	}
+	return out.join("");
+}
+
+/** パス中の全座標点（M/L/H/Vそれぞれの到達点）。重心計算に使う。 */
+function extractPathPoints(path: string): { x: number; y: number }[] {
+	const tokens = path.match(/[MLHVZ]|-?\d*\.?\d+/g) ?? [];
+	const pts: { x: number; y: number }[] = [];
+	let x = 0;
+	let y = 0;
+	let i = 0;
+	while (i < tokens.length) {
+		const t = tokens[i];
+		if (t === "M" || t === "L") {
+			x = Number.parseFloat(tokens[i + 1]);
+			y = Number.parseFloat(tokens[i + 2]);
+			pts.push({ x, y });
+			i += 3;
+		} else if (t === "H") {
+			x = Number.parseFloat(tokens[i + 1]);
+			pts.push({ x, y });
+			i += 2;
+		} else if (t === "V") {
+			y = Number.parseFloat(tokens[i + 1]);
+			pts.push({ x, y });
+			i += 2;
+		} else {
+			i += 1;
+		}
+	}
+	return pts;
+}
+
+/** 単純平均によるパスの重心（0..100空間）。フラグメントの飛散方向の計算に使う。 */
+function fragmentCentroid(path: string): { x: number; y: number } {
+	const pts = extractPathPoints(path);
+	if (pts.length === 0) return { x: 50, y: 50 };
+	const sx = pts.reduce((s, p) => s + p.x, 0);
+	const sy = pts.reduce((s, p) => s + p.y, 0);
+	return { x: sx / pts.length, y: sy / pts.length };
+}
+
+/**
+ * 複合パス（`"M... M... M..."`）を、`M`始まりのサブパスごとに分解する。
+ * これが「元の図形を部品に割る」操作の実体——分解できた部品を1つずつ
+ * 独立に変形できるようになる（分解できない単一パスなら1要素の配列を返す）。
+ */
+function splitFragments(path: string): string[] {
+	const matches = path.match(/M[^M]*/g);
+	return matches && matches.length > 0 ? matches.map((s) => s.trim()) : [path];
+}
+
+type PathAnchor = "center" | "bottom" | "top" | "left" | "right";
+const PATH_ANCHORS: PathAnchor[] = ["center", "bottom", "top", "left", "right"];
+
+function anchorXY(anchor: PathAnchor): [number, number] {
+	switch (anchor) {
+		case "bottom":
+			return [50, 100];
+		case "top":
+			return [50, 0];
+		case "left":
+			return [0, 50];
+		case "right":
+			return [100, 50];
+		default:
+			return [50, 50];
+	}
+}
+
+/** フラグメント配列全体に作用する変形プリミティブ。合成可能。 */
+type FragTransform = (frags: string[], t: number) => string[];
+
+/** 複数の変形プリミティブを順に適用する。合成の実体。 */
+function composeFragTransforms(fns: FragTransform[]): FragTransform {
+	return (frags, t) => fns.reduce((acc, fn) => fn(acc, t), frags);
+}
+
+// ───────────────── 原子演算の自動合成（カテゴリを自律的に生む層） ─────────────────
+//
+// 「grow/spread/slide/staggerのどれかを選ぶ」だと、結局は人間が名付けた
+// 有限個のカテゴリの中からしか選べない。ここではさらに一段下げて、
+// 名前を持たない**座標レベルの原子演算**（並進・アンカー伸縮・せん断・渦・波・
+// 脈動・ノイズ）を1〜3個、実行のたびにランダムな順序・パラメータで合成する。
+// 「今回どういう種類の変形になるか」はコード上どこにも書かれておらず、
+// 合成した瞬間に初めて決まる——これが「独自のプリミティブのカテゴリを
+// 自律的に生み出す」の実装：カテゴリの名前や振る舞いを人間が用意するのではなく、
+// 原子演算の組み合わせそのものがカテゴリを演じる。
+
+/** 1点(x,y)を進度tで別の点へ移す純粋な座標変形。 */
+type PointOp = (x: number, y: number, t: number) => [number, number];
+
+/** PointOp を、全フラグメントの全座標へ一様に適用する FragTransform へ持ち上げる。 */
+function liftPointOp(op: PointOp): FragTransform {
+	return (frags, t) => frags.map((f) => transformPathCoords(f, (x, y) => op(x, y, t)));
+}
+
+/** 並進：ランダムな向き・距離から本来の位置へ滑り込む（またはその逆＝滑り出る）。 */
+function opTranslate(): PointOp {
+	const ang = Math.random() * Math.PI * 2;
+	const dist = randRange(20, 70);
+	const dx = Math.cos(ang) * dist;
+	const dy = Math.sin(ang) * dist;
+	const reverse = chance(0.5);
+	return (x, y, t) => {
+		const k = reverse ? easeOutCubic(t) : 1 - easeOutCubic(t);
+		return [x + dx * k, y + dy * k];
+	};
+}
+
+/** アンカー伸縮：中心または5点のアンカーのどれかへ向けて伸び縮みする。 */
+function opAnchorScale(): PointOp {
+	const anchor: PathAnchor = chance(0.4) ? "center" : pick(PATH_ANCHORS);
+	const [ax, ay] = anchorXY(anchor);
+	const power = randRange(0.7, 1.8);
+	const shrink = chance(0.3);
+	return (x, y, t) => {
+		const raw = shrink ? 1 - t : t;
+		const k = easeOutCubic(Math.max(0.02, raw)) ** power;
+		return [ax + (x - ax) * k, ay + (y - ay) * k];
+	};
+}
+
+/** せん断：片方の軸の位置に比例して、もう片方の軸をずらす（平行四辺形化）。 */
+function opShear(): PointOp {
+	const axis: "x" | "y" = chance(0.5) ? "x" : "y";
+	const amount = randRange(-0.6, 0.6);
+	return (x, y, t) => {
+		const k = easeOutCubic(t);
+		return axis === "x" ? [x + amount * k * (y - 50), y] : [x, y + amount * k * (x - 50)];
+	};
+}
+
+/** 渦：中心からの距離に比例した角度だけ回す。全体の一律回転（角度ズレのみ）とは
+ * 違い、内側と外側で回転量が変わるため「渦を巻いて歪む」形になる。 */
+function opTwist(): PointOp {
+	const amount = randRange(0.8, 2.4) * (chance(0.5) ? 1 : -1);
+	return (x, y, t) => {
+		const dx = x - 50;
+		const dy = y - 50;
+		const r = Math.hypot(dx, dy);
+		const ang = Math.atan2(dy, dx) + amount * easeOutCubic(t) * (r / 50);
+		return [50 + Math.cos(ang) * r, 50 + Math.sin(ang) * r];
+	};
+}
+
+/** 波：一方の軸の座標をもう一方の軸に沿った正弦波でうねらせる。 */
+function opWave(): PointOp {
+	const axis: "x" | "y" = chance(0.5) ? "x" : "y";
+	const freq = randRange(0.08, 0.26);
+	const amp = randRange(4, 16);
+	const phase = Math.random() * Math.PI * 2;
+	return (x, y, t) => {
+		const k = Math.sin(t * Math.PI * 0.5) * amp; // 立ち上がりだけ滑らかにする
+		return axis === "x"
+			? [x + Math.sin(y * freq + phase) * k, y]
+			: [x, y + Math.sin(x * freq + phase) * k];
+	};
+}
+
+/** 脈動：中心からの放射方向へ、t の進行に合わせて周期的に押し引きする。 */
+function opRadialPulse(): PointOp {
+	const freq = randRange(1.5, 4);
+	const amp = randRange(6, 20);
+	return (x, y, t) => {
+		const dx = x - 50;
+		const dy = y - 50;
+		const r = Math.max(0.001, Math.hypot(dx, dy));
+		const ux = dx / r;
+		const uy = dy / r;
+		const push = Math.sin(t * Math.PI * freq) * amp * t;
+		return [x + ux * push, y + uy * push];
+	};
+}
+
+/** ノイズ：座標から決定的に導く疑似乱数で、各点をバラバラの向きへ小さくずらす
+ * （砕け散る・グリッチのような質感）。 */
+function opNoiseJitter(): PointOp {
+	const amp = randRange(3, 14);
+	const seed = Math.random() * 1000;
+	const hash = (v: number) => {
+		const h = Math.sin(v) * 43758.5453;
+		return h - Math.floor(h);
+	};
+	return (x, y, t) => {
+		const nx = hash(x * 12.9898 + y * 78.233 + seed) - 0.5;
+		const ny = hash(x * 39.346 + y * 11.135 + seed + 7) - 0.5;
+		return [x + nx * 2 * amp * t, y + ny * 2 * amp * t];
+	};
+}
+
+/** フラグメントごとの重心方向へ押し出す（「形なりの飛散」）。点単独では表現
+ * できず、フラグメントのまとまりを要る唯一の非PointOp原子演算。 */
+function opFragSpread(): FragTransform {
+	const spread = randRange(12, 42);
+	return (frags, t) =>
+		frags.map((f) => {
+			const c = fragmentCentroid(f);
+			const dx = c.x - 50;
+			const dy = c.y - 50;
+			const len = Math.max(1, Math.hypot(dx, dy));
+			const ux = dx / len;
+			const uy = dy / len;
+			const k = easeOutCubic(t);
+			return transformPathCoords(f, (x, y) => [x + ux * spread * k, y + uy * spread * k]);
+		});
+}
+
+/** フラグメントごとに開始タイミングをずらして内側の変形を呼ぶラッパー。 */
+function staggerWrap(inner: FragTransform): FragTransform {
+	return (frags, t) =>
+		frags.map((f, i) => {
+			const delay = frags.length > 1 ? (i / frags.length) * 0.4 : 0;
+			const denom = 1 - delay || 1;
+			const localT = Math.max(0.02, Math.min(1, (t - delay) / denom));
+			return inner([f], localT)[0];
+		});
+}
+
+/** 原子演算の生成器プール。呼ぶたびにパラメータをランダムに振った新しい個体を返す。 */
+const FRAG_OP_FACTORIES: (() => FragTransform)[] = [
+	() => liftPointOp(opTranslate()),
+	() => liftPointOp(opAnchorScale()),
+	() => liftPointOp(opShear()),
+	() => liftPointOp(opTwist()),
+	() => liftPointOp(opWave()),
+	() => liftPointOp(opRadialPulse()),
+	() => liftPointOp(opNoiseJitter()),
+	() => opFragSpread(),
+];
+
+/**
+ * 原子演算を1〜3個ランダムに選んで合成し、「その場限りの変形カテゴリ」を作る。
+ * さらに一定確率でフラグメントごとに**別々の**合成を割り当てる（異種混合）
+ * ——全部品が同じ動きをする単調さを避け、部品ごとに違う挙動が同時に起きる。
+ */
+function synthesizeTransform(fragCount: number): FragTransform {
+	const buildChain = (): FragTransform => {
+		const n = pick([1, 1, 2, 2, 3]);
+		const ops: FragTransform[] = [];
+		for (let i = 0; i < n; i++) ops.push(pick(FRAG_OP_FACTORIES)());
+		const chain = composeFragTransforms(ops);
+		return chance(0.3) ? staggerWrap(chain) : chain;
+	};
+	if (fragCount > 1 && chance(0.3)) {
+		const perFrag = Array.from({ length: fragCount }, () => buildChain());
+		return (frags, t) => frags.map((f, i) => perFrag[i % perFrag.length]([f], t)[0]);
+	}
+	return buildChain();
+}
+
 /** 縦方向（下辺アンカー）に伸びる矩形1本の、進度tでのパス。 */
 function growUpRect(x: number, w: number, bottomY: number, fullH: number, t: number): string {
 	const minH = 2;
@@ -1685,6 +1988,26 @@ function exitFadeOutModulator(endAtBar: number, bars: number): MvModulator {
 }
 
 /**
+ * 区間の終わりに向けて size をゼロへ縮める（`exitFadeOutModulator`のsize版）。
+ * 「伸びる線」の対になる「縮む線」のような、フェードではなく実際に小さく
+ * なりながら消える質感を作るために使う。
+ */
+function sizeShrinkOutModulator(endAtBar: number, bars: number): MvModulator {
+	const b = Math.max(0.01, bars);
+	return {
+		source: "phrase",
+		target: "size",
+		op: "mul",
+		amount: 1,
+		bars: b,
+		phaseOffset: endAtBar - b,
+		symmetric: false,
+		curve: 2,
+		once: true,
+	};
+}
+
+/**
  * 第4幕グリフの内部生成方式。UIには出さず、`generateArrangementForGroup` が
  * 毎回この中からアルゴリズムで（重み付き）ランダムに選ぶ——「有限リストから
  * ユーザーが選ぶ」のではなく「無限に組み合わせを吐けるジェネレータの集合から
@@ -1814,47 +2137,11 @@ export function generateArrangementForGroup(
 		color,
 	};
 
-	// ── 第1幕: 小さな塗り四角のタメ → 完全暗転 ──
-	// [0, 0.19] だけレイヤーを置き、[0.19, 0.25] は何も置かない＝暗転。
-	// アレンジ元からの切り替わりが「パッと現れる」ハードカットにならないよう、
-	// 頭の一瞬（この幕の最初の15%）だけ不透明度0→1のフェードインを掛ける
-	// （減衰の周期をこの幕の最初の15%ぶんに揃えてあるので、幕の外へループして
-	// 点滅する心配は無い）。
-	{
-		const act1Size = roundTo(baseSize * randRange(0.32, 0.42), 1);
-		const act1Bars = Math.max(0.01, durationBars * 0.15);
-		layers.push({
-			...common,
-			form: "path",
-			id: mvUid("shp"),
-			x: cx,
-			y: cy,
-			z: nextZ(),
-			filled: true,
-			thickness: 2,
-			size: act1Size,
-			path: rectPath(25, 25, 75, 75),
-			barRange: [at(0), at(0.19)],
-			modulators: [
-				{
-					source: "phrase",
-					target: "opacity",
-					op: "sub",
-					amount: 1,
-					bars: act1Bars,
-					phaseOffset: at(0),
-					symmetric: false,
-					curve: 1,
-					once: true,
-				},
-				...(centerPop ? [sizePopModulator(act1Size, at(0), act1Bars)] : []),
-			],
-		});
-	}
-
 	// アレンジ元がコマ送りを持っていれば、そのいちばん密なコマ（paths[0]）を使う。
-	// 「回転しながら成長」セグメントで再利用する（以前はエンブレム連続フラッシュ
-	// 専用だったが、そのセグメント自体を削除したので流用先をここへ変えた）。
+	// これがこのアレンジ全体の「素材そのもの」——以下の状態（state）はほぼ全て
+	// この emblemPath を土台に、太さ・重ね・輪郭・波紋・砕け方を変えて作る。
+	// アレンジ元と無関係などこかから借りてきた図形ではなく、常に「元の形が
+	// どう変形しているか」に見えるようにするための一次データ。
 	const emblemPath =
 		shapeSources.find((l) => l.iconCycle && l.iconCycle.paths.length > 0)
 			?.iconCycle?.paths[0] ??
@@ -2097,47 +2384,36 @@ export function generateArrangementForGroup(
 		return out;
 	};
 
-	// ── 波紋（form:'ripple'）が数個、位相をずらしながら広がる ──
-	const buildRippleSweep = (from: number, to: number): MvShapeLayer[] => {
-		const span = to - from;
-		const segBeats = durationBars * span * MV_BEATS_PER_BAR;
-		const ringCount = pick([2, 3, 3]);
-		const period = Math.max(0.25, roundTo(segBeats / ringCount, 2));
-		const entryBars = Math.max(0.02, durationBars * span * 0.12);
-		const exitBars = Math.max(0.02, durationBars * span * 0.15);
-		const out: MvShapeLayer[] = [];
-		for (let i = 0; i < ringCount; i++) {
-			const size = randRange(60, 140) * (1 + i * 0.3);
-			out.push({
-				...common,
-				form: "ripple",
-				id: mvUid("shp"),
-				x: cx,
-				y: cy,
-				z: nextZ(),
-				filled: false,
-				thickness: roundTo(baseThickness * randRange(0.6, 1), 1),
-				size: roundTo(size, 1),
-				barRange: [at(from), at(to)],
-				rippleBeats: period,
-				ripplePhaseOffset: roundTo((i / ringCount) * period, 2),
-				modulators: [
-					entryFadeInModulator(at(from), entryBars),
-					exitFadeOutModulator(at(to), exitBars),
-				],
-			});
-		}
-		return out;
-	};
+	// ═══════════ ここから: アレンジ元の形そのものを変形する「状態(state)」群 ═══════════
+	//
+	// 添付の参考動画（チョウチン少女）をコマ単位で追うと、実体は「4幕」のような
+	// 大きな区分ではなく、1〜数拍ずつ細かく切り替わる**十数〜数十個の小さな状態**
+	// の連なりだった（例: 厚い輪郭→線のみ→中央四角→非表示→厚い輪郭→…）。
+	// しかも状態はどれも「アレンジ元の同じ図形」を土台にしていて、無関係などこかの
+	// 図形へすり替わることは無い——「元が四角なので、四角の形に飛散物を配置して
+	// 視覚的に大きな四角を維持する」という工夫がそこにある。
+	//
+	// そこで、幕を固定個数の区分として扱うのをやめ、**状態プール(STATE_POOL)から
+	// 毎回ランダムウォークで十数〜数十個を選び、それぞれ短くランダムな長さで
+	// 並べる**方式にした。区分の個数も長さも整数の「幕」に量子化されない
+	// （0.5幕・1.5幕・3幕のような端数がいくらでも出る）。状態はどれも
+	// `emblemPath`（アレンジ元の実際の形）を土台にするので、変形が激しくても
+	// 「元の図形が変形している」という一貫性が保たれる。
+	// 角度をわずかにずらすだけの回転演出（旧「回転しながら成長」）は安っぽく
+	// 見えるとの指摘で廃止した。
 
-	// ── アレンジ元のモチーフ(emblemPath)が中心から湧いて出て、区間ぶんずっと
-	// 回り続ける ──
-	const buildSpinGrow = (from: number, to: number): MvShapeLayer[] => {
+	const entryBarsOf = (span: number, frac = 0.25) =>
+		Math.max(0.01, durationBars * span * frac);
+	const exitBarsOf = (span: number, frac = 0.25) =>
+		Math.max(0.01, durationBars * span * frac);
+
+	/** 太い輪郭（1本）。角度は一切変えず、線の太さだけで存在感を出す。 */
+	const stateSolidThick = (from: number, to: number): MvShapeLayer[] => {
 		const span = to - from;
-		const entryBars = Math.max(0.02, durationBars * span * 0.2);
-		const exitBars = Math.max(0.02, durationBars * span * 0.15);
-		const size = roundTo(baseSize * randRange(0.85, 1.15), 1);
-		const degPerSec = pick([1, -1]) * randRange(40, 90);
+		const grow = chance(0.6);
+		const entryBars = entryBarsOf(span, grow ? 0.3 : 0.15);
+		const exitBars = exitBarsOf(span, grow ? 0.15 : 0.3);
+		const thickMul = randRange(1.8, 3.2);
 		return [
 			{
 				...common,
@@ -2147,50 +2423,388 @@ export function generateArrangementForGroup(
 				y: cy,
 				z: nextZ(),
 				filled: false,
-				thickness: roundTo(baseThickness * randRange(0.8, 1.2), 1),
-				size,
+				thickness: roundTo(baseThickness * thickMul, 1),
+				size: baseSize,
 				path: emblemPath,
 				barRange: [at(from), at(to)],
 				modulators: [
 					entryFadeInModulator(at(from), entryBars),
 					exitFadeOutModulator(at(to), exitBars),
-					...(centerPop ? [sizePopModulator(size, at(from), entryBars)] : []),
-					// "spin" は巻き戻らない経過秒数。op:"add"で足すと途切れず回り続ける。
-					{
-						source: "spin",
-						target: "rotation",
-						op: "add",
-						amount: roundTo(degPerSec, 1),
-					},
+					...(grow && centerPop ? [sizePopModulator(baseSize, at(from), entryBars)] : []),
+					...(!grow ? [sizeShrinkOutModulator(at(to), exitBars)] : []),
 				],
 			},
 		];
 	};
 
-	// ── セグメントを毎回シャッフルして2〜4個選び、残り時間(25%〜100%)を
-	// ランダムな比率で配分する ──
-	const SEGMENT_POOL: { label: string; build: (from: number, to: number) => MvShapeLayer[] }[] =
-		[
-			{ label: "対角の角括弧", build: buildBrackets },
-			{ label: "グリフ同時多発", build: buildGlyphBurst },
-			{ label: "波紋", build: buildRippleSweep },
-			{ label: "回転しながら成長", build: buildSpinGrow },
+	/**
+	 * 「四角を減算で重ねて厚みを増す」——同じ emblemPath をスケール違いで
+	 * 2〜3枚重ねる。1本の線を太くするのとは違う、額縁のような二重輪郭になる。
+	 */
+	const stateStackedThick = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = entryBarsOf(span, 0.25);
+		const exitBars = exitBarsOf(span, 0.25);
+		const layerCount = pick([2, 3, 3]);
+		const out: MvShapeLayer[] = [];
+		for (let i = 0; i < layerCount; i++) {
+			const scale = 1 - i * randRange(0.06, 0.11);
+			out.push({
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.8, 1.3), 1),
+				size: roundTo(baseSize * scale, 1),
+				path: emblemPath,
+				barRange: [at(from), at(to)],
+				modulators: [
+					entryFadeInModulator(at(from), entryBars),
+					exitFadeOutModulator(at(to), exitBars),
+					...(centerPop ? [sizePopModulator(baseSize * scale, at(from), entryBars)] : []),
+				],
+			});
+		}
+		return out;
+	};
+
+	/** 細い輪郭のみ。太い状態との対比を作る「静かな」状態。 */
+	const stateHollowThin = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = entryBarsOf(span, 0.3);
+		const exitBars = exitBarsOf(span, 0.3);
+		return [
+			{
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.35, 0.6), 1),
+				size: baseSize,
+				path: emblemPath,
+				barRange: [at(from), at(to)],
+				modulators: [
+					entryFadeInModulator(at(from), entryBars),
+					exitFadeOutModulator(at(to), exitBars),
+				],
+			},
 		];
-	const segments: { label: string; from: number; to: number }[] = [
-		{ label: "タメ→暗転", from: 0, to: 0.25 },
+	};
+
+	/** 中央に小さく縮んだ塗り四角だけが残る「タメ」の状態。 */
+	const stateCenterOnly = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = entryBarsOf(span, 0.3);
+		const exitBars = exitBarsOf(span, 0.3);
+		const size = roundTo(baseSize * randRange(0.28, 0.42), 1);
+		return [
+			{
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: true,
+				thickness: 2,
+				size,
+				path: rectPath(25, 25, 75, 75),
+				barRange: [at(from), at(to)],
+				modulators: [
+					entryFadeInModulator(at(from), entryBars),
+					exitFadeOutModulator(at(to), exitBars),
+					...(centerPop ? [sizePopModulator(size, at(from), entryBars)] : []),
+				],
+			},
+		];
+	};
+
+	/** 完全に何も置かない「暗転」の状態。参考動画の空白コマに相当。 */
+	const stateHidden = (): MvShapeLayer[] => [];
+
+	/**
+	 * 中心を貫く十字の一方向の線＋任意で中央四角。`grow`で「伸びる線」、falseで
+	 * 「縮む線」になる——参考動画にある伸縮どちらの質感も出せるようにしてある。
+	 */
+	const buildLineState =
+		(vertical: boolean) =>
+		(from: number, to: number): MvShapeLayer[] => {
+			const span = to - from;
+			const grow = chance(0.55);
+			const withCenter = chance(0.7);
+			const entryBars = entryBarsOf(span, grow ? 0.35 : 0.15);
+			const exitBars = exitBarsOf(span, grow ? 0.15 : 0.35);
+			const half = randRange(38, 48);
+			const linePath = vertical
+				? `M50 ${roundTo(50 - half, 1)}V${roundTo(50 + half, 1)}`
+				: `M${roundTo(50 - half, 1)} 50H${roundTo(50 + half, 1)}`;
+			const out: MvShapeLayer[] = [
+				{
+					...common,
+					form: "path",
+					id: mvUid("shp"),
+					x: cx,
+					y: cy,
+					z: nextZ(),
+					filled: false,
+					thickness: roundTo(baseThickness * randRange(0.8, 1.3), 1),
+					size: baseSize,
+					path: linePath,
+					barRange: [at(from), at(to)],
+					modulators: [
+						entryFadeInModulator(at(from), entryBars),
+						exitFadeOutModulator(at(to), exitBars),
+						...(grow && centerPop
+							? [sizePopModulator(baseSize, at(from), entryBars)]
+							: []),
+						...(!grow ? [sizeShrinkOutModulator(at(to), exitBars)] : []),
+					],
+				},
+			];
+			if (withCenter) out.push(...stateCenterOnly(from, to));
+			return out;
+		};
+	const stateLinesV = buildLineState(true);
+	const stateLinesH = buildLineState(false);
+
+	/**
+	 * 「アレンジ元の図形の周囲に形に合わせて波紋を出す」——同心円ではなく
+	 * emblemPath そのものを種として、区間の中で数回、小さく生まれては
+	 * 広がりながら薄れる（`once`を付けずに`phrase`をループさせているのが肝）。
+	 * 四角が元なら四角い波紋が、他の形ならその形の波紋が出る。
+	 */
+	const stateShapeRipple = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const pulseCount = pick([2, 3, 3, 4]);
+		const pulseBars = Math.max(0.01, (durationBars * span) / pulseCount);
+		const out: MvShapeLayer[] = [];
+		for (let i = 0; i < pulseCount; i++) {
+			const phase = roundTo(at(from) + (i / pulseCount) * pulseBars, 4);
+			out.push({
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled: false,
+				thickness: roundTo(baseThickness * randRange(0.4, 0.8), 1),
+				size: roundTo(baseSize * randRange(1, 1.5), 1),
+				path: emblemPath,
+				barRange: [at(from), at(to)],
+				modulators: [
+					// once を付けない＝区間の中で pulseBars ごとに繰り返す。
+					{
+						source: "phrase",
+						target: "size",
+						op: "sub",
+						amount: roundTo(baseSize * 0.65, 1),
+						bars: pulseBars,
+						phaseOffset: phase,
+						symmetric: false,
+						curve: 2,
+					},
+					{
+						source: "phrase",
+						target: "opacity",
+						op: "mul",
+						amount: 1,
+						bars: pulseBars,
+						phaseOffset: phase,
+						symmetric: false,
+						curve: 1,
+					},
+				],
+			});
+		}
+		return out;
+	};
+
+	/**
+	 * 「秩序だった飛散」——アレンジ元のバウンディングボックスの**輪郭**ぶんだけ
+	 * 小さな塗り四角を格子状に並べる（中身は空洞のまま）。画面のあちこちへ
+	 * 無秩序に散らばるのではなく、粒が集まって元の四角のシルエットを保つ
+	 * ——添付動画で指摘された「視覚的に大きな四角を維持する」工夫に対応する。
+	 */
+	const stateOrderlyScatter = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const entryBars = entryBarsOf(span, 0.3);
+		const exitBars = exitBarsOf(span, 0.25);
+		const grid = pick([3, 3, 4, 5]);
+		const half = baseSize * 0.42;
+		const cell = (half * 2) / grid;
+		const out: MvShapeLayer[] = [];
+		for (let r = 0; r < grid; r++) {
+			for (let c = 0; c < grid; c++) {
+				const isEdge = r === 0 || r === grid - 1 || c === 0 || c === grid - 1;
+				if (!isEdge) continue;
+				const px = cx - half + cell * (c + 0.5);
+				const py = cy - half + cell * (r + 0.5);
+				const sz = roundTo(cell * randRange(0.65, 0.95), 1);
+				out.push({
+					...common,
+					form: "path",
+					id: mvUid("shp"),
+					x: roundTo(px, 1),
+					y: roundTo(py, 1),
+					z: nextZ(),
+					filled: true,
+					thickness: 2,
+					size: sz,
+					path: rectPath(25, 25, 75, 75),
+					barRange: [at(from), at(to)],
+					modulators: [
+						entryFadeInModulator(at(from), entryBars),
+						exitFadeOutModulator(at(to), exitBars),
+						...(centerPop ? [sizePopModulator(sz, at(from), entryBars)] : []),
+					],
+				});
+			}
+		}
+		return out;
+	};
+
+	/**
+	 * ── 真の生成的合成 ──
+	 *
+	 * 手作りの「状態」を選ぶのではなく、`synthesizeTransform`（ファイル冒頭）が
+	 * 名前を持たない原子演算を実行のたびに合成して「その場限りの変形カテゴリ」を
+	 * 作る。フラグメント分解するか（元が複合パスの場合）、育つ向きか縮む向きか
+	 * ——これらも独立な軸で、掛け合わせることで個別に手書きしたことのない
+	 * 組み合わせが実行のたびに生まれる。実現方法は第4幕グリフ成長と同じ
+	 * 「離散フレームを焼いてクロスフェード」——エンジンはパスを毎フレーム評価
+	 * できないので、サンプルした数コマを短い barRange で並べて連続に見せる。
+	 */
+	const buildGenerativeMove = (from: number, to: number): MvShapeLayer[] => {
+		const span = to - from;
+		const fragments = splitFragments(emblemPath);
+		const useFragments = fragments.length > 1 && chance(0.55);
+		const baseFrags = useFragments ? fragments : [emblemPath];
+		const transform = synthesizeTransform(baseFrags.length);
+
+		const growIn = chance(0.6);
+		const frameCount = 5;
+		const size = roundTo(baseSize * randRange(0.85, 1.35), 1);
+		const thickness = roundTo(baseThickness * randRange(0.5, 1.7), 1);
+		const filled = chance(0.25);
+
+		const sliceLen = (durationBars * span) / frameCount;
+		const xfade = Math.min(sliceLen * 0.4, durationBars * span * 0.08);
+		const out: MvShapeLayer[] = [];
+		for (let i = 0; i < frameCount; i++) {
+			const nominalStart = at(from) + sliceLen * i;
+			const nominalEnd = i === frameCount - 1 ? at(to) : nominalStart + sliceLen;
+			const isFirst = i === 0;
+			const isLast = i === frameCount - 1;
+			const barStart = isFirst ? nominalStart : nominalStart - xfade;
+			const barEnd = isLast ? nominalEnd : nominalEnd + xfade;
+			const raw = i / (frameCount - 1);
+			const t = growIn ? raw : 1 - raw;
+			const path = transform(baseFrags, t).join(" ");
+			out.push({
+				...common,
+				form: "path",
+				id: mvUid("shp"),
+				x: cx,
+				y: cy,
+				z: nextZ(),
+				filled,
+				thickness,
+				size,
+				path,
+				barRange: [roundTo(barStart, 4), roundTo(barEnd, 4)],
+				modulators: [
+					...(isFirst
+						? [
+								entryFadeInModulator(
+									roundTo(barStart, 4),
+									Math.max(0.01, nominalEnd - nominalStart),
+								),
+							]
+						: []),
+					...(isLast
+						? []
+						: [
+								{
+									source: "phrase" as const,
+									target: "opacity" as const,
+									op: "mul" as const,
+									amount: 1,
+									bars: xfade,
+									phaseOffset: roundTo(nominalEnd, 4),
+									symmetric: false,
+									curve: 1,
+									once: true as const,
+								},
+							]),
+				],
+			});
+		}
+		return out;
+	};
+
+	// ── 状態プール。`buildGenerativeMove`（真の生成的合成）を主役に据え、
+	// 単独では表現しづらい概念（非表示・中央四角のタメ・ループする波紋など）を
+	// 補助として軽めの重みで混ぜる。決め打ちの装飾（角括弧・画面各所グリフ）は
+	// さらに稀なアクセント止まり。
+	const STATE_POOL: {
+		label: string;
+		weight: number;
+		build: (from: number, to: number) => MvShapeLayer[];
+	}[] = [
+		{ label: "生成合成", weight: 8, build: buildGenerativeMove },
+		{ label: "太い輪郭", weight: 2, build: stateSolidThick },
+		{ label: "重ねて厚み", weight: 2, build: stateStackedThick },
+		{ label: "細い輪郭", weight: 1, build: stateHollowThin },
+		{ label: "中央四角", weight: 2, build: stateCenterOnly },
+		{ label: "非表示", weight: 2, build: stateHidden },
+		{ label: "縦に伸縮する線", weight: 1, build: stateLinesV },
+		{ label: "横に伸縮する線", weight: 1, build: stateLinesH },
+		{ label: "形なりの波紋", weight: 2, build: stateShapeRipple },
+		{ label: "秩序だった飛散", weight: 2, build: stateOrderlyScatter },
+		{ label: "対角の角括弧", weight: 1, build: buildBrackets },
+		{ label: "画面各所のグリフ", weight: 1, build: buildGlyphBurst },
 	];
-	const segCount = Math.min(SEGMENT_POOL.length, pick([2, 2, 3, 3, 4]));
-	const shuffledPool = [...SEGMENT_POOL].sort(() => Math.random() - 0.5).slice(0, segCount);
-	const weights = shuffledPool.map(() => randRange(0.7, 1.4));
+	const pickState = (excludeLabel?: string) => {
+		const pool = STATE_POOL.filter((s) => s.label !== excludeLabel);
+		const total = pool.reduce((s, k) => s + k.weight, 0);
+		let r = Math.random() * total;
+		for (const k of pool) {
+			r -= k.weight;
+			if (r <= 0) return k;
+		}
+		return pool[pool.length - 1];
+	};
+
+	// ── ランダムウォーク: 状態数も各状態の長さも整数の「幕」に量子化しない。
+	// 状態数は多めに取り、参考動画のような「細かく切り替わり続ける」密度にする
+	// （同じ状態が連続しないようにだけ気を配る）。
+	const stateCount = Math.round(randRange(12, 26, 0));
+	const weights: number[] = [];
+	const picks: (typeof STATE_POOL)[number][] = [];
+	let prevLabel: string | undefined;
+	for (let i = 0; i < stateCount; i++) {
+		const s = pickState(prevLabel);
+		picks.push(s);
+		prevLabel = s.label;
+		weights.push(randRange(0.4, 1.6));
+	}
 	const totalW = weights.reduce((a, b) => a + b, 0);
-	let cursor = 0.25;
-	shuffledPool.forEach((seg, i) => {
-		const isLastSeg = i === shuffledPool.length - 1;
+	const segments: { label: string; from: number; to: number }[] = [];
+	let cursor = 0;
+	picks.forEach((s, i) => {
+		const isLast = i === picks.length - 1;
 		const segFrom = cursor;
-		const segTo = isLastSeg ? 1 : roundTo(cursor + 0.75 * (weights[i] / totalW), 4);
+		const segTo = isLast ? 1 : roundTo(cursor + weights[i] / totalW, 4);
 		cursor = segTo;
-		layers.push(...seg.build(segFrom, segTo));
-		segments.push({ label: seg.label, from: segFrom, to: segTo });
+		layers.push(...s.build(segFrom, segTo));
+		segments.push({ label: s.label, from: segFrom, to: segTo });
 	});
 
 	return { group, layers, segments };
