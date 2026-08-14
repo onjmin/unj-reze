@@ -3607,6 +3607,7 @@ export default function MvMaker({
 						{ value: "'PBfont', sans-serif", label: "PBfont(かわいい)" },
 						{ value: "'chupakafont', sans-serif", label: "チュパカブラフォント" },
 						{ value: "'favofont', sans-serif", label: "ふぁぼフォント" },
+						{ value: "'nagamonfont', sans-serif", label: "長モンフォント" },
 						...customFonts.map((f) => ({
 							value: `'${f.name}', sans-serif`,
 							label: `${f.name}`,
