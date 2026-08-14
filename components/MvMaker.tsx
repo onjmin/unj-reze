@@ -9,6 +9,7 @@ import {
 	Clipboard,
 	Copy,
 	Download,
+	Film,
 	FolderPlus,
 	FolderX,
 	Grid3x3,
@@ -17,6 +18,7 @@ import {
 	Image as ImageIcon,
 	Layers,
 	ListMusic,
+	Loader2,
 	Music,
 	Play,
 	Plus,
@@ -2206,6 +2208,10 @@ export default function MvMaker({
 			| { sectionId: string };
 	} | null>(null);
 	const playerRef = useRef<MvPlayerHandle>(null);
+	const [exportingMp4, setExportingMp4] = useState(false);
+	const [exportProgress, setExportProgress] = useState(0);
+	const [exportStatusText, setExportStatusText] = useState("");
+	const cancelExportRef = useRef<(() => void) | null>(null);
 	const [lyricTimingIndexMap, setLyricTimingIndexMap] = useState<
 		Record<string, number>
 	>({});
@@ -2613,6 +2619,51 @@ export default function MvMaker({
 		a.download = `${(manifest.title.trim() || "MV").replace(/\s+/g, "_")}.json`;
 		a.click();
 		URL.revokeObjectURL(url);
+	};
+
+	const handleExportMp4 = () => {
+		if (!playerRef.current) return;
+		if (!canSave) {
+			alert("MMLが入力されていません。曲を作成してからエクスポートしてください。");
+			return;
+		}
+		setExportingMp4(true);
+		setExportProgress(0);
+		setExportStatusText("録画を準備中...");
+
+		const cancelFn = playerRef.current.startExportMp4(
+			(bar, totalBars) => {
+				const pct = Math.min(100, Math.round((bar / (totalBars || 1)) * 100));
+				setExportProgress(pct);
+				setExportStatusText(`${bar} / ${totalBars} 小節を録画中... (${pct}%)`);
+			},
+			(blob, ext) => {
+				setExportingMp4(false);
+				cancelExportRef.current = null;
+
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				const filename = (manifest.title.trim() || "MV").replace(/\s+/g, "_");
+				a.download = `${filename}.${ext}`;
+				a.click();
+				URL.revokeObjectURL(url);
+			},
+			(err) => {
+				setExportingMp4(false);
+				cancelExportRef.current = null;
+				alert(`MP4エクスポートエラー: ${err.message}`);
+			},
+		);
+		cancelExportRef.current = cancelFn;
+	};
+
+	const handleCancelExportMp4 = () => {
+		if (cancelExportRef.current) {
+			cancelExportRef.current();
+			cancelExportRef.current = null;
+		}
+		setExportingMp4(false);
 	};
 
 	const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -7873,6 +7924,16 @@ export default function MvMaker({
 							</button>
 							<button
 								onClick={() => {
+									handleExportMp4();
+									setSettingsOpen(false);
+								}}
+								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+							>
+								<Film size={13} />
+								MP4動画としてエクスポート (.mp4)
+							</button>
+							<button
+								onClick={() => {
 									importFileRef.current?.click();
 									setSettingsOpen(false);
 								}}
@@ -8532,6 +8593,35 @@ export default function MvMaker({
 					}
 					onClose={() => setShapeFormPickerLayerId(null)}
 				/>
+			)}
+
+			{exportingMp4 && (
+				<div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+					<div className="w-80 space-y-4 rounded-xl border border-gray-700 bg-gray-900 p-5 text-center shadow-2xl">
+						<div className="flex items-center justify-center gap-2.5 text-sm font-semibold text-blue-400">
+							<Loader2 className="animate-spin" size={18} />
+							MP4動画を出力中...
+						</div>
+						<p className="text-xs leading-relaxed text-gray-400">
+							MVを再生しながらキャプチャしています。終わるまでブラウザを開いたままにしてください。
+						</p>
+						<div className="h-2.5 w-full overflow-hidden rounded-full border border-gray-700 bg-gray-800">
+							<div
+								className="h-full bg-blue-500 transition-all duration-200"
+								style={{ width: `${Math.min(100, Math.max(0, exportProgress))}%` }}
+							/>
+						</div>
+						<div className="font-mono text-xs text-gray-300">
+							{exportStatusText}
+						</div>
+						<button
+							onClick={handleCancelExportMp4}
+							className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
+						>
+							録画をキャンセル
+						</button>
+					</div>
+				</div>
 			)}
 		</div>
 	);
