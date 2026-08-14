@@ -17,6 +17,9 @@ import MvPlayer from "./MvPlayer";
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
 
+const HEADER_HEIGHT = 36;
+const CONTROLS_HEIGHT = 53;
+
 interface MvBoxProps {
 	mvId: string;
 	postId: string;
@@ -66,7 +69,9 @@ export default function MvBox({
 	}, []);
 
 	const fullHeight =
-		measuredWidth > 0 ? measuredWidth * (MV_H / MV_W) + 40 : THUMBNAIL_HEIGHT;
+		measuredWidth > 0
+			? measuredWidth * (MV_H / MV_W) + HEADER_HEIGHT + CONTROLS_HEIGHT
+			: THUMBNAIL_HEIGHT;
 	const isOpen = phase === "opening" || phase === "open";
 	const currentHeight = isOpen ? fullHeight : THUMBNAIL_HEIGHT;
 
@@ -185,38 +190,45 @@ export default function MvBox({
 						transition: "opacity 200ms",
 					}}
 				>
+					{/* ヘッダーバー（動画の外側上部） */}
+					<div className="flex h-9 shrink-0 items-center justify-between border-b border-gray-800/80 bg-gray-950/90 px-3">
+						<span className="text-xs font-bold text-gray-200 truncate">
+							{mvTitle || "MV"}
+						</span>
+						<div className="flex items-center gap-1.5 shrink-0">
+							{manifest && isCollabAllowed(originType) && (
+								<button
+									onClick={() =>
+										startMvRemix({
+											manifest,
+											title: `${mvTitle}（改造）`,
+											preset: mvPreset || "pianoRoll",
+											sourceMvId: mvId,
+											sourceTitle: mvTitle,
+										})
+									}
+									className="flex items-center gap-1 rounded-full bg-cyan-600/90 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-cyan-500"
+								>
+									<Pencil size={10} /> 改造する
+								</button>
+							)}
+							<button
+								onClick={handleClose}
+								className="rounded-full bg-gray-800 px-2.5 py-1 text-[10px] font-bold text-gray-200 transition-colors hover:bg-gray-700"
+							>
+								閉じる
+							</button>
+						</div>
+					</div>
+
 					{manifest ? (
-						<MvPlayer manifest={manifest} autoPlay tapToToggle />
+						<MvPlayer manifest={manifest} autoPlay tapToToggle className="rounded-none" />
 					) : (
 						<div className="flex flex-1 items-center justify-center gap-2 text-[11px] text-gray-500">
 							{loading && <Loader2 size={14} className="animate-spin" />}
 							{error ?? (loading ? "読み込み中…" : "")}
 						</div>
 					)}
-					<div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
-						{manifest && isCollabAllowed(originType) && (
-							<button
-								onClick={() =>
-									startMvRemix({
-										manifest,
-										title: `${mvTitle}（改造）`,
-										preset: mvPreset || "pianoRoll",
-										sourceMvId: mvId,
-										sourceTitle: mvTitle,
-									})
-								}
-								className="flex items-center gap-1 rounded-full bg-cyan-600/80 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur transition-colors hover:bg-cyan-500/90"
-							>
-								<Pencil size={10} /> 改造する
-							</button>
-						)}
-						<button
-							onClick={handleClose}
-							className="rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-bold text-gray-200 backdrop-blur transition-colors hover:bg-black/90"
-						>
-							閉じる
-						</button>
-					</div>
 				</div>
 			)}
 		</div>
