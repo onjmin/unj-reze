@@ -3761,6 +3761,20 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 			? iconCycleFrames(d, layer.iconCycle)
 			: undefined;
 		const activePath = cycleFrames ? cycleFrames[0].path : layer.path;
+		if (layer.form === "path" && !activePath) {
+			// duet構図等は iconCycle のコマをわざと空文字("")にして「このコマは
+			// 何も描かない」を表現する（placeFrames 参照）。だが直後の分岐は
+			// `layer.form==="path" && activePath` の否定を「pathフォーム以外」の
+			// 判定と誤って共有していたため、ここに来ると traceForm() へ落ちていた。
+			// traceForm() は switch(layer.form) に "path" のケースが無く何もせず
+			// 戻るので、ctx 上に残った前回描画時の古いカレントパス（beginPathされ
+			// ないまま残った rect/arc 等）がそのまま bare ctx.fill()/stroke() されて
+			// しまい、意図しない巨大な塗りつぶし（画面が白一色になるバグ）の実体に
+			// なっていた。pathフォームで絵が無いコマは素直に何も描かず次の複製へ
+			// 進むのが正しい。
+			ctx.restore();
+			continue;
+		}
 		if (layer.form === "path" && activePath) {
 			// 設計座標系（pathBox）の中心を原点に、長辺が size×2 になるよう拡縮して描く
 			const box = layer.pathBox ?? [0, 0, 100, 100];
