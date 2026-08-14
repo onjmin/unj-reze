@@ -58,7 +58,10 @@ export async function startMvPlayback(
 
 	if (mode === "light") {
 		const { playMML } = await import("@onjmin/dtm");
+		const studio = await getStudio();
 		const playback = playMML(scaled, {
+			audioContext: studio.audioContext,
+			destination: studio.masterGain,
 			volume,
 			startStep,
 			synth: true,
