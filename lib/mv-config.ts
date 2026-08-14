@@ -829,6 +829,14 @@ export interface MvImageLayer extends MvLayerBase {
 export interface MvAssetRef {
 	ref: string;
 	url?: string;
+	/**
+	 * 元画像のうち、この用途で使う1コマぶんだけの切り出し矩形 [sx, sy, sw, sh]。
+	 * `walk:row_anim:...` のような複数コマの横長シート（例: 内蔵素材＞MV素材＞目開口閉）を
+	 * base/eyes/mouth へ割り当てたとき、シート全体を引き伸ばして歪ませないために使う。
+	 * 目/口はアニメーションさせない（開閉の状態遷移自体がアニメーションのため）——
+	 * ここは常に静止画1コマぶんの矩形。未指定なら画像/canvas全体を使う（従来通り）。
+	 */
+	crop?: [number, number, number, number];
 }
 
 /** 母音6種（ローマ字の子音を除いた母音本体＋撥音「ん」）。 */

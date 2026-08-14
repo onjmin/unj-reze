@@ -3030,6 +3030,22 @@ function resolveAssetRefImage(
 	return img && img.naturalWidth > 0 ? img : null;
 }
 
+/**
+ * 目/口パーツ画像の切り出し矩形。`ref.crop` があればそれを使い（row_anim等の複数コマ
+ * シートから選んだ1コマぶん）、無ければ画像/canvas全体を使う（psd由来・単一画像は従来通り）。
+ */
+function assetRefSourceRect(
+	ref: MvAssetRef | null,
+	img: CanvasImageSource,
+): SpriteRect {
+	if (ref?.crop) {
+		const [sx, sy, sw, sh] = ref.crop;
+		return { sx, sy, sw: Math.max(1, sw), sh: Math.max(1, sh) };
+	}
+	const size = canvasImageSize(img);
+	return { sx: 0, sy: 0, sw: size.w, sh: size.h };
+}
+
 /** CanvasImageSource(HTMLImageElement/HTMLCanvasElement)の実寸。 */
 function canvasImageSize(src: CanvasImageSource): { w: number; h: number } {
 	if (src instanceof HTMLImageElement) {
@@ -3175,13 +3191,16 @@ function drawCharacterLayer(d: DrawCtx, layer: MvCharacterLayer): void {
 			dw,
 			dh,
 		);
-		// 目・口は土台と同じ矩形（等倍・全体）へ重ねる。土台がスプライトシートの1コマを
-		// 切り出していても、パーツ画像はその1コマぶんの静止画として同じ大きさで重なる。
+		// 目・口は土台と同じ矩形（等倍）へ重ねる。パーツ画像に crop（row_anim等の
+		// 複数コマシートから選んだ1コマ）があればそのコマだけを、無ければ画像/canvas全体を、
+		// その1コマぶんの静止画として同じ大きさで重ねる（アニメーションはさせない）。
 		if (eyeImg) {
-			ctx.drawImage(eyeImg, -dw / 2, -dh / 2, dw, dh);
+			const s = assetRefSourceRect(eyeRef, eyeImg);
+			ctx.drawImage(eyeImg, s.sx, s.sy, s.sw, s.sh, -dw / 2, -dh / 2, dw, dh);
 		}
 		if (mouthImg) {
-			ctx.drawImage(mouthImg, -dw / 2, -dh / 2, dw, dh);
+			const s = assetRefSourceRect(mouthRef, mouthImg);
+			ctx.drawImage(mouthImg, s.sx, s.sy, s.sw, s.sh, -dw / 2, -dh / 2, dw, dh);
 		}
 		ctx.restore();
 	}

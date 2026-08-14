@@ -46,7 +46,13 @@ import {
 	saveAutosave,
 	saveHistory,
 } from "@/lib/history";
-import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
+import {
+	findLocalMvSpriteEyeMouthCombo,
+	type LocalMvSprite,
+	MV_LOCAL_SPRITES,
+	mvSpriteRef,
+	parseEyeMouthComboName,
+} from "@/lib/local-assets";
 import {
 	DEFAULT_MV_BLINK,
 	DEFAULT_MV_LIPSYNC_TRACK,
@@ -1138,6 +1144,113 @@ function walkSettingFromRef(ref: string): MvWalkSetting | undefined {
 	return setting;
 }
 
+/**
+ * row_anim系のwalk参照（例: 内蔵素材＞MV素材＞目開口閉）が持つコマ数。
+ * 複数コマの横長シートでなければ1（=クロップ不要の静止画）。
+ */
+function walkRefFrameCount(ref: string): number {
+	const wr = parseWalkRef(ref);
+	if (!wr || wr.stdId !== "row_anim" || !wr.crop) return 1;
+	return Math.max(1, wr.frames ?? 1);
+}
+
+/**
+ * row_anim系のwalk参照から、指定コマ目だけの静止画切り出し矩形を求める。
+ * キャラクターレイヤーの目/口は瞬き/口パクの開閉状態が既にアニメーションなので、
+ * パーツ画像そのものはアニメさせず1コマぶんの静止画として使う（`MvAssetRef.crop`）。
+ */
+function walkRefFrameCrop(
+	ref: string,
+	frameIndex: number,
+): [number, number, number, number] | undefined {
+	const wr = parseWalkRef(ref);
+	if (!wr || wr.stdId !== "row_anim" || !wr.crop) return undefined;
+	const frames = Math.max(1, wr.frames ?? 1);
+	const [csx, csy, csw, csh] = wr.crop;
+	const cw = csw / frames;
+	const ch = csh;
+	const row = wr.row ?? 0;
+	const idx = ((Math.round(frameIndex) % frames) + frames) % frames;
+	return [csx + idx * cw, csy + row * ch, cw, ch];
+}
+
+/** `MvAssetRef.crop` から、いま何コマ目を指しているかを逆算する（無ければ0）。 */
+function assetRefFrameIndex(asset: MvAssetRef | undefined): number {
+	if (!asset?.crop) return 0;
+	const wr = parseWalkRef(asset.ref);
+	if (!wr || !wr.crop) return 0;
+	const frames = Math.max(1, wr.frames ?? 1);
+	const cw = wr.crop[2] / frames;
+	if (cw <= 0) return 0;
+	return Math.round((asset.crop[0] - wr.crop[0]) / cw);
+}
+
+/** そのフィールドに何も割り当てられていないか（新規 character レイヤーの既定値 `{ ref: "" }`）。 */
+function isEmptyAssetRef(asset: MvAssetRef | undefined): boolean {
+	return !asset || !asset.ref;
+}
+
+/** 内蔵MV素材(LocalMvSprite)から、1コマぶんにクロップ済みの MvAssetRef を組み立てる。 */
+function assetRefForLocalSprite(s: LocalMvSprite): MvAssetRef {
+	const ref = mvSpriteRef(s);
+	const crop = walkRefFrameCrop(ref, 0);
+	return { ref, url: s.url, ...(crop ? { crop } : {}) };
+}
+
+/**
+ * 内蔵素材（MV_LOCAL_SPRITES）の「目開口閉」のような合成済み1枚絵を character レイヤーの
+ * 目/口いずれかのフィールドへ割り当てたとき、同じキャラの他の状態（目閉/口開など）を
+ * 未設定のフィールドへ自動で埋める。ユーザーがアップロードするカスタム画像には適用しない
+ * （そちらは result.url が MV_LOCAL_SPRITES に無いので何もしない）。
+ */
+function autoFillEyeMouthCombo(
+	layer: MvCharacterLayer,
+	field: CharacterAssetFieldExternal,
+	pickedUrl: string | undefined,
+): MvCharacterLayer {
+	if (
+		field !== "eyesOpen" &&
+		field !== "eyesClosed" &&
+		field !== "mouthClosed" &&
+		field !== "mouthOpen"
+	) {
+		return layer;
+	}
+	const sprite = MV_LOCAL_SPRITES.find((s) => s.url === pickedUrl);
+	if (!sprite) return layer;
+	const combo = parseEyeMouthComboName(sprite.name);
+	if (combo.eyes === undefined || combo.mouth === undefined) return layer;
+
+	let next = layer;
+	const eyes = layer.eyes;
+	if (eyes) {
+		let nextEyes = eyes;
+		if (isEmptyAssetRef(nextEyes.open)) {
+			const s2 = findLocalMvSpriteEyeMouthCombo(sprite.group, "open", combo.mouth);
+			if (s2) nextEyes = { ...nextEyes, open: assetRefForLocalSprite(s2) };
+		}
+		if (isEmptyAssetRef(nextEyes.closed)) {
+			const s2 = findLocalMvSpriteEyeMouthCombo(sprite.group, "closed", combo.mouth);
+			if (s2) nextEyes = { ...nextEyes, closed: assetRefForLocalSprite(s2) };
+		}
+		next = { ...next, eyes: nextEyes };
+	}
+	const mouth = layer.mouth;
+	if (mouth) {
+		let nextMouth = mouth;
+		if (isEmptyAssetRef(nextMouth.open)) {
+			const s2 = findLocalMvSpriteEyeMouthCombo(sprite.group, combo.eyes, "open");
+			if (s2) nextMouth = { ...nextMouth, open: assetRefForLocalSprite(s2) };
+		}
+		if (isEmptyAssetRef(nextMouth.closed)) {
+			const s2 = findLocalMvSpriteEyeMouthCombo(sprite.group, combo.eyes, "closed");
+			if (s2) nextMouth = { ...nextMouth, closed: assetRefForLocalSprite(s2) };
+		}
+		next = { ...next, mouth: nextMouth };
+	}
+	return next;
+}
+
 /** そのロールが実際に使う光り方（未設定なら見せ方ごとの既定）。 */
 function noteLight(layer: MvVisualizerLayer): MvNoteLight {
 	if (layer.light) return layer.light;
@@ -1205,29 +1318,68 @@ type CharacterAssetFieldExternal =
 	| "mouthOpen"
 	| `vowel_${MvVowel}`;
 
-/** 小さな参照ボタン＋サムネイル。base/eyes/mouth の各パーツ選択で使い回す。 */
+/**
+ * 小さな参照ボタン＋サムネイル。base/eyes/mouth の各パーツ選択で使い回す。
+ * `onFrameChange` を渡すと、複数コマの横長シート（row_anim、内蔵素材＞MV素材＞目開口閉など）を
+ * 選んだ場合に「何コマ目を使うか」の矢印ステッパーを出す。目/口はアニメさせず1コマぶんの
+ * 静止画として使うため（瞬き/口パクの開閉自体が状態遷移）、ここで1コマへ確定させる。
+ */
 function AssetRefButton({
 	label,
 	asset,
 	onPick,
+	onFrameChange,
 }: {
 	label: string;
 	asset?: MvAssetRef;
 	onPick: () => void;
+	onFrameChange?: (frameIndex: number) => void;
 }) {
+	const frameCount = asset?.ref ? walkRefFrameCount(asset.ref) : 1;
+	const showStepper = !!onFrameChange && frameCount > 1;
+	const frameIndex = assetRefFrameIndex(asset);
 	return (
-		<div className="flex items-center gap-2">
-			<button type="button" onClick={onPick} className={`${REF_BTN_CLASS} flex-1`}>
-				<ImageIcon size={12} />
-				{label}
-			</button>
-			{asset?.url && (
-				<img
-					src={asset.url}
-					onError={handleImgError}
-					alt=""
-					className="h-9 w-9 shrink-0 rounded border border-gray-700 object-contain"
-				/>
+		<div className="space-y-1">
+			<div className="flex items-center gap-2">
+				<button
+					type="button"
+					onClick={onPick}
+					className={`${REF_BTN_CLASS} flex-1`}
+				>
+					<ImageIcon size={12} />
+					{label}
+				</button>
+				{asset?.url && (
+					<img
+						src={asset.url}
+						onError={handleImgError}
+						alt=""
+						className="h-9 w-9 shrink-0 rounded border border-gray-700 object-contain"
+					/>
+				)}
+			</div>
+			{showStepper && (
+				<div className="flex items-center gap-2 text-[10px] text-gray-400">
+					<span>
+						シートの何コマ目を使うか（{frameIndex + 1}/{frameCount}）
+					</span>
+					<button
+						type="button"
+						onClick={() =>
+							onFrameChange?.((frameIndex - 1 + frameCount) % frameCount)
+						}
+						className="min-h-7 min-w-7 rounded border border-gray-700 bg-gray-800 px-1.5 text-gray-300 hover:bg-gray-700"
+					>
+						◀
+					</button>
+					<button
+						type="button"
+						onClick={() => onFrameChange?.((frameIndex + 1) % frameCount)}
+						className="min-h-7 min-w-7 rounded border border-gray-700 bg-gray-800 px-1.5 text-gray-300 hover:bg-gray-700"
+					>
+						▶
+					</button>
+				</div>
 			)}
 		</div>
 	);
@@ -1494,17 +1646,39 @@ function CharacterLayerFields({
 				{layer.eyes && (
 					<>
 						<Hint>
-							「目開」「目閉」のようなファイル名では自動関連付けされません。開いた目・閉じた目、それぞれの画像を選んでください。
+							カスタム画像は「目開」「目閉」のようなファイル名では自動関連付けされません（開いた目・閉じた目、それぞれの画像を選んでください）。内蔵素材＞MV素材の「目開口閉」等は名前が既知のため、片方を選ぶと同じキャラの他の状態も自動で埋まります。
 						</Hint>
 						<AssetRefButton
 							label="開いた目の画像"
 							asset={layer.eyes.open}
 							onPick={() => onPickAsset("eyesOpen")}
+							onFrameChange={(i) =>
+								onUpdate({
+									eyes: layer.eyes && {
+										...layer.eyes,
+										open: {
+											...layer.eyes.open,
+											crop: walkRefFrameCrop(layer.eyes.open.ref, i),
+										},
+									},
+								})
+							}
 						/>
 						<AssetRefButton
 							label="閉じた目の画像"
 							asset={layer.eyes.closed}
 							onPick={() => onPickAsset("eyesClosed")}
+							onFrameChange={(i) =>
+								onUpdate({
+									eyes: layer.eyes && {
+										...layer.eyes,
+										closed: {
+											...layer.eyes.closed,
+											crop: walkRefFrameCrop(layer.eyes.closed.ref, i),
+										},
+									},
+								})
+							}
 						/>
 						<div className="flex items-center gap-2">
 							<NumField
@@ -1621,17 +1795,39 @@ function CharacterLayerFields({
 				{layer.mouth && (
 					<>
 						<Hint>
-							「口開」「口閉」のようなファイル名では自動関連付けされません。開いた口・閉じた口、それぞれの画像を選んでください。
+							カスタム画像は「口開」「口閉」のようなファイル名では自動関連付けされません（開いた口・閉じた口、それぞれの画像を選んでください）。内蔵素材＞MV素材の「目開口閉」等は名前が既知のため、片方を選ぶと同じキャラの他の状態も自動で埋まります。
 						</Hint>
 						<AssetRefButton
 							label="閉じた口の画像"
 							asset={layer.mouth.closed}
 							onPick={() => onPickAsset("mouthClosed")}
+							onFrameChange={(i) =>
+								onUpdate({
+									mouth: layer.mouth && {
+										...layer.mouth,
+										closed: {
+											...layer.mouth.closed,
+											crop: walkRefFrameCrop(layer.mouth.closed.ref, i),
+										},
+									},
+								})
+							}
 						/>
 						<AssetRefButton
 							label="開いた口の画像"
 							asset={layer.mouth.open}
 							onPick={() => onPickAsset("mouthOpen")}
+							onFrameChange={(i) =>
+								onUpdate({
+									mouth: layer.mouth && {
+										...layer.mouth,
+										open: {
+											...layer.mouth.open,
+											crop: walkRefFrameCrop(layer.mouth.open.ref, i),
+										},
+									},
+								})
+							}
 						/>
 						<SelectField
 							label="口パクの方式"
@@ -1735,6 +1931,24 @@ function CharacterLayerFields({
 											label={MV_VOWEL_LABELS[v]}
 											asset={layer.mouth?.vowels?.[v]}
 											onPick={() => onPickAsset(`vowel_${v}`)}
+											onFrameChange={(i) =>
+												onUpdate({
+													mouth: layer.mouth && {
+														...layer.mouth,
+														vowels: {
+															...layer.mouth.vowels,
+															[v]: {
+																...layer.mouth.vowels?.[v],
+																ref: layer.mouth.vowels?.[v]?.ref ?? "",
+																crop: walkRefFrameCrop(
+																	layer.mouth.vowels?.[v]?.ref ?? "",
+																	i,
+																),
+															},
+														},
+													},
+												})
+											}
 										/>
 									))}
 								</div>
@@ -2298,32 +2512,45 @@ export default function MvMaker({
 			const sectionId = picker.target.sectionId;
 			updateSectionStage(sectionId, { bgRef: result.ref, bgUrl: result.url });
 		} else if (picker.target.field) {
-			// character レイヤーの目/口パーツ画像。土台と違ってコマ割りは持たない静止画。
+			// character レイヤーの目/口パーツ画像。土台と違ってアニメさせない静止画なので、
+			// row_anim等の複数コマシートを選んだ場合は1コマ目だけを既定でクロップして焼く
+			// （そのままだとシート全体が1コマの枠へ引き伸ばされて歪む）。
 			const layerId = picker.target.layerId;
 			const field = picker.target.field;
-			const assetRef: MvAssetRef = { ref: result.ref, url: result.url };
+			const crop = walkRefFrameCrop(result.ref, 0);
+			const assetRef: MvAssetRef = {
+				ref: result.ref,
+				url: result.url,
+				...(crop ? { crop } : {}),
+			};
 			updateLayer(layerId, (l) => {
 				if (l.kind !== "character") return l;
-				if (field === "base") return { ...l, base: assetRef };
-				if (field === "eyesOpen" && l.eyes)
-					return { ...l, eyes: { ...l.eyes, open: assetRef } };
-				if (field === "eyesClosed" && l.eyes)
-					return { ...l, eyes: { ...l.eyes, closed: assetRef } };
-				if (field === "mouthClosed" && l.mouth)
-					return { ...l, mouth: { ...l.mouth, closed: assetRef } };
-				if (field === "mouthOpen" && l.mouth)
-					return { ...l, mouth: { ...l.mouth, open: assetRef } };
-				if (field.startsWith("vowel_") && l.mouth) {
+				let next: MvCharacterLayer;
+				if (field === "base") {
+					next = { ...l, base: assetRef };
+				} else if (field === "eyesOpen" && l.eyes) {
+					next = { ...l, eyes: { ...l.eyes, open: assetRef } };
+				} else if (field === "eyesClosed" && l.eyes) {
+					next = { ...l, eyes: { ...l.eyes, closed: assetRef } };
+				} else if (field === "mouthClosed" && l.mouth) {
+					next = { ...l, mouth: { ...l.mouth, closed: assetRef } };
+				} else if (field === "mouthOpen" && l.mouth) {
+					next = { ...l, mouth: { ...l.mouth, open: assetRef } };
+				} else if (field.startsWith("vowel_") && l.mouth) {
 					const vowel = field.slice(6) as MvVowel;
-					return {
+					next = {
 						...l,
 						mouth: {
 							...l.mouth,
 							vowels: { ...l.mouth.vowels, [vowel]: assetRef },
 						},
 					};
+				} else {
+					return l;
 				}
-				return l;
+				// 内蔵MV素材(束音ロゼ等)の合成済み1枚絵を選んだ場合、同じキャラの他の
+				// 目/口の状態を未設定のフィールドへ自動で埋める（カスタム画像には適用されない）。
+				return autoFillEyeMouthCombo(next, field, result.url);
 			});
 		} else {
 			const layerId = picker.target.layerId;
@@ -2478,6 +2705,37 @@ export default function MvMaker({
 		setSelectedLayerId(layer.id);
 		setPicker({ mode: "image", target: { layerId: layer.id, field: "base" } });
 	};
+
+	/**
+	 * 既存の image レイヤーを character レイヤーへその場で変換する（kindだけ差し替え、
+	 * 配列内の位置・共通フィールドはそのまま引き継ぐ）。新規に character レイヤーを作り直させず、
+	 * 既存の画像レイヤーからも瞬き/口パクを設定できるようにするための入り口。
+	 */
+	const convertImageLayerToCharacter = (l: MvImageLayer): MvCharacterLayer => ({
+		id: l.id,
+		name: l.name,
+		sections: l.sections,
+		barRange: l.barRange,
+		z: l.z,
+		opacity: l.opacity,
+		entrance: l.entrance,
+		exit: l.exit,
+		groupId: l.groupId,
+		kind: "character",
+		base: { ref: l.ref, url: l.url },
+		x: l.x,
+		y: l.y,
+		scale: l.scale,
+		anchor: l.anchor,
+		motion: l.motion,
+		motionAmount: l.motionAmount,
+		walk: l.walk,
+		frame: l.frame,
+		pixelated: l.pixelated,
+		flipH: l.flipH,
+		flipV: l.flipV,
+		repeat: l.repeat,
+	});
 
 	const addTextLayer = () => {
 		const layer: MvTextLayer = {
@@ -3564,6 +3822,18 @@ export default function MvMaker({
 							)
 						}
 					/>
+
+					<button
+						type="button"
+						onClick={() =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "image" ? convertImageLayerToCharacter(l) : l,
+							)
+						}
+						className="min-h-9 w-full rounded border border-emerald-700 bg-emerald-900/40 px-2 text-[11px] text-emerald-200 hover:bg-emerald-900/70"
+					>
+						キャラクターレイヤーへ変換して瞬き/口パクを設定
+					</button>
 
 					<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
 						<div className="flex items-center justify-between">

@@ -266,6 +266,59 @@ export function mvSpriteRef(s: LocalMvSprite, row = 0): string {
 	return `walk:row_anim:u:${s.url}#${crop},${s.frames},0,1,0,loop,6`;
 }
 
+// ───────────────── 内蔵MV素材の目/口 状態判定（キャラクターレイヤー連携用） ─────────────────
+//
+// 「ファイル名からの自動関連付けはしない」という方針は、ユーザーがアップロードする
+// カスタム画像にのみ適用する。ここの内蔵素材(MV_LOCAL_SPRITES)は有限個で名前もこちらが
+// 完全に把握・管理しているため、「目開口閉」のような名前から目/口の状態を判定してよい
+// （束音ロゼの beat-a〜e、クッキー☆の mot-*/nyn-* 等）。
+
+export type EyeMouthState = "open" | "closed";
+
+export interface EyeMouthCombo {
+	eyes?: EyeMouthState;
+	mouth?: EyeMouthState;
+}
+
+/**
+ * 内蔵素材の名前（例:「目開口閉」）から目/口の状態を判定する。
+ * 「目開」/「目閉」/「口開」/「口閉」を含まない場合はそれぞれ undefined
+ * （例: クッキー☆の「口開」だけの名前は eyes: undefined になる）。
+ */
+export function parseEyeMouthComboName(name: string): EyeMouthCombo {
+	const eyes = name.includes("目開")
+		? "open"
+		: name.includes("目閉")
+			? "closed"
+			: undefined;
+	const mouth = name.includes("口開")
+		? "open"
+		: name.includes("口閉")
+			? "closed"
+			: undefined;
+	return { eyes, mouth };
+}
+
+/**
+ * 同じ group（同じキャラの素材群）の中から、目/口の状態が「両方とも名前から判定できる」
+ * （＝合成済みの1枚絵として目開閉×口開閉を表している）素材を探す。
+ * `eyes`/`mouth` に undefined を渡すとその軸は問わない（例: 同じ口の状態のまま目だけ違う素材を探す）。
+ */
+export function findLocalMvSpriteEyeMouthCombo(
+	group: string,
+	eyes: EyeMouthState | undefined,
+	mouth: EyeMouthState | undefined,
+): LocalMvSprite | undefined {
+	return MV_LOCAL_SPRITES.find((s) => {
+		if (s.group !== group) return false;
+		const c = parseEyeMouthComboName(s.name);
+		if (c.eyes === undefined || c.mouth === undefined) return false;
+		if (eyes !== undefined && c.eyes !== eyes) return false;
+		if (mouth !== undefined && c.mouth !== mouth) return false;
+		return true;
+	});
+}
+
 export interface LocalWalkChar {
 	surface: number;
 	name: string;
