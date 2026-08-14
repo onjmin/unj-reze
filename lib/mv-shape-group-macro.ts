@@ -1419,6 +1419,12 @@ export function generateArrangementForGroup(
 	const mains = slots.filter((s) => s.kind === "can");
 	const rest = slots.filter((s) => s.kind !== "can").sort(() => Math.random() - 0.5);
 	const chosen = [...mains, ...rest].slice(0, useCount);
+	// 幕の頭でグリフが最終形のまま静止出現していた（参考動画は逆に「小さな線
+	// から本体が伸びて」最終形へ到達する）。第1幕のフェードイン（opacity）と
+	// 同じ「phraseの減衰envelopeをsubで引く」手口を size に流用し、各グリフ
+	// がこの幕の最初の3割ぶんで小さな種（本来サイズの2割強）から本来サイズへ
+	// イージング成長するようにする。
+	const growthBars = Math.max(0.01, durationBars * 0.25 * 0.3);
 	for (const s of chosen) {
 		const glyph =
 			s.kind === "bar" ? barChartGlyph() : s.kind === "can" ? canisterGlyph() : ticksGlyph();
@@ -1434,10 +1440,21 @@ export function generateArrangementForGroup(
 			size: roundTo(s.size, 1),
 			path: glyph,
 			barRange: [at(0.75), at(1)],
-			// 区間の終わりはアレンジ元へ戻る＝ハードカットなので、この幕の最後の
-			// 15%だけ不透明度1→0のフェードアウトを掛けて、復帰の瞬間の
-			// ポップを和らげる（第1幕のフェードインと対になる措置）。
 			modulators: [
+				// 小さな種→本来サイズへイージング成長（幕の頭の30%）。
+				{
+					source: "phrase",
+					target: "size",
+					op: "sub",
+					amount: roundTo(s.size * 0.82, 1),
+					bars: growthBars,
+					phaseOffset: at(0.75),
+					symmetric: false,
+					curve: 2,
+				},
+				// 区間の終わりはアレンジ元へ戻る＝ハードカットなので、この幕の最後の
+				// 15%だけ不透明度1→0のフェードアウトを掛けて、復帰の瞬間の
+				// ポップを和らげる（第1幕のフェードインと対になる措置）。
 				{
 					source: "phrase",
 					target: "opacity",
