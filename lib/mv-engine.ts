@@ -514,10 +514,11 @@ function gatedEnvelope(
 ): number {
 	if (periodSteps <= 0) return 0;
 	const phase = ((step % periodSteps) + periodSteps) % periodSteps;
-	if (phase >= attackSteps) return 0;
+	const effectiveAttack = Math.min(attackSteps, periodSteps);
+	if (phase >= effectiveAttack) return 0;
 	return shape === "bounce"
-		? bounceEnvelope(phase, Math.max(1, attackSteps), curve)
-		: envelope(phase, Math.max(1, attackSteps), curve);
+		? bounceEnvelope(phase, Math.max(1, effectiveAttack), curve)
+		: envelope(phase, Math.max(1, effectiveAttack), curve);
 }
 
 /** `shape` に応じて `envelope`/`bounceEnvelope` を切り替える。 */

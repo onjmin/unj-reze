@@ -8183,18 +8183,27 @@ export default function MvMaker({
 						Object.values(baseShapeLayer.motionPresetByScene ?? {})[0]
 					}
 					onApply={(cfg) => {
-						updateLayer(baseShapeLayer.id, (l) => {
-							if (l.kind !== "shape") return l;
-							return {
-								...l,
-								modulators: resolveSceneModulators(cfg),
-								motionPreset: cfg,
-								// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
-								// engine 側の旧データ救済に拾われて上書きされてしまう。
-								modulatorsByScene: undefined,
-								motionPresetByScene: undefined,
-							};
-						});
+						const targetGroupId = baseShapeLayer.groupId;
+						const newMods = resolveSceneModulators(cfg);
+						update((m) => ({
+							...m,
+							layers: m.layers.map((l) => {
+								if (l.kind !== "shape") return l;
+								const isTarget = targetGroupId
+									? l.groupId === targetGroupId
+									: l.id === baseShapeLayer.id;
+								if (!isTarget) return l;
+								return {
+									...l,
+									modulators: newMods,
+									motionPreset: cfg,
+									// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
+									// engine 側の旧データ救済に拾われて上書きされてしまう。
+									modulatorsByScene: undefined,
+									motionPresetByScene: undefined,
+								};
+							}),
+						}));
 					}}
 					onClose={() => setMotionTarget(null)}
 				/>

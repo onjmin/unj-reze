@@ -250,15 +250,26 @@ export const MV_MOTION_SPEED_OPTIONS: { value: number; label: string }[] = [
 export function resolveSceneModulators(cfg: MvSceneMotionConfig): MvModulator[] {
 	const preset = findMvMotionPreset(cfg.presetId);
 	const base = preset ? preset.build() : [];
-	// 速さは全プリセット共通。source:'beat' の周期だけを選んだ速さへ差し替える
-	// （プリセットによって size/opacity/rotation など対象は違っても、速さの概念は1つ）。
-	const speed = cfg.beatSyncSpeed;
-	const withSpeed =
-		speed && speed !== 1
+	// amountOverride（回転角度の上書きなど）が設定されている場合は反映する
+	const withOverride =
+		cfg.amountOverride !== undefined
 			? base.map((m) =>
-					m.source === "beat" ? { ...m, periodBeats: speed } : m,
+					m.target === "rotation" || preset?.category === "rotate"
+						? { ...m, amount: cfg.amountOverride! }
+						: m,
 				)
 			: base;
+	// 速さは全プリセット共通。source:'beat' の周期を選んだ速さへ差し替える
+	// （プリセットによって size/opacity/rotation など対象は違っても、速さの概念は1つ）。
+	const speed = cfg.beatSyncSpeed ?? 1;
+	const withSpeed = withOverride.map((m) => {
+		if (m.source !== "beat") return m;
+		const updated: MvModulator = { ...m, periodBeats: speed };
+		if (m.attackBeats !== undefined) {
+			updated.attackBeats = Math.min(m.attackBeats, speed);
+		}
+		return updated;
+	});
 	// 裏拍：発火位置を半拍ぶんずらす。speedで周期を伸縮していても「半拍」は絶対量のまま
 	// （既存の phaseOffset があれば足し込む——通常プリセットは未設定＝0なので影響しない）。
 	const withOffbeat = cfg.offbeat

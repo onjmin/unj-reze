@@ -64,7 +64,15 @@ function MotionLivePreview({
 				palette: [],
 			},
 			sections: [],
-			layers: [{ ...baseLayer, id: "preview", modulators }],
+			layers: [
+				{
+					...baseLayer,
+					id: "preview",
+					modulators,
+					modulatorsByScene: undefined,
+					motionPresetByScene: undefined,
+				},
+			],
 		};
 		// 実際の曲のBPMで動かさないと、ビート同期プリセットの体感速度が
 		// 本編と食い違って見える（以前は120固定でズレていた）。
