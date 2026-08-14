@@ -1100,6 +1100,150 @@ function growFromCenterXRect(centerX: number, y0: number, y1: number, fullW: num
 	return rectPath(centerX - w / 2, y0, centerX + w / 2, y1);
 }
 
+/** 上辺アンカーで下方向に伸びる矩形。 */
+function growDownRect(x: number, w: number, topY: number, fullH: number, t: number): string {
+	const minH = 2;
+	const h = minH + (fullH - minH) * easeOutCubic(t);
+	return rectPath(x, topY, x + w, topY + h);
+}
+
+/** 左辺アンカーで右方向に伸びる矩形。 */
+function growRightRect(y0: number, y1: number, leftX: number, fullW: number, t: number): string {
+	const minW = 2;
+	const w = minW + (fullW - minW) * easeOutCubic(t);
+	return rectPath(leftX, y0, leftX + w, y1);
+}
+
+/** 右辺アンカーで左方向に伸びる矩形。 */
+function growLeftRect(y0: number, y1: number, rightX: number, fullW: number, t: number): string {
+	const minW = 2;
+	const w = minW + (fullW - minW) * easeOutCubic(t);
+	return rectPath(rightX - w, y0, rightX, y1);
+}
+
+/** 中心点アンカーで縦横それぞれ独立の寸法(fullW/fullH)へ伸びる矩形。 */
+function growFromCenterWH(
+	cx: number,
+	cy: number,
+	fullW: number,
+	fullH: number,
+	t: number,
+): string {
+	const min = 2;
+	const w = min + (fullW - min) * easeOutCubic(t);
+	const h = min + (fullH - min) * easeOutCubic(t);
+	return rectPath(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
+}
+
+// ───────────────── 幾何学模様の無限生成（再帰的矩形分割） ─────────────────
+//
+// 手作りの語彙（bar/can/tick/cross/dots/frame）は結局は有限個の型しか作れない。
+// ここでは一般的な生成アート手法である「再帰的矩形分割」（別名 guillotine cut /
+// Mondrian式BSP——箱を毎回ランダムな向き・比率で2分割し、葉に達したら矩形として
+// 残す）を実装し、深さ・分割比・アンカー・隙間をすべて乱数にすることで
+// 理論上無限のバリエーションを出せるようにする。矩形の集合という出力形式は
+// 既存の「部品分解＋アンカー付き成長」パイプラインとそのまま噛み合う——
+// 分割で生まれた各葉に、どの辺を固定して伸ばすか（アンカー）を1つ乱数で
+// 割り当てるだけで、成長アニメーションが手作りグリフと同じ枠組みで動く。
+
+type GeoAnchor = "bottom" | "top" | "left" | "right" | "centerX" | "centerY" | "center";
+const GEO_ANCHORS: GeoAnchor[] = [
+	"bottom",
+	"top",
+	"left",
+	"right",
+	"centerX",
+	"centerY",
+	"center",
+];
+
+interface GeoCell {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	anchor: GeoAnchor;
+}
+
+interface GeoPlan {
+	cells: GeoCell[];
+}
+
+/**
+ * 箱(x,y,w,h)を再帰的に2分割し、葉（分割をやめた箱）を隙間ぶん内側に縮めて
+ * セルとして採用する。分割の向き・比率・深さ・葉を採用するかどうか・隙間の量
+ * ——すべて乱数なので、同じ呼び出しでも毎回まったく違う構図が出る。
+ */
+function planGeo(): GeoPlan {
+	const cells: GeoCell[] = [];
+	const gapRatio = randRange(0.06, 0.16);
+	const maxDepth = 2 + Math.floor(Math.random() * 3); // 2〜4階層
+	const subdivide = (x: number, y: number, w: number, h: number, depth: number) => {
+		// 深いほど「もう分割せず葉にする」確率が上がる（無限に細かくならないように）。
+		const stopChance = depth <= 0 ? 1 : 0.28 + (maxDepth - depth) * 0.12;
+		if (w < 10 || h < 10 || Math.random() < stopChance) {
+			// 葉を間引くことで「隙間（負の空間）」も生まれ、格子で埋め尽くされた
+			// 単調な絵にならない。
+			if (Math.random() < 0.82) {
+				const gapX = w * gapRatio;
+				const gapY = h * gapRatio;
+				const cx = x + gapX;
+				const cy = y + gapY;
+				const cw = Math.max(3, w - gapX * 2);
+				const ch = Math.max(3, h - gapY * 2);
+				cells.push({
+					x: cx,
+					y: cy,
+					w: cw,
+					h: ch,
+					anchor: pick(GEO_ANCHORS),
+				});
+			}
+			return;
+		}
+		const vertical = chance(0.5);
+		const ratio = randRange(0.32, 0.68);
+		if (vertical) {
+			const w1 = w * ratio;
+			subdivide(x, y, w1, h, depth - 1);
+			subdivide(x + w1, y, w - w1, h, depth - 1);
+		} else {
+			const h1 = h * ratio;
+			subdivide(x, y, w, h1, depth - 1);
+			subdivide(x, y + h1, w, h - h1, depth - 1);
+		}
+	};
+	subdivide(4, 4, 92, 92, maxDepth);
+	if (cells.length === 0) {
+		cells.push({ x: 30, y: 30, w: 40, h: 40, anchor: "center" });
+	}
+	return { cells };
+}
+
+/** 各セルのアンカーに応じた成長関数へ振り分けて描画する。 */
+function renderGeo(plan: GeoPlan, t: number): string {
+	return plan.cells
+		.map((c) => {
+			switch (c.anchor) {
+				case "bottom":
+					return growUpRect(c.x, c.w, c.y + c.h, c.h, t);
+				case "top":
+					return growDownRect(c.x, c.w, c.y, c.h, t);
+				case "left":
+					return growRightRect(c.y, c.y + c.h, c.x, c.w, t);
+				case "right":
+					return growLeftRect(c.y, c.y + c.h, c.x + c.w, c.w, t);
+				case "centerX":
+					return growFromCenterXRect(c.x + c.w / 2, c.y, c.y + c.h, c.w, t);
+				case "centerY":
+					return growFromCenterYRect(c.x, c.w, c.y + c.h / 2, c.h, t);
+				case "center":
+					return growFromCenterWH(c.x + c.w / 2, c.y + c.h / 2, c.w, c.h, t);
+			}
+		})
+		.join(" ");
+}
+
 interface BarChartPlan {
 	x: number;
 	w: number;
@@ -1307,8 +1451,15 @@ function sizePopModulator(fullSize: number, phaseOffset: number, bars: number, c
 	};
 }
 
-/** 第4幕で使えるグリフ種。 */
-export type MvArrangementGlyphKind = "bar" | "can" | "tick" | "cross" | "dots" | "frame";
+/** 第4幕で使えるグリフ種。`geo` は再帰的矩形分割による無限生成。 */
+export type MvArrangementGlyphKind =
+	| "bar"
+	| "can"
+	| "tick"
+	| "cross"
+	| "dots"
+	| "frame"
+	| "geo";
 
 /** 特殊アレンジ生成の見た目パラメータ。未指定分はこれまでどおりの既定挙動。 */
 export interface ArrangementGenOptions {
@@ -1660,6 +1811,8 @@ export function generateArrangementForGroup(
 		{ x: MV_W * 0.5, y: MV_H * 0.12, kind: "cross", size: randRange(30, 44) },
 		{ x: MV_W * 0.24, y: MV_H * 0.86, kind: "dots", size: randRange(46, 60) },
 		{ x: MV_W * 0.76, y: MV_H * 0.14, kind: "frame", size: randRange(50, 64) },
+		{ x: MV_W * 0.5, y: MV_H * 0.5, kind: "geo", size: randRange(48, 66) },
+		{ x: MV_W * 0.68, y: MV_H * 0.68, kind: "geo", size: randRange(40, 56) },
 	];
 	const slots = allSlots.filter(
 		(s) => !genOptions?.act4Kinds || genOptions.act4Kinds.includes(s.kind),
@@ -1710,14 +1863,30 @@ export function generateArrangementForGroup(
 			const plan = planFrame();
 			return (t) => renderFrame(plan, t);
 		},
+		geo: () => {
+			const plan = planGeo();
+			return (t) => renderGeo(plan, t);
+		},
 	};
 	for (const s of chosen) {
 		const render = buildGlyphRender[s.kind]();
 		const sliceLen = growthBars / growthFrameCount;
+		// 各コマを完全なハードカットで並べると、部品成長の見た目自体は連続でも
+		// 「コマが変わった瞬間」がそのまま1回のポップに見え、5コマぶん＝
+		// 複数回ポップして見える（ユーザー報告の「2回ポップイン」の実体：
+		// フェードインの掛かる1コマ目→無地の残りのコマへの切り替わりが、
+		// 別々の出現イベントとして視認できてしまっていた）。隣接コマの
+		// barRangeをわずかに重ねて、その重なりぶんだけ前コマがフェードアウト・
+		// 次コマがフェードインするようにし（=== `fadeBridge` と同じ手口）、
+		// 1回の連続した成長に見えるようにする。
+		const xfade = Math.min(sliceLen * 0.4, growthBars * 0.08);
 		for (let i = 0; i < growthFrameCount; i++) {
-			const frameStart = at(0.75) + sliceLen * i;
-			const frameEnd = i === growthFrameCount - 1 ? at(0.75) + growthBars : frameStart + sliceLen;
+			const nominalStart = at(0.75) + sliceLen * i;
+			const nominalEnd = i === growthFrameCount - 1 ? at(0.75) + growthBars : nominalStart + sliceLen;
 			const isFirst = i === 0;
+			const isLast = i === growthFrameCount - 1;
+			const barStart = isFirst ? nominalStart : nominalStart - xfade;
+			const barEnd = isLast ? nominalEnd : nominalEnd + xfade;
 			layers.push({
 				...common,
 				form: "path",
@@ -1729,26 +1898,38 @@ export function generateArrangementForGroup(
 				thickness: 2,
 				size: roundTo(s.size, 1),
 				path: render(growthProgress[i]),
-				barRange: [roundTo(frameStart, 4), roundTo(frameEnd, 4)],
+				barRange: [roundTo(barStart, 4), roundTo(barEnd, 4)],
 				modulators: [
-					// 種の1コマ目だけ不透明度0→1のフェードインを掛け、成長開始が
-					// ハードカットでパッと現れないようにする（成長コマ同士は
-					// 「離散的に差し替わる」参考動画の質感どおりハードカットのまま）。
-					...(isFirst
-						? [
+					// 先頭コマは種から0→1、以降のコマは重なり区間ぶんだけ
+					// フェードインして前コマと入れ替わる。
+					{
+						source: "phrase" as const,
+						target: "opacity" as const,
+						op: "sub" as const,
+						amount: 1,
+						bars: Math.max(0.01, isFirst ? nominalEnd - nominalStart : xfade),
+						phaseOffset: roundTo(barStart, 4),
+						symmetric: false,
+						curve: 1,
+						once: true as const,
+					},
+					// 最終コマ以外は、自分の末尾の重なり区間ぶんフェードアウトして
+					// 次コマへ溶け込む。
+					...(isLast
+						? []
+						: [
 								{
 									source: "phrase" as const,
 									target: "opacity" as const,
-									op: "sub" as const,
+									op: "mul" as const,
 									amount: 1,
-									bars: Math.max(0.01, frameEnd - frameStart),
-									phaseOffset: roundTo(frameStart, 4),
+									bars: xfade,
+									phaseOffset: roundTo(nominalEnd, 4),
 									symmetric: false,
 									curve: 1,
 									once: true as const,
 								},
-							]
-						: []),
+							]),
 					// 部品アンカー成長に、中心からのsizeポップインを併用する。
 					...(centerPop ? [sizePopModulator(s.size, at(0.75), growthBars)] : []),
 				],

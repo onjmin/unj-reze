@@ -33,6 +33,7 @@ const ACT4_KIND_OPTIONS: { value: MvArrangementGlyphKind; label: string }[] = [
 	{ value: "cross", label: "十字" },
 	{ value: "dots", label: "ドット集合" },
 	{ value: "frame", label: "四隅枠" },
+	{ value: "geo", label: "幾何学模様（無限生成）" },
 ];
 
 const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSpeed"]>; label: string }[] = [
@@ -47,6 +48,14 @@ const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSp
  * ここでは `groups` を渡さず——`isLayerVisible` はグループの連動判定を素通りし、
  * アレンジ側のレイヤーが常に見える——`beats` 拍ぶんで単純にループさせるだけでいい。
  */
+/** 4幕それぞれのラベルと、進捗バー上での区間(0..1)。 */
+const ARRANGEMENT_ACTS = [
+	{ label: "第1幕：タメ→暗転", from: 0, to: 0.25 },
+	{ label: "第2幕：エンブレム連続フラッシュ", from: 0.25, to: 0.5 },
+	{ label: "第3幕：対角の角括弧", from: 0.5, to: 0.75 },
+	{ label: "第4幕：グリフ同時多発", from: 0.75, to: 1 },
+];
+
 function ArrangementLivePreview({
 	layers,
 	beats,
@@ -57,6 +66,15 @@ function ArrangementLivePreview({
 	bpm?: number;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const barRef = useRef<HTMLButtonElement>(null);
+	const playheadRef = useRef<HTMLDivElement>(null);
+	const actLabelRef = useRef<HTMLSpanElement>(null);
+	// 動画プレビューのシークバーと同じ発想——再生位置はDOM直操作で毎フレーム
+	// 更新する（Reactのstateにすると60fpsでの再レンダーになってしまう）。
+	// クリック/ドラッグでの頭出しは、時計の基準点(startRef)をずらすことで実現する
+	// （経過時間の計算式はそのまま、原点だけ動かす）。
+	const startRef = useRef(0);
+	const loopSecRef = useRef(1);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
@@ -85,27 +103,87 @@ function ArrangementLivePreview({
 		const stepsPerSec = (song.bpm / 60) * MV_STEPS_PER_BEAT;
 		const loopSteps = Math.max(1, beats) * MV_STEPS_PER_BEAT;
 		const loopSec = loopSteps / stepsPerSec;
+		loopSecRef.current = loopSec;
+		startRef.current = performance.now();
 		let raf = 0;
-		const start = performance.now();
 		const loop = () => {
-			const elapsed = ((performance.now() - start) / 1000) % loopSec;
+			const elapsed = ((performance.now() - startRef.current) / 1000) % loopSec;
 			const frame: MvFrameState = { step: elapsed * stepsPerSec, timeSec: elapsed };
 			ctx.clearRect(0, 0, MV_W, MV_H);
 			drawMvFrame(ctx, manifest, song, frame);
+
+			const frac = loopSec > 0 ? elapsed / loopSec : 0;
+			if (playheadRef.current) playheadRef.current.style.left = `${frac * 100}%`;
+			const actIndex = Math.min(
+				ARRANGEMENT_ACTS.length - 1,
+				Math.floor(frac * ARRANGEMENT_ACTS.length),
+			);
+			if (actLabelRef.current) {
+				actLabelRef.current.textContent = ARRANGEMENT_ACTS[actIndex].label;
+			}
 			raf = requestAnimationFrame(loop);
 		};
 		raf = requestAnimationFrame(loop);
 		return () => cancelAnimationFrame(raf);
 	}, [layers, beats, bpm]);
 
+	// バー上のクリック/ドラッグで頭出し。時計の原点(startRef)を
+	// 「その位置に相当する経過時間ぶん過去」へずらすだけで、以降は普通に
+	// 再生が続く（動画プレイヤーのシークと同じ挙動）。
+	const seekTo = (clientX: number) => {
+		const bar = barRef.current;
+		if (!bar) return;
+		const rect = bar.getBoundingClientRect();
+		const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+		const desiredElapsed = frac * loopSecRef.current;
+		startRef.current = performance.now() - desiredElapsed * 1000;
+	};
+
 	return (
-		<canvas
-			ref={canvasRef}
-			width={MV_W}
-			height={MV_H}
-			className="block h-auto w-full rounded bg-black"
-			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
-		/>
+		<div className="space-y-1.5">
+			<canvas
+				ref={canvasRef}
+				width={MV_W}
+				height={MV_H}
+				className="block h-auto w-full rounded bg-black"
+				style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+			/>
+			<button
+				type="button"
+				ref={barRef}
+				onClick={(e) => seekTo(e.clientX)}
+				onMouseDown={(e) => {
+					if (e.buttons !== 1) return;
+					const onMove = (ev: MouseEvent) => seekTo(ev.clientX);
+					const onUp = () => {
+						window.removeEventListener("mousemove", onMove);
+						window.removeEventListener("mouseup", onUp);
+					};
+					window.addEventListener("mousemove", onMove);
+					window.addEventListener("mouseup", onUp);
+				}}
+				className="relative block h-4 w-full cursor-pointer overflow-visible rounded bg-transparent p-0"
+				aria-label="再生位置をシーク"
+			>
+				<div className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+					{ARRANGEMENT_ACTS.map((act) => (
+						<div
+							key={act.label}
+							className="h-full border-r border-gray-900 bg-purple-600/40 last:border-r-0"
+							style={{ width: `${(act.to - act.from) * 100}%` }}
+						/>
+					))}
+				</div>
+				<div
+					ref={playheadRef}
+					className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow"
+					style={{ left: "0%" }}
+				/>
+			</button>
+			<span ref={actLabelRef} className="block text-[10px] text-gray-400">
+				第1幕：タメ→暗転
+			</span>
+		</div>
 	);
 }
 
