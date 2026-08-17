@@ -62,6 +62,7 @@ import FollowListSheet, { type FollowListTab } from "./FollowListSheet";
 import ImagePreview from "./ImagePreview";
 import MmlSource from "./MmlSource";
 import OriginTypeModal from "./OriginTypeModal";
+import SpriteImage from "./SpriteImage";
 import UserActionMenu from "./UserActionMenu";
 
 const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
@@ -75,6 +76,7 @@ const MusicShareModal = dynamic(() => import("./MusicShareModal"), {
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed, readProfileSeed } from "@/lib/profile-cache";
+import { walkPresetRows } from "@/lib/walk-cycle";
 
 interface ProfileViewProps {
 	userId: string;
@@ -1499,10 +1501,13 @@ export default function ProfileView({
 													}}
 													className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
 												>
-													<img
+													<SpriteImage
 														src={p.imageSrc}
 														alt={p.imageAlt || "ユーザーアート"}
 														className="max-w-full h-auto max-h-[220px] block mx-auto"
+														animFrames={p.animFrames}
+														animFps={p.animFps}
+														rows={walkPresetRows(p.walkPreset)}
 														onError={(e) => {
 															const target = e.currentTarget;
 															target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;

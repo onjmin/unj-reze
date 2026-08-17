@@ -18,6 +18,8 @@ import { extractMmlFromContent } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { getThreadDisplayTime } from "@/lib/time";
 import { Post } from "@/lib/types";
+import { walkPresetRows } from "@/lib/walk-cycle";
+import SpriteImage from "./SpriteImage";
 
 interface BbsBoardViewProps {
 	posts: Post[];
@@ -342,10 +344,14 @@ export default function BbsBoardView({
 									if (post.hasImage && post.imageSrc) {
 										return (
 											<div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60 gimp-checkered-background-white">
-												<img
+												<SpriteImage
 													src={post.imageSrc}
 													alt=""
 													className="w-full h-full object-cover"
+													animFrames={post.animFrames}
+													animFps={post.animFps}
+													rows={walkPresetRows(post.walkPreset)}
+													animate={false}
 												/>
 											</div>
 										);

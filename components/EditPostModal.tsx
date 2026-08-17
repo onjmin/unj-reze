@@ -5,7 +5,9 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { MML_MARKERS } from "@/lib/mml";
 import type { Post } from "@/lib/types";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import { useMmlSource } from "./MmlSource";
+import SpriteImage from "./SpriteImage";
 
 const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 
@@ -164,10 +166,22 @@ export default function EditPostModal({
 				{/* 添付画像 */}
 				{currentImageSrc && (
 					<div className="gimp-checkered-background-white relative rounded-lg overflow-hidden border border-gray-800 max-w-[180px] md:max-w-[260px] self-start group">
-						<img
-							src={currentImageSrc}
+						<SpriteImage
+							src={currentImageSrc ?? undefined}
 							alt="添付画像"
 							className="w-full h-auto"
+							// 編集でimageSrcが差し替わった場合、元投稿のanimFrames/walkPresetは
+							// もう対応しない（editPostがこれらの更新を受け付けないため）。
+							// 差し替わっていない＝元のまま表示のときだけアニメ扱いにする。
+							animFrames={
+								currentImageSrc === post.imageSrc ? post.animFrames : undefined
+							}
+							animFps={post.animFps}
+							rows={
+								currentImageSrc === post.imageSrc
+									? walkPresetRows(post.walkPreset)
+									: 1
+							}
 						/>
 						<div className="absolute top-1.5 right-1.5 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
 							{capabilities.editImage && (

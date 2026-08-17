@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseWalkRef } from "@/lib/asset-ref";
 import type { Post } from "@/lib/types";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import {
 	animatedCellInRect,
 	detectStandard,
@@ -17,6 +18,7 @@ import {
 	type WayKey,
 } from "@/lib/walk-sprite";
 import type { PickResult } from "./ContentPicker";
+import SpriteImage from "./SpriteImage";
 
 interface PostSlicePanelProps {
 	userId?: string;
@@ -230,14 +232,17 @@ export default function PostSlicePanel({
 								onClick={() => setSelected({ id: p.id, url: p.imageSrc! })}
 								className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background-white"
 							>
-								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img
+								<SpriteImage
 									src={p.imageSrc}
 									alt=""
 									onError={() =>
 										setFailedPostIds((prev) => new Set(prev).add(p.id))
 									}
 									className="w-full h-full object-cover"
+									animFrames={p.animFrames}
+									animFps={p.animFps}
+									rows={walkPresetRows(p.walkPreset)}
+									animate={false}
 								/>
 								<span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">
 									#{p.id}

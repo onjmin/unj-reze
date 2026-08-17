@@ -36,10 +36,12 @@ import {
 	userSheetsServerSnapshot,
 	userSheetsSnapshot,
 } from "@/lib/user-sheets";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import { loadImage, WALK_STANDARDS } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import type { PickResult } from "./ContentPicker";
 import PostSlicePanel from "./PostSlicePanel";
+import SpriteImage from "./SpriteImage";
 import WalkSpritePreview from "./WalkSpritePreview";
 
 interface UserSheetPanelProps {
@@ -739,12 +741,15 @@ function PostImageGrid({
 								title={`#${p.id}`}
 								className={`aspect-square rounded-lg overflow-hidden border bg-gray-900 relative gimp-checkered-background ${active ? "border-blue-500 ring-1 ring-blue-500" : "border-gray-700 hover:border-blue-500"}`}
 							>
-								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img
+								<SpriteImage
 									src={p.imageSrc}
 									alt=""
 									className="w-full h-full object-cover"
 									style={{ imageRendering: "pixelated" }}
+									animFrames={p.animFrames}
+									animFps={p.animFps}
+									rows={walkPresetRows(p.walkPreset)}
+									animate={false}
 								/>
 							</button>
 						);

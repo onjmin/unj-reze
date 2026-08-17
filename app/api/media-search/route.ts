@@ -36,6 +36,11 @@ export async function GET(request: NextRequest) {
 		imageSrc: r.imageSrc,
 		imageAlt: r.imageAlt,
 		mmlUrl: r.mmlUrl,
+		dotW: r.dotW,
+		dotH: r.dotH,
+		animFrames: r.animFrames,
+		animFps: r.animFps,
+		walkPreset: r.walkPreset,
 		originType: r.originType,
 		isOwner: r.isOwner,
 	}));

@@ -25,12 +25,14 @@ import {
 	ORIGIN_TYPE_OPTIONS,
 } from "@/lib/types";
 import { fetchSize, fetchText } from "@/lib/uploader";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import { loadImage } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
 import LocalAssetPanel from "./LocalAssetPanel";
 import RpgenAssetPanel from "./RpgenAssetPanel";
 import SMCAssetPanel from "./SMCAssetPanel";
+import SpriteImage from "./SpriteImage";
 import SpriteSheetBrowser from "./SpriteSheetBrowser";
 import UserSheetPanel from "./UserSheetPanel";
 
@@ -1033,8 +1035,7 @@ export default function ContentPicker({
 												}
 												className="group relative aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 gimp-checkered-background-white text-left transition"
 											>
-												{/* eslint-disable-next-line @next/next/no-img-element */}
-												<img
+												<SpriteImage
 													src={p.imageSrc}
 													alt={p.imageAlt || ""}
 													onError={() =>
@@ -1042,6 +1043,10 @@ export default function ContentPicker({
 													}
 													className="w-full h-full object-cover"
 													style={{ imageRendering: "pixelated" }}
+													animFrames={p.animFrames}
+													animFps={p.animFps}
+													rows={walkPresetRows(p.walkPreset)}
+													animate={false}
 												/>
 												{(() => {
 													const badge = originBadge(p.originType);
