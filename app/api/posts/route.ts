@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveSessionUser } from "@/lib/auth/session-server";
+import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
 import { getClientIp } from "@/lib/ip";
@@ -112,10 +112,10 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		// セッションが確認できた場合はセッション本人の identity を使う。
-		const sessionUser = await resolveSessionUser(request, bodySessionId);
-		const displayName = sessionUser?.displayName ?? bodyDisplayName ?? "名無し";
-		const authorSlug = sessionUser?.slug ?? undefined;
+		// セッション本人を解決、未登録セッションなら自動作成
+		const sessionUser = await resolveOrCreateSessionUser(request, bodySessionId);
+		const displayName = sessionUser.displayName;
+		const authorSlug = sessionUser.slug;
 
 		// 参考実装: 多層不正検知（Turnstile + 指紋 + IP/セッション相関）。
 		// fingerprint がクライアントから送られてきた場合のみ評価する後方互換設計 —

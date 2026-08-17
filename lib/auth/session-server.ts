@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { getClientIp } from "@/lib/ip";
 import type { AnonymousUser } from "@/lib/types";
 
 /** lib/session.ts がクライアント側で書くセッションCookieと同名 */
@@ -27,4 +28,22 @@ export async function resolveSessionUser(
 		(typeof bodySessionId === "string" ? bodySessionId : undefined);
 	if (!sessionId) return null;
 	return await db.getAnonymousUserBySession(sessionId);
+}
+
+/**
+ * 投稿・返信などの匿名書き込み用。
+ * 未知のセッションまたは初回アクセスの場合は自動的に匿名ユーザーを作成・取得する。
+ */
+export async function resolveOrCreateSessionUser(
+	request: NextRequest,
+	bodySessionId?: unknown,
+): Promise<AnonymousUser> {
+	const fromCookie = request.cookies.get(SESSION_COOKIE)?.value;
+	const sessionId =
+		fromCookie ||
+		(typeof bodySessionId === "string" && bodySessionId
+			? bodySessionId
+			: crypto.randomUUID());
+	const ip = getClientIp(request.headers);
+	return await db.getOrCreateAnonymousUser(sessionId, ip);
 }

@@ -37,7 +37,7 @@
  * SERIAL 採番（threads.id / res.id）はDB任せにして競合класを消し、
  * res.num のような手計算が要る値は UNIQUE 制約 + リトライで守る。
  */
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 import type { Pool } from "pg";
 import { genBbsId } from "../cc-id";
 import { extractChordsFromContent } from "../chord";
@@ -77,8 +77,6 @@ import type {
 	UpdateGameParams,
 	UpdateMvParams,
 } from "./interface";
-
-neonConfig.fetchConnectionCache = true;
 
 function getConnectionString() {
 	return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || "";
@@ -123,13 +121,14 @@ async function q<T = any>(
 	text: string,
 	params: any[] = [],
 ): Promise<{ rows: T[]; rowCount?: number }> {
+	const sanitizedParams = params.map((p) => (p === undefined ? null : p));
 	if (isLocalDatabaseUrl()) {
 		const pool = await getLocalPool();
-		const res = await pool.query(text, params);
+		const res = await pool.query(text, sanitizedParams);
 		return { rows: res.rows as T[], rowCount: res.rowCount ?? undefined };
 	}
 	const sql = getDb();
-	const res = await sql.query(text, params, { fullResults: true });
+	const res = await sql.query(text, sanitizedParams, { fullResults: true });
 	return res as { rows: T[]; rowCount?: number };
 }
 
@@ -640,7 +639,7 @@ export const pgStore: DataStore = {
 						authorId,
 						genBbsId(authorId, 1),
 						data.displayName,
-						data.avatarColor,
+						data.avatarColor ?? null,
 						c.contentText,
 						c.contentUrl,
 						c.contentType,
@@ -798,7 +797,7 @@ export const pgStore: DataStore = {
 						authorId,
 						genBbsId(authorId, 1),
 						data.displayName,
-						data.avatarColor,
+						data.avatarColor ?? null,
 						c.contentText,
 						c.contentUrl,
 						c.contentType,
