@@ -1,5 +1,9 @@
 // プリセット共有の定数・型・ファクトリ。GameMaker.tsx と各プリセット定義が参照する。
 
+export type { WeatherConfig, WeatherKind } from "@/lib/pixel-weather";
+import type { WeatherConfig } from "@/lib/pixel-weather";
+export type WeatherDef = WeatherConfig;
+
 export const TILE_SIZE = 32;
 export const COLS = 20;
 export const ROWS = 15;
@@ -343,6 +347,12 @@ export type EventCommand =
 				pos: string;
 				stops: string;
 			}[];
+	  }
+	/** 天候エフェクトを変更する（雨・雪・桜吹雪など）。weather=null または kind='none' で天候消去。 */
+	| {
+			type: "changeWeather";
+			weather?: WeatherDef | null;
+			duration?: number;
 	  }
 	/** イベントページ（フェーズ）を切り替える（RPGEN の #CH_PH）。
 	 *  phaseIndex は GUI の表示と揃えた 1 始まり（1 = 「ページ1」= pages[0]）。
@@ -1212,6 +1222,8 @@ export interface SceneDef {
 	encounterGroups?: EncounterGroup[];
 	/** ランダムエンカウント発生ステップ数（デフォルト 16）。 */
 	encounterRate?: number;
+	/** このシーンの天候設定（雨・雪・桜吹雪など）。省略時は天候なし。 */
+	weather?: WeatherDef;
 }
 
 export interface PresetData {
@@ -1230,6 +1242,8 @@ export interface PresetData {
 	overlayMap?: number[][];
 	/** 天蓋/上層レイヤー（木の上部・屋根など）。map と同サイズのグリッド。プレイヤーより手前に描画され、半透明化する。 */
 	overheadMap?: number[][];
+	/** 初期マップの天候設定 */
+	weather?: WeatherDef;
 	objects: ObjectDef[];
 	bgm?: BgmState;
 	battleBgm?: BgmState;

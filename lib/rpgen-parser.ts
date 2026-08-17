@@ -1153,20 +1153,28 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 					blocking: cmd.params.nb !== "1",
 				};
 			case CommandType.ChangeWeatherRain:
+				return {
+					type: "changeWeather",
+					weather: {
+						kind: "rain",
+						color: cmd.params.c || cmd.params.c1 || undefined,
+					},
+					duration: parseInt(cmd.params.t || cmd.params.p || "0"),
+				};
 			case CommandType.ChangeWeatherSnow:
+				return {
+					type: "changeWeather",
+					weather: {
+						kind: "snow",
+						color: cmd.params.c || cmd.params.c1 || undefined,
+					},
+					duration: parseInt(cmd.params.t || cmd.params.p || "0"),
+				};
 			case CommandType.ChangeWeatherClear:
 				return {
-					type: "screenEffect",
-					effects: [
-						{
-							type: "solid",
-							color: cmd.params.c || cmd.params.c1 || "",
-							c1: "",
-							c2: "",
-							pos: "",
-							stops: "",
-						},
-					],
+					type: "changeWeather",
+					weather: null,
+					duration: parseInt(cmd.params.t || cmd.params.p || "0"),
 				};
 			case CommandType.ChangeMessageFont:
 				return {

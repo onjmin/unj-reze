@@ -67,8 +67,9 @@ import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } fr
 import Mmo3dMaker from './Mmo3dMaker';
 import Mmo3dEditorPanel from './Mmo3dEditorPanel';
 import GameThreadBoard from './GameThreadBoard';
-import type { Mmo3dRenderer } from './game-presets/shared';
+import type { Mmo3dRenderer, WeatherDef } from './game-presets/shared';
 import { ensureSessionId } from '@/lib/session';
+import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/pixel-weather';
 
 export type { PresetId };
 
@@ -2261,6 +2262,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [screenEffect, setScreenEffect] = useState<{ effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] } | null>(null);
   const screenEffectRef = useRef<{ effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] } | null>(null);
   screenEffectRef.current = screenEffect;
+
+  const [currentWeather, setCurrentWeather] = useState<WeatherConfig | null>(null);
+  const currentWeatherRef = useRef<WeatherConfig | null>(null);
+  currentWeatherRef.current = currentWeather;
+  const lastCamXRef = useRef(0);
+  const lastCamYRef = useRef(0);
 
   const camOverrideRef = useRef<{ startX: number; startY: number; endX: number; endY: number; startTime: number; duration: number; easing?: number } | null>(null);
   const originalMapBgRef = useRef<{ ref?: string; url?: string } | null>(null);
@@ -6232,6 +6239,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setScreenEffect({ effects: cmd.effects });
           setTimeout(advance, 0);
           break;
+        case 'changeWeather':
+          setCurrentWeather(cmd.weather && cmd.weather.kind !== 'none' ? { ...cmd.weather } : null);
+          setTimeout(advance, 0);
+          break;
         case 'resetCamera': {
           const now = Date.now();
           let startX = camXRef.current;
@@ -6888,6 +6899,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ep.y = targetLayout.originY * TILE_SIZE + ep.y;
       }
     }
+    // アクティブシーンの天候を適用
+    const curScWeather = scenesRef.current[activeSceneIdxRef.current]?.weather ?? gameData.weather ?? null;
+    setCurrentWeather(curScWeather ? { ...curScWeather } : null);
+
     // アクティブシーンのエンティティをワールド座標で配置
     const s0l = layout.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current) ?? layout.layouts[0];
     const oldEntitiesMap = new Map(engineRef.current.entities?.map(e => [e.def.id, e]));
@@ -7751,6 +7766,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             })) as unknown as Entity[];
             engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
             resetSceneState();
+            setCurrentWeather(newScene.weather ? { ...newScene.weather } : null);
             setEditSceneIdx(tgtLay.sceneIdx);
             switchBgm(getCurrentFieldBgm());
             return;
@@ -7855,6 +7871,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
           encounterGaugeRef.current = 0; encounterNextRef.current = 0;
           resetSceneState();
+          setCurrentWeather(newScene.weather ? { ...newScene.weather } : null);
           switchBgm(getCurrentFieldBgm());
           break;
         }
@@ -12205,6 +12222,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.restore();
       }
 
+      // ── 天候エフェクト（角ドット・ピクセルアート）──────────────────────
+      const activeWeather = currentWeatherRef.current;
+      if (activeWeather && activeWeather.kind && activeWeather.kind !== 'none') {
+        const camDeltaX = camXRef.current - lastCamXRef.current;
+        const camDeltaY = camYRef.current - lastCamYRef.current;
+        drawPixelWeather(ctx, PLAY_W, PLAY_H, activeWeather, 16.67, camDeltaX, camDeltaY);
+      }
+      lastCamXRef.current = camXRef.current;
+      lastCamYRef.current = camYRef.current;
+
       // ── シーン間フェード遷移（土管・扉）──────────────────────────────────
       const fade = sceneFadeRef.current;
       if (fade) {
@@ -12220,6 +12247,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (nextIdx >= 0) {
             const next = scenesRef.current[nextIdx];
             activeSceneIdxRef.current = nextIdx;
+            setCurrentWeather(next.weather ? { ...next.weather } : null);
             const layout = worldLayoutRef.current;
             const nextLayout = layout?.layouts.find(l => l.sceneIdx === nextIdx);
 
@@ -19703,6 +19731,64 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             })}
                           </div>
 
+                          {/* シーン天候設定 */}
+                          <div className="space-y-1.5 pt-1.5 border-t border-gray-850">
+                            <div className="flex items-center justify-between text-[9px] text-gray-400">
+                              <span>シーン天候（角ドットエフェクト）</span>
+                              {sc.weather && sc.weather.kind !== 'none' && (
+                                <button onClick={() => setGameData(p => ({ ...p, scenes: p.scenes!.map((s, i) => i === idx ? { ...s, weather: undefined } : s) }))}
+                                  className="text-gray-500 hover:text-red-400">なしに戻す</button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <select
+                                value={sc.weather?.kind ?? 'none'}
+                                onChange={e => {
+                                  const kind = e.target.value as WeatherKind;
+                                  setGameData(p => ({
+                                    ...p,
+                                    scenes: p.scenes!.map((s, i) => i === idx ? {
+                                      ...s,
+                                      weather: kind === 'none' ? undefined : {
+                                        ...(s.weather || {}),
+                                        kind,
+                                        intensity: s.weather?.intensity ?? 1.0,
+                                      }
+                                    } : s)
+                                  }));
+                                }}
+                                className="flex-1 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none min-w-[120px]"
+                              >
+                                {(Object.keys(WEATHER_LABELS) as WeatherKind[]).map(k => (
+                                  <option key={k} value={k}>{WEATHER_LABELS[k]}</option>
+                                ))}
+                              </select>
+                              {sc.weather && sc.weather.kind !== 'none' && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] text-gray-500">強さ</span>
+                                  <input
+                                    type="number"
+                                    min={0.2}
+                                    max={3.0}
+                                    step={0.1}
+                                    value={sc.weather.intensity ?? 1.0}
+                                    onChange={e => {
+                                      const val = parseFloat(e.target.value) || 1.0;
+                                      setGameData(p => ({
+                                        ...p,
+                                        scenes: p.scenes!.map((s, i) => i === idx ? {
+                                          ...s,
+                                          weather: { ...s.weather!, intensity: val }
+                                        } : s)
+                                      }));
+                                    }}
+                                    className="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
                           {/* シーンBGM設定 */}
                           <div className="space-y-1.5 pt-1.5 border-t border-gray-850">
                             <div className="flex items-center justify-between text-[9px] text-gray-400">
@@ -20061,7 +20147,7 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
   moveCamera: 'カメラ移動', resetCamera: 'カメラリセット', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', clearScreenEffect: '画面エフェクト消去', changePhase: 'フェーズ変更',
-  playEffect: 'エフェクト再生', showGold: '所持金表示', changeFont: 'フォント変更', finishEvent: 'イベント中断',
+  changeWeather: '天候変更', playEffect: 'エフェクト再生', showGold: '所持金表示', changeFont: 'フォント変更', finishEvent: 'イベント中断',
   removeEvent: 'イベント一時削除', saveData: 'データセーブ', loadData: 'データロード',
   stopSound: '効果音停止', changeSpriteColor: '色調変更', resetSpriteColor: '色調リセット',
   seekBgm: 'BGMシーク', rateBgm: 'BGM再生速度',
@@ -20434,6 +20520,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
         case 'resumeImage': return { type: 'resumeImage', imgId: '1' };
         case 'clearScreenEffect': return { type: 'clearScreenEffect' };
         case 'screenEffect': return { type: 'screenEffect', effects: [{ type: 'solid', color: '0-0-0-50', c1: '', c2: '', pos: '', stops: '' }] };
+        case 'changeWeather': return { type: 'changeWeather', weather: { kind: 'rain', intensity: 1.0 } };
         case 'changePhase': return { type: 'changePhase', phaseIndex: 1 };
         case 'playEffect': return { type: 'playEffect', effectId: '', target: 'self' };
         case 'showGold': return { type: 'showGold', visible: true };
@@ -21536,6 +21623,78 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                 </div>
               </div>
             )}
+            {type === 'changeWeather' && (() => {
+              const w: WeatherConfig = cv.weather || { kind: 'rain', intensity: 1.0 };
+              const updateW = (patch: Partial<WeatherConfig>) => {
+                const nextW = { ...w, ...patch };
+                onChange({ weather: nextW.kind === 'none' ? null : nextW } as Partial<EventCommand>);
+              };
+              return (
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-400 block">天候の種類
+                    <select
+                      value={w.kind || 'rain'}
+                      onChange={e => updateW({ kind: e.target.value as WeatherKind })}
+                      className={`${inputCls} mt-0.5`}
+                    >
+                      {(Object.keys(WEATHER_LABELS) as WeatherKind[]).map(k => (
+                        <option key={k} value={k}>{WEATHER_LABELS[k]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {w.kind !== 'none' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-400">強さ・量 (0.2〜3.0)
+                          <input
+                            type="number"
+                            min={0.2}
+                            max={3.0}
+                            step={0.1}
+                            value={w.intensity ?? 1.0}
+                            onChange={e => updateW({ intensity: parseFloat(e.target.value) || 1.0 })}
+                            className={`${inputCls} mt-0.5`}
+                          />
+                        </label>
+                        <label className="text-[10px] text-gray-400">速度倍率 (0.2〜3.0)
+                          <input
+                            type="number"
+                            min={0.2}
+                            max={3.0}
+                            step={0.1}
+                            value={w.speed ?? 1.0}
+                            onChange={e => updateW({ speed: parseFloat(e.target.value) || 1.0 })}
+                            className={`${inputCls} mt-0.5`}
+                          />
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-400">風向 (-3.0〜3.0)
+                          <input
+                            type="number"
+                            min={-3.0}
+                            max={3.0}
+                            step={0.2}
+                            value={w.wind ?? 0.0}
+                            onChange={e => updateW({ wind: parseFloat(e.target.value) || 0.0 })}
+                            className={`${inputCls} mt-0.5`}
+                          />
+                        </label>
+                        <label className="text-[10px] text-gray-400">カスタム色（空=標準）
+                          <input
+                            type="text"
+                            placeholder="例: #90c5ef"
+                            value={w.color ?? ''}
+                            onChange={e => updateW({ color: e.target.value || undefined })}
+                            className={`${inputCls} mt-0.5`}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             {type === 'playEffect' && (
               <div className="flex flex-col gap-2">
                 <select value={cv.effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
@@ -21604,6 +21763,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'resetCamera': return `${c.duration || 0}ms`;
       case 'moveNpc': return `${c.objId || 'player'} → [${c.tx ?? '-'}, ${c.ty ?? '-'}]`;
       case 'screenEffect': return c.effects?.[0]?.color || '';
+      case 'changeWeather': return c.weather?.kind ? `${WEATHER_LABELS[c.weather.kind as WeatherKind] || c.weather.kind}` : '天候なし（快晴）';
       case 'changePhase': return `フェーズ${c.phaseIndex ?? 1}${c.objId ? ` →${c.objId}` : (c.tx != null && c.ty != null ? ` @[${c.tx}, ${c.ty}]` : '')}`;
       case 'playEffect': return `${c.effectId || '?'} @ ${c.target || 'self'}`;
       default: return '';

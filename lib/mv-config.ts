@@ -1575,7 +1575,18 @@ export type MvEffectStyle =
 	// 画面の質感
 	| "scanlines"
 	| "filmGrain"
-	| "letterbox";
+	| "letterbox"
+	// 天候・パーティクル（角ドット）
+	| "weatherRain"
+	| "weatherStorm"
+	| "weatherSnow"
+	| "weatherBlizzard"
+	| "weatherPetals"
+	| "weatherLeaves"
+	| "weatherFog"
+	| "weatherSandstorm"
+	| "weatherSparkles"
+	| "weatherSunbeams";
 
 export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
 	flash: "フラッシュ（白く光る）",
@@ -1600,10 +1611,20 @@ export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
 	scanlines: "走査線（ブラウン管）",
 	filmGrain: "フィルムノイズ（ざらつき）",
 	letterbox: "シネスコ帯（上下の黒帯）",
+	weatherRain: "ドット雨（角ドット）",
+	weatherStorm: "豪雨・嵐（雷光付き）",
+	weatherSnow: "ドット雪（粉雪）",
+	weatherBlizzard: "吹雪（猛吹雪）",
+	weatherPetals: "桜吹雪（花びら）",
+	weatherLeaves: "落ち葉（紅葉）",
+	weatherFog: "霧・もや（ディザリング）",
+	weatherSandstorm: "砂嵐（土埃）",
+	weatherSparkles: "星屑・光の粉（スパークル）",
+	weatherSunbeams: "木漏れ日（光条）",
 };
 
-/** 演出ピッカーでの見出しカテゴリ。20種類あるので分類しないと選べない。 */
-export type MvEffectCategory = "light" | "move" | "distort" | "texture";
+/** 演出ピッカーでの見出しカテゴリ。種類が多いので分類して選択可能にする。 */
+export type MvEffectCategory = "light" | "move" | "distort" | "texture" | "weather";
 
 export const MV_EFFECT_CATEGORY: Record<MvEffectStyle, MvEffectCategory> = {
 	flash: "light",
@@ -1626,6 +1647,16 @@ export const MV_EFFECT_CATEGORY: Record<MvEffectStyle, MvEffectCategory> = {
 	scanlines: "texture",
 	filmGrain: "texture",
 	letterbox: "texture",
+	weatherRain: "weather",
+	weatherStorm: "weather",
+	weatherSnow: "weather",
+	weatherBlizzard: "weather",
+	weatherPetals: "weather",
+	weatherLeaves: "weather",
+	weatherFog: "weather",
+	weatherSandstorm: "weather",
+	weatherSparkles: "weather",
+	weatherSunbeams: "weather",
 };
 
 export const MV_EFFECT_CATEGORY_LABELS: Record<MvEffectCategory, string> = {
@@ -1633,6 +1664,7 @@ export const MV_EFFECT_CATEGORY_LABELS: Record<MvEffectCategory, string> = {
 	move: "揺らす・動かす",
 	distort: "歪ませる・壊す",
 	texture: "画面の質感",
+	weather: "天候・パーティクル（角ドット）",
 };
 
 export const MV_EFFECT_STYLE_DESCRIPTIONS: Record<MvEffectStyle, string> = {
@@ -1656,6 +1688,16 @@ export const MV_EFFECT_STYLE_DESCRIPTIONS: Record<MvEffectStyle, string> = {
 	scanlines: "横線を重ねてブラウン管っぽくする。ずっと点けっぱなしで使う。",
 	filmGrain: "ざらついたノイズを乗せる。フィルムや古い映像の質感に。",
 	letterbox: "上下に黒帯を出す。映画のワンシーンのように見せる。",
+	weatherRain: "斜めに降る角ドット雨粒と着地水しぶき。",
+	weatherStorm: "強風と激しい雨粒、時折ピカッと走る角ドット稲妻。",
+	weatherSnow: "ゆらゆら左右に揺れながら降る角ドット雪片。",
+	weatherBlizzard: "横殴りに猛スピードで吹き抜ける吹雪。",
+	weatherPetals: "ひらひらと舞い踊るピンクの角ドット桜の花びら。",
+	weatherLeaves: "くるくると回転しながら舞い落ちる紅葉・枯葉。",
+	weatherFog: "市松模様（ディザリング）のレトロな霧・もや雲層。",
+	weatherSandstorm: "激しい横風に乗って流れる黄砂・砂嵐。",
+	weatherSparkles: "キラキラと点滅・浮遊する角ドットの星屑・光の粉。",
+	weatherSunbeams: "斜めに差し込む半透明の角ドット光条と光粒子。",
 };
 
 /**
@@ -1683,6 +1725,16 @@ export const MV_EFFECT_USES_COLOR: ReadonlySet<MvEffectStyle> =
 		"scanlines",
 		"letterbox",
 		"shockwave",
+		"weatherRain",
+		"weatherStorm",
+		"weatherSnow",
+		"weatherBlizzard",
+		"weatherPetals",
+		"weatherLeaves",
+		"weatherFog",
+		"weatherSandstorm",
+		"weatherSparkles",
+		"weatherSunbeams",
 	]);
 
 /**

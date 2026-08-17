@@ -9,7 +9,8 @@
 import { detectProgression } from "@onjmin/chord-parser";
 import { imageRefToUrl, isPsdRef } from "./asset-ref";
 import { resolveBlinkState } from "./mv-blink";
-import { peekPsdImage, preloadPsdRef } from "./mv-psd";
+import { preloadPsdRef, peekPsdImage } from "./mv-psd";
+import { drawPixelWeather, type WeatherKind } from "./pixel-weather";
 import {
 	chordRootName,
 	chordToneLabel,
@@ -1614,6 +1615,44 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				ctx.fillStyle = fx.color || "#000000";
 				ctx.fillRect(0, 0, MV_W, h);
 				ctx.fillRect(0, MV_H - h, MV_W, h);
+				break;
+			}
+			case "weatherRain":
+			case "weatherStorm":
+			case "weatherSnow":
+			case "weatherBlizzard":
+			case "weatherPetals":
+			case "weatherLeaves":
+			case "weatherFog":
+			case "weatherSandstorm":
+			case "weatherSparkles":
+			case "weatherSunbeams": {
+				const weatherKindMap: Record<string, WeatherKind> = {
+					weatherRain: "rain",
+					weatherStorm: "storm",
+					weatherSnow: "snow",
+					weatherBlizzard: "blizzard",
+					weatherPetals: "cherryBlossom",
+					weatherLeaves: "leaves",
+					weatherFog: "fog",
+					weatherSandstorm: "sandstorm",
+					weatherSparkles: "sparkles",
+					weatherSunbeams: "sunbeams",
+				};
+				const kind = weatherKindMap[fx.style] || "rain";
+				drawPixelWeather(
+					ctx,
+					MV_W,
+					MV_H,
+					{
+						kind,
+						intensity: fx.amount ?? 1.0,
+						color: fx.color,
+						opacity: env,
+						pixelSize: 2,
+					},
+					16.67,
+				);
 				break;
 			}
 		}
