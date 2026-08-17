@@ -59,6 +59,12 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
 				description: "kusaの避難所SNS (wara)",
 				src: "https://warasns.pages.dev/",
 			},
+			{
+				name: "クサマチ",
+				description:
+					"今日の人生を、ひとつ。毎日ひとつ、その日だけのあなたが配られます。",
+				src: "https://kusa-machi-production.up.railway.app/",
+			},
 		],
 	},
 	{

@@ -16,13 +16,32 @@ export interface DrawingExportDialogProps {
 	walkActiveWayIndex?: number;
 	onExportSinglePng: (scale: number) => void | Promise<void>;
 	onExportSpriteSheet?: (scale: number) => void | Promise<void>;
-	onExportGif?: (options: { scale: number; transparent: boolean }) => void | Promise<void>;
+	onExportGif?: (options: {
+		scale: number;
+		transparent: boolean;
+		backgroundColor?: string;
+	}) => void | Promise<void>;
 	onExportZip?: (scale: number) => void | Promise<void>;
 	onExportWalkSpriteSheet?: () => void | Promise<void>;
-	onExportWalkGif?: (options: { allWays: boolean; transparent: boolean }) => void | Promise<void>;
+	onExportWalkGif?: (options: {
+		allWays: boolean;
+		transparent: boolean;
+		backgroundColor?: string;
+	}) => void | Promise<void>;
 	onExportWalkZip?: () => void | Promise<void>;
 	onExportWalkAni?: () => void | Promise<void>;
 }
+
+const BG_PRESET_COLORS = [
+	"#ffffff",
+	"#000000",
+	"#1a1b26",
+	"#475569",
+	"#22c55e",
+	"#3b82f6",
+	"#ef4444",
+	"#eab308",
+];
 
 export default function DrawingExportDialog({
 	open,
@@ -44,7 +63,8 @@ export default function DrawingExportDialog({
 	onExportWalkAni,
 }: DrawingExportDialogProps) {
 	const [scale, setScale] = useState<number>(isDotEditor ? 1 : 1);
-	const [transparent, setTransparent] = useState(true);
+	const [useSolidBg, setUseSolidBg] = useState(false);
+	const [bgColor, setBgColor] = useState("#ffffff");
 	const [exporting, setExporting] = useState(false);
 	const [walkGifAllWays, setWalkGifAllWays] = useState(false);
 
@@ -121,23 +141,77 @@ export default function DrawingExportDialog({
 					</div>
 				)}
 
-				{/* オプション（GIF透過設定など） */}
+				{/* オプション（GIF透過 / 単色背景設定など） */}
 				{(mode === "anim" || mode === "walk") && (
-					<div className="rounded-lg bg-gray-900/60 p-3 border border-gray-800 space-y-2 text-xs">
+					<div className="rounded-lg bg-gray-900/60 p-3 border border-gray-800 space-y-2.5 text-xs">
 						<div className="flex items-center justify-between">
-							<span className="text-gray-300">GIFの背景透過</span>
-							<label className="relative inline-flex items-center cursor-pointer">
-								<input
-									type="checkbox"
-									checked={transparent}
-									onChange={(e) => setTransparent(e.target.checked)}
-									className="sr-only peer"
-								/>
-								<div className="w-8 h-4 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3.5 after:transition-all peer-checked:bg-blue-600" />
-							</label>
+							<div className="space-y-0.5">
+								<span className="text-gray-300 font-medium">GIFの背景色</span>
+								<div className="text-[10px] text-gray-500">
+									{useSolidBg ? "指定の単色背景で出力" : "透過（透明）背景で出力"}
+								</div>
+							</div>
+							<div className="flex items-center gap-1.5 bg-gray-800/80 p-0.5 rounded-lg border border-gray-700">
+								<button
+									type="button"
+									onClick={() => setUseSolidBg(false)}
+									className={`px-2.5 py-1 rounded text-[11px] font-medium transition ${
+										!useSolidBg
+											? "bg-blue-600 text-white shadow-sm"
+											: "text-gray-400 hover:text-gray-200"
+									}`}
+								>
+									透過
+								</button>
+								<button
+									type="button"
+									onClick={() => setUseSolidBg(true)}
+									className={`px-2.5 py-1 rounded text-[11px] font-medium transition ${
+										useSolidBg
+											? "bg-blue-600 text-white shadow-sm"
+											: "text-gray-400 hover:text-gray-200"
+									}`}
+								>
+									単色背景
+								</button>
+							</div>
 						</div>
+
+						{/* 単色背景選択時 */}
+						{useSolidBg && (
+							<div className="pt-2 border-t border-gray-800/80 space-y-1.5">
+								<div className="flex items-center justify-between">
+									<span className="text-[11px] text-gray-400">背景色</span>
+									<span className="text-[10px] text-gray-500 font-mono">{bgColor}</span>
+								</div>
+								<div className="flex items-center gap-2">
+									<input
+										type="color"
+										value={bgColor}
+										onChange={(e) => setBgColor(e.target.value)}
+										className="w-8 h-8 rounded border border-gray-700 cursor-pointer bg-transparent shrink-0"
+									/>
+									<div className="flex flex-wrap gap-1 flex-1">
+										{BG_PRESET_COLORS.map((c) => (
+											<button
+												key={c}
+												type="button"
+												onClick={() => setBgColor(c)}
+												className={`w-5 h-5 rounded border transition-transform ${
+													bgColor.toLowerCase() === c.toLowerCase()
+														? "border-white scale-110 shadow"
+														: "border-gray-700/80 hover:scale-105"
+												}`}
+												style={{ backgroundColor: c }}
+											/>
+										))}
+									</div>
+								</div>
+							</div>
+						)}
+
 						{mode === "walk" && (
-							<div className="flex items-center justify-between pt-1 border-t border-gray-800/80">
+							<div className="flex items-center justify-between pt-2 border-t border-gray-800/80">
 								<span className="text-gray-300">GIF出力対象</span>
 								<div className="flex gap-1">
 									<button
@@ -191,7 +265,11 @@ export default function DrawingExportDialog({
 								disabled={exporting}
 								onClick={() =>
 									handleAction(() =>
-										onExportGif?.({ scale, transparent }),
+										onExportGif?.({
+											scale,
+											transparent: !useSolidBg,
+											backgroundColor: useSolidBg ? bgColor : undefined,
+										}),
 									)
 								}
 								className="w-full flex items-center justify-between py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs shadow transition active:scale-[0.98] disabled:opacity-50"
@@ -268,7 +346,8 @@ export default function DrawingExportDialog({
 									handleAction(() =>
 										onExportWalkGif?.({
 											allWays: walkGifAllWays,
-											transparent,
+											transparent: !useSolidBg,
+											backgroundColor: useSolidBg ? bgColor : undefined,
 										}),
 									)
 								}

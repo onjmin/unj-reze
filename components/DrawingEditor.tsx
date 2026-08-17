@@ -258,8 +258,11 @@ export default function DrawingEditor({
 
 	const handleExportAnimGif = async ({
 		transparent,
+		backgroundColor,
 	}: {
+		scale?: number;
 		transparent: boolean;
+		backgroundColor?: string;
 	}) => {
 		const frameCanvases = getAnimFramesForExport();
 		if (frameCanvases.length === 0) return;
@@ -271,6 +274,7 @@ export default function DrawingEditor({
 			height: h,
 			fps: fpsRef.current,
 			transparent,
+			backgroundColor,
 			fileName: "animation.gif",
 		});
 	};

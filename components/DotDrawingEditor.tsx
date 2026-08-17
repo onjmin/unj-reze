@@ -295,9 +295,11 @@ export default function DotDrawingEditor({
 	const handleExportAnimGif = async ({
 		scale,
 		transparent,
+		backgroundColor,
 	}: {
 		scale: number;
 		transparent: boolean;
+		backgroundColor?: string;
 	}) => {
 		const frameCanvases = getAnimFramesForExport(scale);
 		const targetW = gridW * scale;
@@ -308,6 +310,7 @@ export default function DotDrawingEditor({
 			height: targetH,
 			fps: fpsRef.current,
 			transparent,
+			backgroundColor,
 			fileName: "animation.gif",
 		});
 	};
@@ -406,9 +409,11 @@ export default function DotDrawingEditor({
 	const handleExportWalkGif = async ({
 		allWays,
 		transparent,
+		backgroundColor,
 	}: {
 		allWays: boolean;
 		transparent: boolean;
+		backgroundColor?: string;
 	}) => {
 		const frames: HTMLCanvasElement[] = [];
 		if (allWays) {
@@ -431,6 +436,7 @@ export default function DotDrawingEditor({
 			height: walkPreset.h,
 			fps: fpsRef.current,
 			transparent,
+			backgroundColor,
 			fileName: `walk_${walkPreset.label}.gif`,
 		});
 	};
