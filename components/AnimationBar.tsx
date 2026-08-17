@@ -4,6 +4,7 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Copy,
+	CopyPlus,
 	Eye,
 	EyeOff,
 	Film,
@@ -15,6 +16,7 @@ import {
 import { useRef, useState } from "react";
 
 export interface FrameData {
+	id?: number;
 	layers: {
 		name: string;
 		visible: boolean;
@@ -24,8 +26,52 @@ export interface FrameData {
 	}[];
 }
 
+export interface AnimationBarFrame {
+	id: number;
+	color: string;
+}
+
+export function computeFrameColor(
+	layers: {
+		data?: Uint8ClampedArray;
+		visible?: boolean;
+		opacity?: number;
+	}[],
+): string {
+	let hash = 0x811c9dc5;
+	let hasPixels = false;
+	for (const l of layers) {
+		if (l.visible === false || (l.opacity !== undefined && l.opacity <= 0))
+			continue;
+		const d = l.data;
+		if (!d || d.length === 0) continue;
+		const len = d.length;
+		const step = Math.max(4, Math.floor(len / 256) * 4);
+		for (let i = 0; i < len; i += step) {
+			const a = d[i + 3];
+			if (a > 0) {
+				hasPixels = true;
+				const pixelVal =
+					(d[i] & 0xff) |
+					((d[i + 1] & 0xff) << 8) |
+					((d[i + 2] & 0xff) << 16) |
+					((a & 0xff) << 24);
+				hash ^= pixelVal;
+				hash = Math.imul(hash, 0x01000193);
+			}
+		}
+	}
+	if (!hasPixels) {
+		return "#27272a";
+	}
+	const h = Math.abs(hash) % 360;
+	const s = 65 + (Math.abs(hash >> 8) % 25);
+	const l = 32 + (Math.abs(hash >> 16) % 16);
+	return `hsl(${h}, ${s}%, ${l}%)`;
+}
+
 interface AnimationBarProps {
-	frameCount: number;
+	frames: AnimationBarFrame[];
 	currentFrame: number;
 	fps: number;
 	isPlaying: boolean;
@@ -34,7 +80,8 @@ interface AnimationBarProps {
 	onSelectFrame: (i: number) => void;
 	onAddFrame: () => void;
 	onDeleteFrame: () => void;
-	onDuplicateFrame: () => void;
+	onDuplicateFrameAdjacent: () => void;
+	onDuplicateFrameEnd: () => void;
 	onReorderFrame?: (from: number, to: number) => void;
 	onTogglePlay: () => void;
 	onFpsChange: (fps: number) => void;
@@ -44,7 +91,7 @@ interface AnimationBarProps {
 }
 
 export default function AnimationBar({
-	frameCount,
+	frames,
 	currentFrame,
 	fps,
 	isPlaying,
@@ -53,7 +100,8 @@ export default function AnimationBar({
 	onSelectFrame,
 	onAddFrame,
 	onDeleteFrame,
-	onDuplicateFrame,
+	onDuplicateFrameAdjacent,
+	onDuplicateFrameEnd,
 	onReorderFrame,
 	onTogglePlay,
 	onFpsChange,
@@ -63,6 +111,31 @@ export default function AnimationBar({
 }: AnimationBarProps) {
 	const dragIndexRef = useRef<number | null>(null);
 	const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+	const [prevFps, setPrevFps] = useState(fps);
+	const [fpsText, setFpsText] = useState<string>(() => String(fps));
+
+	if (prevFps !== fps) {
+		setPrevFps(fps);
+		setFpsText(String(fps));
+	}
+
+	const handleFpsInputChange = (val: string) => {
+		setFpsText(val);
+		const num = parseFloat(val);
+		if (!isNaN(num) && num > 0 && num <= 120) {
+			onFpsChange(num);
+		}
+	};
+
+	const handleFpsInputBlur = () => {
+		const num = parseFloat(fpsText);
+		if (isNaN(num) || num <= 0 || num > 120) {
+			setFpsText(String(fps));
+		} else {
+			setFpsText(String(num));
+			onFpsChange(num);
+		}
+	};
 
 	const handleDragStart = (i: number, e: React.DragEvent) => {
 		dragIndexRef.current = i;
@@ -93,6 +166,8 @@ export default function AnimationBar({
 		setDropTargetIndex(null);
 	};
 
+	const frameCount = frames.length;
+
 	return (
 		<div className="flex items-center space-x-2 px-3 py-2 bg-[#0f0f11] border-t border-gray-800 shrink-0">
 			<Film size={13} className="text-gray-500 shrink-0" />
@@ -103,31 +178,45 @@ export default function AnimationBar({
 			>
 				{isPlaying ? <Pause size={12} /> : <Play size={12} />}
 			</button>
-			<div className="flex items-center space-x-0.5 overflow-x-auto scrollbar-none flex-1 py-0.5">
-				{Array.from({ length: frameCount }, (_, i) => {
+			<div className="flex items-center space-x-1 overflow-x-auto scrollbar-none flex-1 py-0.5">
+				{frames.map((frame, i) => {
 					const isTarget = dropTargetIndex === i;
 					const isCurrent = i === currentFrame;
 					return (
 						<button
-							key={i}
+							key={frame.id}
 							draggable={!isPlaying && frameCount > 1}
 							onDragStart={(e) => handleDragStart(i, e)}
 							onDragOver={(e) => handleDragOver(i, e)}
 							onDrop={(e) => handleDrop(i, e)}
 							onDragEnd={handleDragEnd}
 							onClick={() => onSelectFrame(i)}
-							title={`フレーム ${i + 1} (ドラッグして並び替え)`}
-							className={`shrink-0 w-8 h-8 rounded text-[9px] font-mono transition-all select-none relative ${
+							title={`フレーム #${frame.id} (${i + 1}番目) - ドラッグして並び替え`}
+							style={{
+								backgroundColor: frame.color,
+								boxShadow: isCurrent
+									? "inset 0 0 0 2px #ffffff, inset 0 0 0 3px rgba(0, 0, 0, 0.4)"
+									: "inset 0 0 0 1px rgba(255, 255, 255, 0.2)",
+							}}
+							className={`shrink-0 w-8 h-8 rounded text-[11px] font-mono font-bold transition-all select-none relative flex items-center justify-center ${
 								isCurrent
-									? "bg-blue-600 text-white shadow ring-1 ring-blue-400"
-									: "bg-gray-100/10 text-gray-400 hover:bg-gray-100/20"
+									? "z-10 brightness-110"
+									: "opacity-85 hover:opacity-100 hover:brightness-125"
 							} ${
 								isTarget
-									? "border-2 border-dashed border-blue-400 scale-105"
+									? "ring-2 ring-dashed ring-blue-400"
 									: ""
 							}`}
 						>
-							{i + 1}
+							<span
+								className="text-white select-none leading-none"
+								style={{
+									textShadow:
+										"-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 -1px 0 #000, 0 1px 0 #000, -1px 0 0 #000, 1px 0 0 #000",
+								}}
+							>
+								{frame.id}
+							</span>
 						</button>
 					);
 				})}
@@ -163,16 +252,23 @@ export default function AnimationBar({
 			<button
 				onClick={onAddFrame}
 				className="w-7 h-7 rounded flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 shrink-0"
-				title="フレーム追加"
+				title="新規フレーム追加"
 			>
 				<Plus size={12} />
 			</button>
 			<button
-				onClick={onDuplicateFrame}
+				onClick={onDuplicateFrameAdjacent}
 				className="w-7 h-7 rounded flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 shrink-0"
-				title="フレーム複製"
+				title="フレーム複製（隣に追加）"
 			>
 				<Copy size={12} />
+			</button>
+			<button
+				onClick={onDuplicateFrameEnd}
+				className="w-7 h-7 rounded flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 shrink-0"
+				title="フレーム複製（末尾に追加）"
+			>
+				<CopyPlus size={12} />
 			</button>
 			{frameCount > 1 && (
 				<button
@@ -183,17 +279,23 @@ export default function AnimationBar({
 					<Trash2 size={12} />
 				</button>
 			)}
-			<div className="flex items-center space-x-1.5 text-[9px] text-gray-500 shrink-0 ml-1">
+			<div className="flex items-center space-x-1 text-[10px] text-gray-400 shrink-0 ml-1">
 				<span>FPS</span>
 				<input
-					type="range"
-					min={1}
-					max={30}
-					value={fps}
-					onChange={(e) => onFpsChange(Number(e.target.value))}
-					className="w-14 h-1 accent-blue-500"
+					type="text"
+					inputMode="decimal"
+					value={fpsText}
+					onChange={(e) => handleFpsInputChange(e.target.value)}
+					onBlur={handleFpsInputBlur}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
+							(e.target as HTMLInputElement).blur();
+						}
+					}}
+					placeholder="8"
+					className="w-12 h-6 px-1 text-center bg-black/40 border border-gray-700 rounded text-xs text-gray-200 font-mono focus:outline-none focus:border-blue-500"
+					title="FPS（コマ数/秒。小数も可）"
 				/>
-				<span className="w-4 text-right font-mono text-gray-400">{fps}</span>
 			</div>
 			<div className="h-5 w-px bg-gray-800 shrink-0" />
 			<button
@@ -232,3 +334,4 @@ export default function AnimationBar({
 		</div>
 	);
 }
+

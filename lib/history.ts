@@ -9,6 +9,7 @@ export interface SavedLayer {
 }
 
 export interface SavedFrame {
+	id?: number;
 	layers: SavedLayer[];
 }
 
@@ -46,7 +47,8 @@ export interface LiveLayer {
 	data: Uint8ClampedArray;
 }
 
-interface LiveFrame {
+export interface LiveFrame {
+	id?: number;
 	layers: LiveLayer[];
 }
 
@@ -136,6 +138,7 @@ export const serializeFrames = (
 	h: number,
 ): SavedFrame[] => {
 	return frames.map((f) => ({
+		id: f.id,
 		layers: serializeLayers(f.layers, w, h),
 	}));
 };
@@ -145,9 +148,10 @@ export const deserializeFrames = async (
 	w: number,
 	h: number,
 ): Promise<LiveFrame[]> => {
-	const promises = savedFrames.map(async (sf) => {
+	const promises = savedFrames.map(async (sf, i) => {
 		const layers = await deserializeLayers(sf.layers, w, h);
 		return {
+			id: sf.id ?? i + 1,
 			layers,
 		};
 	});

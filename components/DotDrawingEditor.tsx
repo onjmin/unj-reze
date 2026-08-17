@@ -43,13 +43,30 @@ import {
 	type WalkPreset,
 	presets as walkPresets,
 } from "@/lib/walk-cycle";
-import type { FrameData } from "./AnimationBar";
-import AnimationBar from "./AnimationBar";
+import type { AnimationBarFrame, FrameData } from "./AnimationBar";
+import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
 import LayerPanel from "./LayerPanel";
 import WalkCyclePanel from "./WalkCyclePanel";
+
+function getEditorFrames(
+	instances: oekaki.LayeredCanvas[][],
+	ids: number[],
+	currentLayers: oekaki.LayeredCanvas[],
+	currentFrame: number,
+): AnimationBarFrame[] {
+	const list = instances.length > 0 ? instances : [currentLayers];
+	return list.map((layers, i) => {
+		const id = ids[i] ?? i + 1;
+		const l = i === currentFrame ? currentLayers : layers;
+		return {
+			id,
+			color: computeFrameColor(l),
+		};
+	});
+}
 
 interface DotDrawingEditorProps {
 	onClose: () => void;
@@ -164,6 +181,8 @@ export default function DotDrawingEditor({
 	const activeLayerIndexRef = useRef(0);
 	const [animMode, setAnimMode] = useState(false);
 	const frameInstancesRef = useRef<oekaki.LayeredCanvas[][]>([]);
+	const frameIdsRef = useRef<number[]>([1]);
+	const nextFrameIdRef = useRef<number>(2);
 	const currentFrameRef = useRef(0);
 	const fpsRef = useRef(8);
 	const [isPlaying, setIsPlaying] = useState(false);
@@ -732,7 +751,8 @@ export default function DotDrawingEditor({
 			if (frameInstancesRef.current[currentFrameRef.current]) {
 				frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 			}
-			return frameInstancesRef.current.map((layers) => ({
+			return frameInstancesRef.current.map((layers, i) => ({
+				id: frameIdsRef.current[i] ?? i + 1,
 				layers: layers.map((l) => ({
 					name: l.name,
 					visible: l.visible,
@@ -744,6 +764,7 @@ export default function DotDrawingEditor({
 		}
 		return [
 			{
+				id: frameIdsRef.current[0] ?? 1,
 				layers: oekaki.getLayers().map((l) => ({
 					name: l.name,
 					visible: l.visible,
@@ -934,7 +955,9 @@ export default function DotDrawingEditor({
 						h,
 					);
 					const instances: oekaki.LayeredCanvas[][] = [];
+					const restoredIds: number[] = [];
 					for (const f of deserializedFrames) {
+						restoredIds.push(f.id ?? (restoredIds.length + 1));
 						const frameLayers: oekaki.LayeredCanvas[] = [];
 						for (const {
 							name,
@@ -954,6 +977,10 @@ export default function DotDrawingEditor({
 						instances.push(frameLayers);
 					}
 					frameInstancesRef.current = instances;
+					frameIdsRef.current =
+						restoredIds.length > 0 ? restoredIds : [1];
+					nextFrameIdRef.current =
+						Math.max(...frameIdsRef.current, 0) + 1;
 					const targetFrame = Math.max(
 						0,
 						Math.min(restoredState.currentFrame || 0, instances.length - 1),
@@ -1589,6 +1616,7 @@ export default function DotDrawingEditor({
 		handleDeselect();
 		if (frameInstancesRef.current.length === 0) {
 			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
 		}
 		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 		const currentLayers = oekaki.getLayers();
@@ -1604,7 +1632,9 @@ export default function DotDrawingEditor({
 			return newL;
 		});
 		const idx = currentFrameRef.current + 1;
+		const newId = nextFrameIdRef.current++;
 		frameInstancesRef.current.splice(idx, 0, newLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
 		currentFrameRef.current = idx;
 		oekaki.setLayers(newLayers);
 		syncLayerEntries();
@@ -1619,6 +1649,7 @@ export default function DotDrawingEditor({
 		const toDelete = frameInstancesRef.current[currentFrameRef.current];
 		toDelete?.forEach((l) => l.delete());
 		frameInstancesRef.current.splice(currentFrameRef.current, 1);
+		frameIdsRef.current.splice(currentFrameRef.current, 1);
 		if (currentFrameRef.current >= frameInstancesRef.current.length)
 			currentFrameRef.current = frameInstancesRef.current.length - 1;
 		const nextLayers = frameInstancesRef.current[currentFrameRef.current];
@@ -1630,10 +1661,11 @@ export default function DotDrawingEditor({
 		forceRender((n) => n + 1);
 	};
 
-	const duplicateFrame = () => {
+	const duplicateFrameAdjacent = () => {
 		handleDeselect();
 		if (frameInstancesRef.current.length === 0) {
 			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
 		}
 		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 		const currentLayers = oekaki.getLayers();
@@ -1647,7 +1679,37 @@ export default function DotDrawingEditor({
 			return dupL;
 		});
 		const idx = currentFrameRef.current + 1;
+		const newId = nextFrameIdRef.current++;
 		frameInstancesRef.current.splice(idx, 0, dupLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
+		currentFrameRef.current = idx;
+		oekaki.setLayers(dupLayers);
+		syncLayerEntries();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const duplicateFrameEnd = () => {
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const dupLayers = currentLayers.map((src) => {
+			const dupL = new oekaki.LayeredCanvas(src.name);
+			dupL.visible = src.visible;
+			dupL.locked = src.locked;
+			dupL.opacity = src.opacity;
+			dupL.data = new Uint8ClampedArray(src.data);
+			dupL.trace();
+			return dupL;
+		});
+		const idx = frameInstancesRef.current.length;
+		const newId = nextFrameIdRef.current++;
+		frameInstancesRef.current.splice(idx, 0, dupLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
 		currentFrameRef.current = idx;
 		oekaki.setLayers(dupLayers);
 		syncLayerEntries();
@@ -1667,10 +1729,13 @@ export default function DotDrawingEditor({
 		handleDeselect();
 		if (frameInstancesRef.current.length === 0) {
 			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
 		}
 		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 		const moved = frameInstancesRef.current.splice(from, 1)[0];
 		frameInstancesRef.current.splice(to, 0, moved);
+		const movedId = frameIdsRef.current.splice(from, 1)[0];
+		frameIdsRef.current.splice(to, 0, movedId);
 
 		let newCurrent = currentFrameRef.current;
 		if (currentFrameRef.current === from) {
@@ -2188,21 +2253,25 @@ export default function DotDrawingEditor({
 				/>
 			</div>
 
+			{/* eslint-disable react-hooks/refs */}
 			{animMode && (
 				// フレーム数・現在フレーム・fps は毎フレームの高頻度更新を避けるため意図的に ref + forceRender
 				// で管理しており(各更新箇所で forceRender を呼びfresh値を反映)、ここでの ref 読み取りは安全。
 				<AnimationBar
-					// eslint-disable-next-line react-hooks/refs
-					frameCount={Math.max(1, frameInstancesRef.current.length)}
-					// eslint-disable-next-line react-hooks/refs
+					frames={getEditorFrames(
+						frameInstancesRef.current,
+						frameIdsRef.current,
+						oekaki.getLayers(),
+						currentFrameRef.current,
+					)}
 					currentFrame={currentFrameRef.current}
-					// eslint-disable-next-line react-hooks/refs
 					fps={fpsRef.current}
 					isPlaying={isPlaying}
 					onSelectFrame={selectFrame}
 					onAddFrame={addFrame}
 					onDeleteFrame={deleteFrame}
-					onDuplicateFrame={duplicateFrame}
+					onDuplicateFrameAdjacent={duplicateFrameAdjacent}
+					onDuplicateFrameEnd={duplicateFrameEnd}
 					onReorderFrame={reorderFrame}
 					onTogglePlay={togglePlay}
 					onFpsChange={handleFpsChange}
@@ -2213,6 +2282,7 @@ export default function DotDrawingEditor({
 					onExit={exitAnimMode}
 				/>
 			)}
+			{/* eslint-enable react-hooks/refs */}
 
 			{walkMode && (
 				<WalkCyclePanel
