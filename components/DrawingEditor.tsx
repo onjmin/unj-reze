@@ -591,8 +591,6 @@ export default function DrawingEditor({
 							target.name = "コラボ";
 							target.paste(img);
 							target.trace();
-							new oekaki.LayeredCanvas("レイヤー #2");
-							layerCounterRef.current = 3;
 						}
 						// re-populate layer entries
 						const updated: LayerEntry[] = oekaki

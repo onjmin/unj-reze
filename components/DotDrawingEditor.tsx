@@ -1024,8 +1024,6 @@ export default function DotDrawingEditor({
 								ctx.clearRect(0, 0, w, h);
 								ctx.drawImage(img, 0, 0, w, h);
 								target.trace();
-								new oekaki.LayeredCanvas("レイヤー #2");
-								layerCounterRef.current = 3;
 							}
 							syncLayerEntries();
 							setActiveLayerIndex(0);
@@ -1382,6 +1380,7 @@ export default function DotDrawingEditor({
 				for (const l of oekaki.getLayers()) l.delete();
 				oekaki.refresh();
 				const baseL = new oekaki.LayeredCanvas("コラボ");
+				layerCounterRef.current = 2;
 				const ctx = baseL.ctx;
 				ctx.imageSmoothingEnabled = false;
 				const w = canvasSizeRef.current.w || CANVAS_SIZE;
@@ -1389,8 +1388,6 @@ export default function DotDrawingEditor({
 				ctx.clearRect(0, 0, w, h);
 				ctx.drawImage(img, 0, 0, w, h);
 				baseL.trace();
-				new oekaki.LayeredCanvas("レイヤー #2");
-				layerCounterRef.current = 3;
 				syncLayerEntries();
 				setActiveLayerIndex(0);
 				activeLayerIndexRef.current = 0;
