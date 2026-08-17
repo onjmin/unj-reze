@@ -183,15 +183,16 @@ export default function SpriteImage({
 	const yPos = rows > 1 ? (100 * rowIndex) / (rows - 1) : 0;
 	const keyframesName = `sprite-anim-steps-${frames}`;
 
-	const spriteDiv = (
+	return (
 		<div
 			role="img"
 			aria-label={alt || ""}
-			className={isWalkPreview ? "w-full h-full" : className}
-			onClick={isWalkPreview ? undefined : onClick}
+			className={className}
+			onClick={onClick}
 			style={{
 				...style,
-				...(isWalkPreview ? {} : sizingStyle),
+				...sizingStyle,
+				...(isWalkPreview ? { position: "relative" } : {}),
 				backgroundImage: `url(${src})`,
 				backgroundSize: `${frames * 100}% ${rows * 100}%`,
 				backgroundPosition: `0% ${yPos}%`,
@@ -214,15 +215,7 @@ export default function SpriteImage({
 					}}
 				/>
 			)}
-		</div>
-	);
-
-	if (!isWalkPreview) return spriteDiv;
-
-	return (
-		<div className={`${className || ""} relative`} onClick={onClick} style={sizingStyle}>
-			{spriteDiv}
-			{ways && ways.length > 1 && (
+			{isWalkPreview && ways && ways.length > 1 && (
 				<div className="absolute inset-0 pointer-events-none">
 					{(["w", "a", "s", "d"] as const)
 						.filter((k) => ways.some((w) => w.key === k))
