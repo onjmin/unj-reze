@@ -89,8 +89,8 @@ export async function POST(request: NextRequest) {
 			fingerprint,
 			sessionId: bodySessionId,
 		}: {
-			displayName: string;
-			content: string;
+			displayName?: string;
+			content?: string;
 			hasImage?: boolean;
 			imageSrc?: string;
 			imageAlt?: string;
@@ -105,17 +105,16 @@ export async function POST(request: NextRequest) {
 			sessionId?: string;
 		} = body;
 
-		if (!bodyDisplayName || (!content && !hasImage)) {
+		if (!content && !hasImage && !gameId && !mvId) {
 			return NextResponse.json(
-				{ error: "displayName and content are required" },
+				{ error: "content or attachment is required" },
 				{ status: 400 },
 			);
 		}
 
 		// セッションが確認できた場合はセッション本人の identity を使う。
-		// 投稿はログイン不要なので、セッション不明の場合は body の displayName にフォールバックする。
 		const sessionUser = await resolveSessionUser(request, bodySessionId);
-		const displayName = sessionUser?.displayName ?? bodyDisplayName;
+		const displayName = sessionUser?.displayName ?? bodyDisplayName ?? "名無し";
 		const authorSlug = sessionUser?.slug ?? undefined;
 
 		// 参考実装: 多層不正検知（Turnstile + 指紋 + IP/セッション相関）。
@@ -173,7 +172,7 @@ export async function POST(request: NextRequest) {
 
 		const post = await db.createPost({
 			displayName,
-			content,
+			content: content ?? "",
 			hasImage,
 			imageSrc,
 			imageAlt,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { getClientIp } from "@/lib/ip";
 import { kvExists, kvSetEx } from "@/lib/kv";
@@ -32,13 +33,18 @@ export async function POST(
 		// ページ離脱時の sendBeacon などで空ボディが来ることがある
 	}
 
+	const sessionUser = await resolveSessionUser(
+		request,
+		typeof body.sessionId === "string" ? body.sessionId : undefined,
+	);
 	const phase = body.phase === "end" ? "end" : "start";
 	const cleared = phase === "end" && !!body.cleared;
 	const score = Math.max(0, Math.min(Number(body.score) || 0, 9_999_999));
 	const displayName =
-		typeof body.displayName === "string"
+		sessionUser?.displayName ??
+		(typeof body.displayName === "string"
 			? body.displayName.slice(0, 40)
-			: undefined;
+			: "名無し");
 
 	let countPlay = phase === "start";
 	if (countPlay) {

@@ -148,7 +148,7 @@ const staticApi = {
 			return encodePost(post);
 		},
 		create: async (data: {
-			displayName: string;
+			displayName?: string;
 			content: string;
 			hasImage?: boolean;
 			imageSrc?: string;
@@ -166,6 +166,7 @@ const staticApi = {
 			const decodedMvId = data.mvId ? decodeIdOrThrow(data.mvId) : undefined;
 			const post = await mockDbInstance.createPost({
 				...data,
+				displayName: data.displayName || "名無し",
 				gameId: decodedGameId,
 				mvId: decodedMvId,
 			});
@@ -231,7 +232,7 @@ const staticApi = {
 			create: async (
 				postId: string,
 				data: {
-					displayName: string;
+					displayName?: string;
 					content: string;
 					parentPostId?: string;
 					hasImage?: boolean;
@@ -252,6 +253,7 @@ const staticApi = {
 				const mvIdNum = data.mvId ? Number(data.mvId) : undefined;
 				const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), {
 					...data,
+					displayName: data.displayName || "名無し",
 					parentPostId: decodedParentPostId,
 					gameId: gameIdNum,
 					mvId: mvIdNum,
@@ -586,7 +588,7 @@ const liveApi = {
 		// MMLはここでR2へ逃がす。投稿系の入口を1本にしておくと、コンポーザ・返信・編集の
 		// どこから来ても content にMML本文が残らない（docs/NEON_EGRESS.md）
 		create: async (data: {
-			displayName: string;
+			displayName?: string;
 			content: string;
 			hasImage?: boolean;
 			imageSrc?: string;
@@ -663,7 +665,7 @@ const liveApi = {
 			create: (
 				postId: string,
 				data: {
-					displayName: string;
+					displayName?: string;
 					content: string;
 					parentPostId?: string;
 					hasImage?: boolean;

@@ -86,7 +86,7 @@ export interface MmlRef {
 }
 
 export interface CreatePostParams extends MmlRef {
-	displayName: string;
+	displayName?: string;
 	content: string;
 	hasImage?: boolean;
 	imageSrc?: string;
@@ -104,7 +104,7 @@ export interface CreatePostParams extends MmlRef {
 }
 
 export interface ReplyParams extends MmlRef {
-	displayName: string;
+	displayName?: string;
 	/** セッションから解決済みのスラッグ。省略時は displayName から導出する。 */
 	slug?: string;
 	content: string;

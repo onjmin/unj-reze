@@ -122,7 +122,6 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 		if (!text.trim()) return;
 		try {
 			const reply = await api.posts.replies.create(id, {
-				displayName: userId,
 				content: text,
 				parentPostId: id,
 			});

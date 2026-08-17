@@ -55,13 +55,6 @@ export async function POST(
 		sessionId,
 	} = body;
 
-	if (!bodyDisplayName) {
-		return NextResponse.json(
-			{ error: "displayName is required" },
-			{ status: 400 },
-		);
-	}
-
 	if (!content && !hasImage && !gameId && !mvId) {
 		return NextResponse.json(
 			{ error: "content, image, or game is required" },
@@ -70,9 +63,8 @@ export async function POST(
 	}
 
 	// セッションが確認できた場合はセッション本人の identity を使う。
-	// 返信もログイン不要なので、セッション不明の場合は body の displayName にフォールバックする。
 	const sessionUser = await resolveSessionUser(request, sessionId);
-	const displayName = sessionUser?.displayName ?? bodyDisplayName;
+	const displayName = sessionUser?.displayName ?? bodyDisplayName ?? "名無し";
 	const authorSlug = sessionUser?.slug ?? undefined;
 
 	const decodedParentPostId = parentPostId ? decodeId(parentPostId) : undefined;

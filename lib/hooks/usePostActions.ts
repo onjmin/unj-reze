@@ -171,7 +171,6 @@ export function usePostActions(
 		}));
 		try {
 			const reply = await api.posts.replies.create(postId, {
-				displayName: userId,
 				content: replyText,
 				parentPostId: postId,
 			});

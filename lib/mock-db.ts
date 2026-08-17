@@ -597,7 +597,7 @@ class MockDB {
 	}
 
 	createPost(data: {
-		displayName: string;
+		displayName?: string;
 		content: string;
 		hasImage?: boolean;
 		imageSrc?: string;
@@ -611,11 +611,12 @@ class MockDB {
 		originType?: OriginType;
 	}): Post {
 		const createdAt = this.now();
+		const name = data.displayName || "名無し";
 		const post: Post = {
 			id: this.genId(),
 			datKey: this.nextDatKey(),
-			displayName: data.displayName,
-			slug: data.slug || deriveSlug(data.displayName),
+			displayName: name,
+			slug: data.slug || deriveSlug(name),
 			createdAt,
 			time: formatRelativeTime(createdAt),
 			content: data.content,
@@ -724,7 +725,7 @@ class MockDB {
 	addReply(
 		postId: number,
 		data: {
-			displayName: string;
+			displayName?: string;
 			content: string;
 			parentPostId?: number;
 			hasImage?: boolean;
@@ -741,10 +742,11 @@ class MockDB {
 		const post = this.posts.find((p) => p.id === postId);
 		if (!post) return null;
 		const id = Math.max(0, ...this.posts.map((p) => p.id)) + 1;
+		const name = data.displayName || "名無し";
 		const reply: Post = {
 			id,
-			displayName: data.displayName,
-			slug: data.displayName,
+			displayName: name,
+			slug: name,
 			createdAt: new Date().toISOString(),
 			time: "たった今",
 			content: data.content,
@@ -781,7 +783,7 @@ class MockDB {
 		const parent = this.posts.find((p) => p.id === parentId) ?? post;
 		this.createNotification({
 			recipientId: parent.displayName,
-			actor: data.displayName,
+			actor: name,
 			type: "reply",
 			postId: post.id,
 		});
@@ -798,7 +800,7 @@ class MockDB {
 				if (target && target.displayName !== parent.displayName) {
 					this.createNotification({
 						recipientId: target.displayName,
-						actor: data.displayName,
+						actor: name,
 						type: "mention",
 						postId: post.id,
 					});

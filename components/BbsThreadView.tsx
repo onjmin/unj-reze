@@ -268,7 +268,6 @@ export default function BbsThreadView({
 			}
 
 			const reply = await api.posts.replies.create(post.id, {
-				displayName: userId,
 				content,
 				parentPostId: post.id,
 				hasImage: !!capturedImage,

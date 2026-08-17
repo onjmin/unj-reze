@@ -61,12 +61,10 @@ export default function GameThreadBoard({
 		setPosting(true);
 		setError(null);
 		try {
-			const displayName = currentUser?.displayName ?? "名無し";
 			const res = await fetch(`/api/posts/${postId}/replies`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					displayName,
 					content,
 					parentPostId: postId,
 				}),

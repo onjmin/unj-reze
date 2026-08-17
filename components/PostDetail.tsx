@@ -481,7 +481,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			}
 
 			const reply = await api.posts.replies.create(post.id, {
-				displayName: userId,
 				content,
 				parentPostId: targetParent.id,
 				hasImage: !!replyImage,
