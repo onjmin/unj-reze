@@ -5,6 +5,7 @@ import {
 	BoxSelect,
 	Brush,
 	Copy,
+	Download,
 	Eraser,
 	Film,
 	FlipHorizontal,
@@ -19,6 +20,7 @@ import {
 	RotateCcw,
 	RotateCw,
 	Save,
+	Settings,
 	Trash2,
 	Undo,
 	Upload,
@@ -37,8 +39,15 @@ import {
 	serializeFrames,
 	serializeLayers,
 } from "@/lib/history";
+import {
+	exportFramesZip,
+	exportGif,
+	exportSinglePng,
+	exportSpriteSheet,
+} from "@/lib/export-drawing";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
+import DrawingExportDialog from "./DrawingExportDialog";
 import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
@@ -159,6 +168,9 @@ export default function DrawingEditor({
 
 	// History & Autosave States
 	const [showHistory, setShowHistory] = useState(false);
+	const [showExportDialog, setShowExportDialog] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsRef = useRef<HTMLDivElement>(null);
 	const [hasAutosave, setHasAutosave] = useState(false);
 	const [autosaveData, setAutosaveData] = useState<DrawingEditorState | null>(
 		null,
@@ -180,6 +192,104 @@ export default function DrawingEditor({
 	} | null>(null);
 
 	const lastDrawToolRef = useRef<"pen" | "brush">("pen");
+
+	// 設定ドロップダウンの外側クリック検知
+	useEffect(() => {
+		const handleClickOutside = (e: MouseEvent) => {
+			if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+				setSettingsOpen(false);
+			}
+		};
+		window.addEventListener("mousedown", handleClickOutside);
+		return () => window.removeEventListener("mousedown", handleClickOutside);
+	}, []);
+
+	// --- Export Handlers ---
+	const handleExportSinglePng = () => {
+		const canvas = oekaki.render();
+		exportSinglePng(canvas, undefined, undefined, "drawing.png");
+	};
+
+	const getAnimFramesForExport = () => {
+		const frames =
+			frameInstancesRef.current.length > 0
+				? frameInstancesRef.current
+				: [oekaki.getLayers()];
+		const currentLayers = oekaki.getLayers();
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const w = active?.canvas.width || canvasSizeRef.current.w || 640;
+		const h = active?.canvas.height || canvasSizeRef.current.h || 480;
+
+		return frames.map((layers, frameIdx) => {
+			const list =
+				frameIdx === currentFrameRef.current ? currentLayers : layers;
+			const canvas = document.createElement("canvas");
+			canvas.width = w;
+			canvas.height = h;
+			const ctx = canvas.getContext("2d", { willReadFrequently: true });
+			if (ctx) {
+				for (const l of list) {
+					if (!l.visible || l.opacity <= 0) continue;
+					ctx.globalAlpha = l.opacity / 100;
+					ctx.drawImage(l.canvas, 0, 0);
+				}
+			}
+			return canvas;
+		});
+	};
+
+	const handleExportAnimSpriteSheet = () => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		exportSpriteSheet(
+			{
+				columns: frameCanvases.length,
+				rows: 1,
+				cellWidth: w,
+				cellHeight: h,
+				frames: frameCanvases,
+			},
+			"animation_spritesheet.png",
+		);
+	};
+
+	const handleExportAnimGif = async ({
+		transparent,
+	}: {
+		transparent: boolean;
+	}) => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		await exportGif({
+			frames: frameCanvases,
+			width: w,
+			height: h,
+			fps: fpsRef.current,
+			transparent,
+			fileName: "animation.gif",
+		});
+	};
+
+	const handleExportAnimZip = async () => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		await exportFramesZip({
+			frames: frameCanvases.map((canvas, i) => ({
+				name: `frame_${String(i + 1).padStart(2, "0")}.png`,
+				canvas,
+			})),
+			width: w,
+			height: h,
+			fileName: "animation_frames.zip",
+		});
+	};
 
 	useEffect(() => {
 		toolRef.current = tool;
@@ -1675,6 +1785,64 @@ export default function DrawingEditor({
 						アニメ
 					</button>
 				</div>
+				<div className="ml-auto flex items-center space-x-2">
+					{/* 設定ボタン & ドロップダウン */}
+					<div className="relative" ref={settingsRef}>
+						<button
+							onClick={() => setSettingsOpen((v) => !v)}
+							className={`p-1.5 rounded transition-colors ${
+								settingsOpen
+									? "bg-gray-700 text-white"
+									: "text-gray-400 hover:bg-gray-800 hover:text-white"
+							}`}
+							title="設定"
+						>
+							<Settings size={14} />
+						</button>
+						{settingsOpen && (
+							<div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#161622] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
+								{/* 出力・ダウンロード */}
+								<button
+									onClick={() => {
+										setShowExportDialog(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Download size={13} />
+									<span>
+										{animMode
+											? "アニメーションの出力"
+											: "画像の出力"}
+									</span>
+								</button>
+								<div className="border-t border-gray-800 my-1" />
+								{/* 読込 */}
+								<button
+									onClick={() => {
+										setShowImport(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Upload size={13} />
+									<span>画像の読込 (インポート)</span>
+								</button>
+								{/* 履歴 */}
+								<button
+									onClick={() => {
+										setShowHistory(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<History size={13} />
+									<span>履歴・スナップショット</span>
+								</button>
+							</div>
+						)}
+					</div>
+				</div>
 			</div>
 
 			{hasAutosave && (
@@ -1981,6 +2149,28 @@ export default function DrawingEditor({
 							<span>クリア</span>
 						</button>
 						<button
+							onClick={() => setShowExportDialog(true)}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="出力・ダウンロード"
+						>
+							<Download size={11} />
+							<span>出力</span>
+						</button>
+						<button
+							onClick={() => setShowImport(true)}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+						>
+							<Upload size={11} />
+							<span>読込</span>
+						</button>
+						<button
+							onClick={() => setShowHistory(true)}
+							className="px-2 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center space-x-1 text-[10px] transition-colors"
+						>
+							<History size={11} />
+							<span>履歴</span>
+						</button>
+						<button
 							onClick={handleUndo}
 							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
 						>
@@ -1995,20 +2185,6 @@ export default function DrawingEditor({
 							<span>進む</span>
 						</button>
 					</div>
-					<button
-						onClick={() => setShowImport(true)}
-						className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
-					>
-						<Upload size={11} />
-						<span>読込</span>
-					</button>
-					<button
-						onClick={() => setShowHistory(true)}
-						className="px-2 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center space-x-1 text-[10px] transition-colors"
-					>
-						<History size={11} />
-						<span>履歴</span>
-					</button>
 					<button
 						onClick={handleSave}
 						className="h-7 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1.5 px-3 text-[10px] transition-colors"
@@ -2047,6 +2223,19 @@ export default function DrawingEditor({
 				onRestore={handleRestoreHistory}
 				getCurrentData={getCurrentState}
 			/>
+			{/* eslint-disable react-hooks/refs */}
+			<DrawingExportDialog
+				open={showExportDialog}
+				onClose={() => setShowExportDialog(false)}
+				mode={animMode ? "anim" : "standard"}
+				isDotEditor={false}
+				fps={fpsRef.current}
+				onExportSinglePng={handleExportSinglePng}
+				onExportSpriteSheet={handleExportAnimSpriteSheet}
+				onExportGif={handleExportAnimGif}
+				onExportZip={handleExportAnimZip}
+			/>
+			{/* eslint-enable react-hooks/refs */}
 		</div>
 	);
 }

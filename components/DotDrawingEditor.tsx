@@ -4,6 +4,7 @@ import * as oekaki from "@onjmin/oekaki";
 import {
 	BoxSelect,
 	Copy,
+	Download,
 	Eraser,
 	Film,
 	FlipHorizontal,
@@ -18,6 +19,7 @@ import {
 	RotateCcw,
 	RotateCw,
 	Save,
+	Settings,
 	Trash2,
 	Undo,
 	Upload,
@@ -43,8 +45,17 @@ import {
 	type WalkPreset,
 	presets as walkPresets,
 } from "@/lib/walk-cycle";
+import {
+	exportFramesZip,
+	exportGif,
+	exportSinglePng,
+	exportSpriteSheet,
+	exportWalkAsAniZip,
+	resizeCanvas,
+} from "@/lib/export-drawing";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
+import DrawingExportDialog from "./DrawingExportDialog";
 import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
@@ -197,6 +208,10 @@ export default function DotDrawingEditor({
 	const [isDragover, setIsDragover] = useState(false);
 	const [showImport, setShowImport] = useState(false);
 
+	const [showExportDialog, setShowExportDialog] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsRef = useRef<HTMLDivElement>(null);
+
 	// History & Autosave States
 	const [showHistory, setShowHistory] = useState(false);
 	const [hasAutosave, setHasAutosave] = useState(false);
@@ -208,12 +223,252 @@ export default function DotDrawingEditor({
 	);
 	const storageKey = getStorageKey("dotdrawing");
 
+	// 設定ドロップダウンの外側クリック検知
+	useEffect(() => {
+		const handleClickOutside = (e: MouseEvent) => {
+			if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+				setSettingsOpen(false);
+			}
+		};
+		window.addEventListener("mousedown", handleClickOutside);
+		return () => window.removeEventListener("mousedown", handleClickOutside);
+	}, []);
+
 	useEffect(() => {
 		toolRef.current = tool;
 		colorRef.current = color;
 		walkModeRef.current = walkMode;
 		walkPresetRef.current = walkPreset;
 	});
+
+	// --- Export Handlers ---
+	const handleExportSinglePng = (scale: number) => {
+		const canvas = oekaki.render();
+		const targetW = gridW * scale;
+		const targetH = gridH * scale;
+		exportSinglePng(canvas, targetW, targetH, `dot_${targetW}x${targetH}.png`);
+	};
+
+	const getAnimFramesForExport = (scale: number) => {
+		const frames =
+			frameInstancesRef.current.length > 0
+				? frameInstancesRef.current
+				: [oekaki.getLayers()];
+		const currentLayers = oekaki.getLayers();
+		const targetW = gridW * scale;
+		const targetH = gridH * scale;
+
+		return frames.map((layers, frameIdx) => {
+			const list =
+				frameIdx === currentFrameRef.current ? currentLayers : layers;
+			const canvas = document.createElement("canvas");
+			canvas.width = CANVAS_SIZE;
+			canvas.height = CANVAS_SIZE;
+			const ctx = canvas.getContext("2d", { willReadFrequently: true });
+			if (ctx) {
+				for (const l of list) {
+					if (!l.visible || l.opacity <= 0) continue;
+					ctx.globalAlpha = l.opacity / 100;
+					ctx.drawImage(l.canvas, 0, 0);
+				}
+			}
+			return resizeCanvas(canvas, targetW, targetH);
+		});
+	};
+
+	const handleExportAnimSpriteSheet = (scale: number) => {
+		const frameCanvases = getAnimFramesForExport(scale);
+		const targetW = gridW * scale;
+		const targetH = gridH * scale;
+		exportSpriteSheet(
+			{
+				columns: frameCanvases.length,
+				rows: 1,
+				cellWidth: targetW,
+				cellHeight: targetH,
+				frames: frameCanvases,
+			},
+			"animation_spritesheet.png",
+		);
+	};
+
+	const handleExportAnimGif = async ({
+		scale,
+		transparent,
+	}: {
+		scale: number;
+		transparent: boolean;
+	}) => {
+		const frameCanvases = getAnimFramesForExport(scale);
+		const targetW = gridW * scale;
+		const targetH = gridH * scale;
+		await exportGif({
+			frames: frameCanvases,
+			width: targetW,
+			height: targetH,
+			fps: fpsRef.current,
+			transparent,
+			fileName: "animation.gif",
+		});
+	};
+
+	const handleExportAnimZip = async (scale: number) => {
+		const frameCanvases = getAnimFramesForExport(scale);
+		const targetW = gridW * scale;
+		const targetH = gridH * scale;
+		await exportFramesZip({
+			frames: frameCanvases.map((canvas, i) => ({
+				name: `frame_${String(i + 1).padStart(2, "0")}.png`,
+				canvas,
+			})),
+			width: targetW,
+			height: targetH,
+			fileName: "animation_frames.zip",
+		});
+	};
+
+	const getWalkCellCanvas = (
+		wayIdx: number,
+		frameIdx: number,
+	): HTMLCanvasElement => {
+		const idx = wayIdx * walkPreset.frames + frameIdx;
+		if (idx === walkActiveIndexRef.current) {
+			const canvas = oekaki.render();
+			return resizeCanvas(canvas, walkPreset.w, walkPreset.h);
+		}
+		const cellLayers = walkLayersRef.current.get(idx);
+		if (cellLayers && cellLayers.layers.length > 0) {
+			const temp = document.createElement("canvas");
+			temp.width = CANVAS_SIZE;
+			temp.height = CANVAS_SIZE;
+			const ctx = temp.getContext("2d", { willReadFrequently: true });
+			if (ctx) {
+				for (const l of cellLayers.layers) {
+					if (!l.visible || l.opacity <= 0) continue;
+					const imgData = new ImageData(
+						new Uint8ClampedArray(l.data),
+						CANVAS_SIZE,
+						CANVAS_SIZE,
+					);
+					const layerCanvas = document.createElement("canvas");
+					layerCanvas.width = CANVAS_SIZE;
+					layerCanvas.height = CANVAS_SIZE;
+					const lctx = layerCanvas.getContext("2d");
+					if (lctx) {
+						lctx.putImageData(imgData, 0, 0);
+						ctx.globalAlpha = l.opacity / 100;
+						ctx.drawImage(layerCanvas, 0, 0);
+					}
+				}
+			}
+			return resizeCanvas(temp, walkPreset.w, walkPreset.h);
+		}
+		const dataUrl = walkDataRef.current.get(idx);
+		if (dataUrl) {
+			const img = new Image();
+			img.src = dataUrl;
+			const temp = document.createElement("canvas");
+			temp.width = walkPreset.w;
+			temp.height = walkPreset.h;
+			const ctx = temp.getContext("2d");
+			if (ctx) {
+				ctx.imageSmoothingEnabled = false;
+				ctx.drawImage(img, 0, 0, walkPreset.w, walkPreset.h);
+			}
+			return temp;
+		}
+		const blank = document.createElement("canvas");
+		blank.width = walkPreset.w;
+		blank.height = walkPreset.h;
+		return blank;
+	};
+
+	const handleExportWalkSpriteSheet = () => {
+		const cells: HTMLCanvasElement[] = [];
+		for (let y = 0; y < walkPreset.ways.length; y++) {
+			for (let x = 0; x < walkPreset.frames; x++) {
+				const c = getWalkCellCanvas(y, x);
+				cells.push(c);
+			}
+		}
+		exportSpriteSheet(
+			{
+				columns: walkPreset.frames,
+				rows: walkPreset.ways.length,
+				cellWidth: walkPreset.w,
+				cellHeight: walkPreset.h,
+				frames: cells,
+			},
+			`walk_${walkPreset.label}_${walkPreset.w * walkPreset.frames}x${walkPreset.h * walkPreset.ways.length}.png`,
+		);
+	};
+
+	const handleExportWalkGif = async ({
+		allWays,
+		transparent,
+	}: {
+		allWays: boolean;
+		transparent: boolean;
+	}) => {
+		const frames: HTMLCanvasElement[] = [];
+		if (allWays) {
+			for (let y = 0; y < walkPreset.ways.length; y++) {
+				for (let x = 0; x < walkPreset.frames; x++) {
+					const c = getWalkCellCanvas(y, x);
+					if (c) frames.push(c);
+				}
+			}
+		} else {
+			const y = Math.floor(walkActiveIndex / walkPreset.frames);
+			for (let x = 0; x < walkPreset.frames; x++) {
+				const c = getWalkCellCanvas(y, x);
+				if (c) frames.push(c);
+			}
+		}
+		await exportGif({
+			frames,
+			width: walkPreset.w,
+			height: walkPreset.h,
+			fps: fpsRef.current,
+			transparent,
+			fileName: `walk_${walkPreset.label}.gif`,
+		});
+	};
+
+	const handleExportWalkZip = async () => {
+		const frames: { name: string; canvas: HTMLCanvasElement }[] = [];
+		for (let y = 0; y < walkPreset.ways.length; y++) {
+			const wayInfo = walkPreset.ways[y];
+			const wayName = wayInfo?.label ? `${y + 1}_${wayInfo.label}` : `${y + 1}`;
+			for (let x = 0; x < walkPreset.frames; x++) {
+				const c = getWalkCellCanvas(y, x);
+				if (c) {
+					frames.push({
+						name: `way_${wayName}_frame_${x + 1}.png`,
+						canvas: c,
+					});
+				}
+			}
+		}
+		await exportFramesZip({
+			frames,
+			width: walkPreset.w,
+			height: walkPreset.h,
+			fileName: `walk_${walkPreset.label}_frames.zip`,
+		});
+	};
+
+	const handleExportWalkAni = async () => {
+		await exportWalkAsAniZip({
+			ways: walkPreset.ways,
+			frames: walkPreset.frames,
+			width: walkPreset.w,
+			height: walkPreset.h,
+			fps: fpsRef.current,
+			getFrameCanvas: (y, x) => getWalkCellCanvas(y, x),
+			fileName: `walk_${walkPreset.label}_cursors.zip`,
+		});
+	};
 
 	const handleDeselect = () => {
 		const active =
@@ -2160,18 +2415,108 @@ export default function DotDrawingEditor({
 							{walkPreset.ways.length}方向
 						</span>
 					) : (
-						<>
-							<span className="text-[9px] text-gray-600">
-								{gridW}×{gridH}
-							</span>
-							<button
-								onClick={() => setShowPresets((v) => !v)}
-								className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/20"
-							>
-								<Maximize2 size={12} />
-							</button>
-						</>
+						<span className="text-[9px] text-gray-600">
+							{gridW}×{gridH}
+						</span>
 					)}
+					{/* 設定ボタン & ドロップダウン */}
+					<div className="relative" ref={settingsRef}>
+						<button
+							onClick={() => setSettingsOpen((v) => !v)}
+							className={`p-1.5 rounded transition-colors ${
+								settingsOpen
+									? "bg-gray-700 text-white"
+									: "text-gray-400 hover:bg-gray-800 hover:text-white"
+							}`}
+							title="設定"
+						>
+							<Settings size={14} />
+						</button>
+						{settingsOpen && (
+							<div className="absolute right-0 top-full mt-1 z-[100] w-56 bg-[#161622] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
+								{/* 出力・ダウンロード */}
+								<button
+									onClick={() => {
+										setShowExportDialog(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Download size={13} />
+									<span>
+										{walkMode
+											? "歩行グラの出力"
+											: animMode
+												? "アニメーションの出力"
+												: "画像の出力"}
+									</span>
+								</button>
+
+								{/* リサイズ（一枚絵・アニメ時のみ） */}
+								{!walkMode && (
+									<>
+										<div className="border-t border-gray-800 my-1" />
+										<div className="px-3 py-1 text-[10px] text-gray-400 font-bold flex items-center gap-1">
+											<Maximize2 size={11} />
+											<span>キャンバスサイズ変更</span>
+										</div>
+										{collabImageUrl && (
+											<div className="text-[9px] text-orange-400 px-3 pb-1">
+												※コラボ画像を再配置して開き直します
+											</div>
+										)}
+										<div className="grid grid-cols-4 gap-1 px-2 py-1">
+											{SIZE_PRESETS.map((p) => (
+												<button
+													key={p.label}
+													onClick={() => {
+														if (collabImageUrl) {
+															reloadCollabWithGrid(p.w, p.h);
+														} else {
+															changeSize(p.w, p.h);
+														}
+														setSettingsOpen(false);
+													}}
+													className={
+														"px-1 py-1 rounded text-[10px] font-mono transition " +
+														(gridW === p.w && gridH === p.h
+															? "bg-blue-600 text-white font-bold"
+															: "bg-gray-800 text-gray-300 hover:bg-gray-700")
+													}
+												>
+													{p.label}
+												</button>
+											))}
+										</div>
+									</>
+								)}
+
+								<div className="border-t border-gray-800 my-1" />
+								{/* 読込 */}
+								<button
+									onClick={() => {
+										setShowImport(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Upload size={13} />
+									<span>画像の読込 (インポート)</span>
+								</button>
+								{/* 履歴 */}
+								<button
+									onClick={() => {
+										setShowHistory(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<History size={13} />
+									<span>履歴・スナップショット</span>
+								</button>
+							</div>
+						)}
+					</div>
 				</div>
 			</div>
 
@@ -2193,43 +2538,6 @@ export default function DotDrawingEditor({
 						>
 							無視
 						</button>
-					</div>
-				</div>
-			)}
-
-			{!walkMode && showPresets && (
-				<div className="absolute top-10 right-3 z-50 bg-[#1a1b26] border border-gray-700 rounded-lg shadow-xl p-2.5 max-w-[240px]">
-					{collabImageUrl && (
-						<div className="text-[10px] text-orange-400 font-semibold mb-2 pb-1.5 border-b border-gray-700/80">
-							🖼️ コラボ画像のドットサイズを指定して開き直す
-						</div>
-					)}
-					<div className="grid grid-cols-4 gap-1">
-						{SIZE_PRESETS.map((p) => (
-							<button
-								key={p.label}
-								onClick={() => {
-									if (collabImageUrl) {
-										reloadCollabWithGrid(p.w, p.h);
-									} else {
-										changeSize(p.w, p.h);
-									}
-								}}
-								className={
-									"px-2 py-1.5 rounded text-[10px] font-mono transition-colors " +
-									(gridW === p.w && gridH === p.h
-										? "bg-blue-600 text-white font-bold shadow"
-										: "text-gray-300 hover:bg-gray-100/10")
-								}
-								title={
-									collabImageUrl
-										? `${p.label} でコラボ画像を再配置して開き直す`
-										: p.label
-								}
-							>
-								{p.label}
-							</button>
-						))}
 					</div>
 				</div>
 			)}
@@ -2483,6 +2791,14 @@ export default function DotDrawingEditor({
 							<span>クリア</span>
 						</button>
 						<button
+							onClick={() => setShowExportDialog(true)}
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
+							title="出力・ダウンロード"
+						>
+							<Download size={10} />
+							<span>出力</span>
+						</button>
+						<button
 							onClick={() => setShowImport(true)}
 							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
 						>
@@ -2549,6 +2865,27 @@ export default function DotDrawingEditor({
 				onRestore={handleRestoreHistory}
 				getCurrentData={getCurrentState}
 			/>
+			{/* eslint-disable react-hooks/refs */}
+			<DrawingExportDialog
+				open={showExportDialog}
+				onClose={() => setShowExportDialog(false)}
+				mode={walkMode ? "walk" : animMode ? "anim" : "standard"}
+				isDotEditor={true}
+				gridW={gridW}
+				gridH={gridH}
+				fps={fpsRef.current}
+				walkPreset={walkPreset}
+				walkActiveWayIndex={Math.floor(walkActiveIndex / walkPreset.frames)}
+				onExportSinglePng={handleExportSinglePng}
+				onExportSpriteSheet={handleExportAnimSpriteSheet}
+				onExportGif={handleExportAnimGif}
+				onExportZip={handleExportAnimZip}
+				onExportWalkSpriteSheet={handleExportWalkSpriteSheet}
+				onExportWalkGif={handleExportWalkGif}
+				onExportWalkZip={handleExportWalkZip}
+				onExportWalkAni={handleExportWalkAni}
+			/>
+			{/* eslint-enable react-hooks/refs */}
 		</div>
 	);
 }
