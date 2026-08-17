@@ -153,7 +153,12 @@ export default function DotDrawingEditor({
 	const [recentColors, setRecentColors] = useState<string[]>([]);
 	const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
 	const [activeLayerIndex, setActiveLayerIndex] = useState(0);
-	const [showLayerPanel, setShowLayerPanel] = useState(false);
+	const [showLayerPanel, setShowLayerPanel] = useState(() => {
+		if (typeof window !== "undefined") {
+			return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+		}
+		return false;
+	});
 	const layerCounterRef = useRef(1);
 	const layerEntriesRef = useRef<LayerEntry[]>([]);
 	const activeLayerIndexRef = useRef(0);
