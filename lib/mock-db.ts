@@ -606,6 +606,8 @@ class MockDB {
 		slug?: string;
 		gameId?: number;
 		mvId?: number;
+		dotW?: number;
+		dotH?: number;
 		originType?: OriginType;
 	}): Post {
 		const createdAt = this.now();
@@ -635,6 +637,8 @@ class MockDB {
 			hasMv: !!data.mvId,
 			mvId: data.mvId,
 			hasMml: extractMmlFromContent(data.content) !== null,
+			dotW: data.dotW,
+			dotH: data.dotH,
 			originType: data.originType,
 			isFalseDeclaration: false,
 			threadId: this.genId(),
@@ -729,6 +733,8 @@ class MockDB {
 			avatarColor?: string;
 			gameId?: number;
 			mvId?: number;
+			dotW?: number;
+			dotH?: number;
 			originType?: OriginType;
 		},
 	): Post | null {
@@ -762,6 +768,8 @@ class MockDB {
 			mvId: data.mvId,
 			hasMv: !!data.mvId,
 			hasMml: extractMmlFromContent(data.content) !== null,
+			dotW: data.dotW,
+			dotH: data.dotH,
 			originType: data.originType,
 		};
 		this.posts.push(reply);

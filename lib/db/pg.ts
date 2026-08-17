@@ -312,6 +312,8 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
+		dotW: row.dot_w != null ? Number(row.dot_w) : undefined,
+		dotH: row.dot_h != null ? Number(row.dot_h) : undefined,
 		originType: row.origin_type ?? undefined,
 		isFalseDeclaration: row.is_false_declaration ?? false,
 		isEdited: row.is_edited ?? false,
@@ -352,6 +354,8 @@ function resRowToPost(row: any): DbPost {
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
+		dotW: row.dot_w != null ? Number(row.dot_w) : undefined,
+		dotH: row.dot_h != null ? Number(row.dot_h) : undefined,
 		originType: row.origin_type ?? undefined,
 		isFalseDeclaration: row.is_false_declaration ?? false,
 		isEdited: row.is_edited ?? false,
@@ -609,7 +613,7 @@ export const pgStore: DataStore = {
              cc_bitmask, content_types_bitmask,
              user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
              content_text, content_url, content_type, content_data_url,
-             has_collab_button, game_id, mv_id, origin_type
+             has_collab_button, game_id, mv_id, origin_type, dot_w, dot_h
            ) VALUES (
              CURRENT_TIMESTAMP,
              GREATEST(
@@ -618,7 +622,7 @@ export const pgStore: DataStore = {
              ),
              '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
                      ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                     $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                     $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
            RETURNING *`,
 					[
 						(mmlResolved.content || "")
@@ -648,6 +652,8 @@ export const pgStore: DataStore = {
 						data.gameId ?? null,
 						data.mvId ?? null,
 						data.originType ?? null,
+						data.dotW ?? null,
+						data.dotH ?? null,
 					],
 				);
 				row = rows[0];
@@ -780,10 +786,10 @@ export const pgStore: DataStore = {
              thread_id, num, created_at, ip, is_owner, sage,
              user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
              content_text, content_url, content_type, content_data_url,
-             has_collab_button, game_id, mv_id, parent_num, origin_type
+             has_collab_button, game_id, mv_id, parent_num, origin_type, dot_w, dot_h
            ) VALUES ($1, (SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1),
                      CURRENT_TIMESTAMP,'0.0.0.0'::inet,$2,FALSE,$3,$4,$5,0,$6,
-                     $7,$8,$9,$10,$11,$12,$13,$14,$15)
+                     $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
            RETURNING *`,
 					[
 						// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
@@ -803,6 +809,8 @@ export const pgStore: DataStore = {
 						data.mvId ?? null,
 						parentNum,
 						data.originType ?? null,
+						data.dotW ?? null,
+						data.dotH ?? null,
 					],
 				);
 				inserted = rows[0];
@@ -1228,7 +1236,7 @@ export const pgStore: DataStore = {
 
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(
-				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, ${AUTHOR_SELECT}
+				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, t.dot_w, t.dot_h, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
           WHERE t.deleted_at IS NULL AND ${where
 						.replace(/content_type/g, "t.content_type")
@@ -1238,7 +1246,7 @@ export const pgStore: DataStore = {
 				params,
 			),
 			q(
-				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, ${AUTHOR_SELECT}
+				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, r.dot_w, r.dot_h, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
           WHERE ${where
 						.replace(/content_type/g, "r.content_type")
@@ -1256,6 +1264,8 @@ export const pgStore: DataStore = {
 					content: r.content_text ?? "",
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					dotW: r.dot_w != null ? Number(r.dot_w) : undefined,
+					dotH: r.dot_h != null ? Number(r.dot_h) : undefined,
 					originType: r.origin_type || undefined,
 					isOwner: userId ? r.user_id === userId : false,
 				}),
@@ -1267,6 +1277,8 @@ export const pgStore: DataStore = {
 					content: r.content_text ?? "",
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					dotW: r.dot_w != null ? Number(r.dot_w) : undefined,
+					dotH: r.dot_h != null ? Number(r.dot_h) : undefined,
 					originType: r.origin_type || undefined,
 					isOwner: userId ? r.user_id === userId : false,
 				}),

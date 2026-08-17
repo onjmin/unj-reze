@@ -110,6 +110,10 @@ export interface Post {
 	 * 実際に鳴らす/描く段になってはじめてブラウザが直接取りにいく。
 	 */
 	mmlUrl?: string;
+	/** ドット絵コラボ用のグリッド横解像度 */
+	dotW?: number;
+	/** ドット絵コラボ用のグリッド縦解像度 */
+	dotH?: number;
 	mvId?: string;
 	mvTitle?: string;
 	/** MVのサムネイル（背景画像URL。無ければプリセットの色で描く） */

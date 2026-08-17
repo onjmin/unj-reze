@@ -131,6 +131,9 @@ export default function BbsThreadView({
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
+	const [replyDotSize, setReplyDotSize] = useState<
+		{ w: number; h: number } | null
+	>(null);
 	const [replyTo, setReplyTo] = useState<number | null>(null);
 	/** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
 	 *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
@@ -224,8 +227,10 @@ export default function BbsThreadView({
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
 		const capturedOriginType = replyOriginType;
+		const capturedDotSize = replyDotSize;
 		setReplyText("");
 		setReplyImage(null);
+		setReplyDotSize(null);
 		setReplyMml(null);
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
@@ -270,6 +275,8 @@ export default function BbsThreadView({
 				imageSrc,
 				gameId,
 				mvId,
+				dotW: capturedDotSize?.w,
+				dotH: capturedDotSize?.h,
 				originType: capturedOriginType,
 			});
 			setPost((p) => ({
@@ -297,8 +304,17 @@ export default function BbsThreadView({
 		);
 	};
 
-	const handleSaveDotDrawing = (canvasData: string) => {
+	const handleSaveDotDrawing = (
+		canvasData: string,
+		gridW?: number,
+		gridH?: number,
+	) => {
 		setReplyImage(canvasData);
+		if (gridW && gridH) {
+			setReplyDotSize({ w: gridW, h: gridH });
+		} else {
+			setReplyDotSize(null);
+		}
 		setActiveScreen(null);
 		setReplyText((prev) =>
 			prev.trim() ? prev : "#ドット絵 自作ドット絵完成！",

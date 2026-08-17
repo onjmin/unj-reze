@@ -14,6 +14,10 @@ export interface DbMediaSearchPost {
 	imageAlt?: string;
 	/** MML本文の保存先URL（R2）。外部化済みの投稿は content にマーカーしか残らないため必要。 */
 	mmlUrl?: string;
+	/** ドット絵コラボ用のグリッド横解像度 */
+	dotW?: number;
+	/** ドット絵コラボ用のグリッド縦解像度 */
+	dotH?: number;
 	/** 自己申告の権利表記。参照ピッカーで改変NG/無断使用禁止の導線を出さないために使う。 */
 	originType?: OriginType;
 	/**
@@ -83,6 +87,10 @@ export interface DbPost {
 	/** 差し替え時に旧オブジェクトを消すためのトークン */
 	mmlDeleteId?: string;
 	mmlDeleteHash?: string;
+	/** ドット絵コラボ用のグリッド横解像度 */
+	dotW?: number;
+	/** ドット絵コラボ用のグリッド縦解像度 */
+	dotH?: number;
 	originType?: OriginType;
 	isFalseDeclaration?: boolean;
 	isEdited?: boolean;

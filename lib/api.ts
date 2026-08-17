@@ -156,6 +156,8 @@ const staticApi = {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			dotW?: number;
+			dotH?: number;
 			originType?: OriginType;
 		}) => {
 			const decodedGameId = data.gameId
@@ -238,6 +240,8 @@ const staticApi = {
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;
+					dotW?: number;
+					dotH?: number;
 					originType?: OriginType;
 				},
 			) => {
@@ -590,6 +594,8 @@ const liveApi = {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			dotW?: number;
+			dotH?: number;
 			originType?: OriginType;
 		}) =>
 			fetcher<Post>("/posts", {
@@ -666,6 +672,8 @@ const liveApi = {
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;
+					dotW?: number;
+					dotH?: number;
 					originType?: OriginType;
 				},
 			) =>

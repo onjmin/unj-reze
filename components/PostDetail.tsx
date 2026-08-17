@@ -148,6 +148,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		title: string;
 		preset: string;
 	} | null>(null);
+	const [collabDotSize, setCollabDotSize] = useState<
+		{ w: number; h: number } | undefined
+	>(undefined);
+	const [replyDotSize, setReplyDotSize] = useState<
+		{ w: number; h: number } | null
+	>(null);
 	const [showCollabSelector, setShowCollabSelector] = useState(false);
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
@@ -482,8 +488,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				imageSrc,
 				gameId,
 				mvId,
+				dotW: replyDotSize?.w,
+				dotH: replyDotSize?.h,
 				originType: replyOriginType,
 			});
+			setReplyDotSize(null);
 
 			setPost((p) => ({
 				...p,
@@ -627,6 +636,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				return;
 			}
 		}
+		if (p.dotW && p.dotH) {
+			setCollabDotSize({ w: p.dotW, h: p.dotH });
+		} else {
+			setCollabDotSize(undefined);
+		}
 		setCollabImageUrl(p.imageSrc);
 		setShowCollabSelector(true);
 	}, []);
@@ -636,14 +650,23 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setActiveScreen("drawing");
 	}, []);
 
-	const handleCollabSelectDotDrawing = useCallback(() => {
-		setShowCollabSelector(false);
-		setActiveScreen("dotdrawing");
-	}, []);
+	const handleCollabSelectDotDrawing = useCallback(
+		(w?: number, h?: number) => {
+			if (w && h) {
+				setCollabDotSize({ w, h });
+			} else {
+				setCollabDotSize(undefined);
+			}
+			setShowCollabSelector(false);
+			setActiveScreen("dotdrawing");
+		},
+		[],
+	);
 
 	const handleCloseCollabSelector = useCallback(() => {
 		setShowCollabSelector(false);
 		setCollabImageUrl(undefined);
+		setCollabDotSize(undefined);
 	}, []);
 
 	const handleSaveDrawing = (canvasData: string) => {
@@ -653,8 +676,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setReplyText("#お絵描き 自作イラスト完成！");
 	};
 
-	const handleSaveDotDrawing = (canvasData: string) => {
+	const handleSaveDotDrawing = (
+		canvasData: string,
+		gridW?: number,
+		gridH?: number,
+	) => {
 		setReplyImage(canvasData);
+		if (gridW && gridH) {
+			setReplyDotSize({ w: gridW, h: gridH });
+		} else {
+			setReplyDotSize(null);
+		}
 		setActiveScreen(null);
 		setCollabImageUrl(undefined);
 		setReplyText("#ドット絵 自作ドット絵完成！");
@@ -1558,9 +1590,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onClose={() => {
 						setActiveScreen(null);
 						setCollabImageUrl(undefined);
+						setCollabDotSize(undefined);
 					}}
 					onSave={handleSaveDotDrawing}
 					collabImageUrl={collabImageUrl}
+					initialGridW={collabDotSize?.w}
+					initialGridH={collabDotSize?.h}
 				/>
 			)}
 			{activeScreen === "gamemaker" && (

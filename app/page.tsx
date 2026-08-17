@@ -151,6 +151,9 @@ export default function App() {
 	const [messageCount, setMessageCount] = useState(0);
 	const [inputText, setInputText] = useState("");
 	const [attachedImage, setAttachedImage] = useState<string | null>(null);
+	const [attachedDotSize, setAttachedDotSize] = useState<
+		{ w: number; h: number } | null
+	>(null);
 	const [attachedMml, setAttachedMml] = useState<string | null>(null);
 	const [originType, setOriginType] = useState<OriginType | undefined>(
 		undefined,
@@ -158,6 +161,9 @@ export default function App() {
 	const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(
 		undefined,
 	);
+	const [collabDotSize, setCollabDotSize] = useState<
+		{ w: number; h: number } | undefined
+	>(undefined);
 	const [showCollabSelector, setShowCollabSelector] = useState(false);
 	const [gameDraft, setGameDraft] = useState<{
 		manifest: GameManifestDraft;
@@ -792,8 +798,11 @@ export default function App() {
 				avatarColor: "from-blue-500 to-indigo-600",
 				gameId,
 				mvId,
+				dotW: attachedDotSize?.w,
+				dotH: attachedDotSize?.h,
 				originType,
 			});
+			setAttachedDotSize(null);
 			setPosts((prev) => {
 				const next = prev.map((p) =>
 					p.id === tempId
@@ -848,6 +857,11 @@ export default function App() {
 					return;
 				}
 			}
+			if (post.dotW && post.dotH) {
+				setCollabDotSize({ w: post.dotW, h: post.dotH });
+			} else {
+				setCollabDotSize(undefined);
+			}
 			setCollabImageUrl(post.imageSrc);
 			setShowCollabSelector(true);
 		},
@@ -859,14 +873,23 @@ export default function App() {
 		openScreen("drawing");
 	}, [openScreen]);
 
-	const handleCollabSelectDotDrawing = useCallback(() => {
-		setShowCollabSelector(false);
-		openScreen("dotdrawing");
-	}, [openScreen]);
+	const handleCollabSelectDotDrawing = useCallback(
+		(w?: number, h?: number) => {
+			if (w && h) {
+				setCollabDotSize({ w, h });
+			} else {
+				setCollabDotSize(undefined);
+			}
+			setShowCollabSelector(false);
+			openScreen("dotdrawing");
+		},
+		[openScreen],
+	);
 
 	const handleCloseCollabSelector = useCallback(() => {
 		setShowCollabSelector(false);
 		setCollabImageUrl(undefined);
+		setCollabDotSize(undefined);
 	}, []);
 
 	const handleEditPost = (post: Post) => {
@@ -943,11 +966,27 @@ export default function App() {
 		);
 	};
 
-	const handleSaveDotDrawing = async (canvasData: string) => {
+	const handleSaveDotDrawing = async (
+		canvasData: string,
+		gridW?: number,
+		gridH?: number,
+	) => {
 		const wasCollab = !!collabImageUrl;
+		if (gridW && gridH) {
+			setAttachedDotSize({ w: gridW, h: gridH });
+		} else {
+			setAttachedDotSize(null);
+		}
 		if (editingPost) {
 			setEditingPost((prev) =>
-				prev ? { ...prev, imageSrc: canvasData } : null,
+				prev
+					? {
+							...prev,
+							imageSrc: canvasData,
+							dotW: gridW ?? prev.dotW,
+							dotH: gridH ?? prev.dotH,
+						}
+					: null,
 			);
 			closeScreen();
 			setCollabImageUrl(undefined);
@@ -1299,9 +1338,12 @@ export default function App() {
 					onClose={() => {
 						closeScreen();
 						setCollabImageUrl(undefined);
+						setCollabDotSize(undefined);
 					}}
 					onSave={handleSaveDotDrawing}
 					collabImageUrl={collabImageUrl}
+					initialGridW={collabDotSize?.w}
+					initialGridH={collabDotSize?.h}
 				/>
 			)}
 			{activeScreen === "gamemaker" && (

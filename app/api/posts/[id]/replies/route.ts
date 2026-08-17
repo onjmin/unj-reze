@@ -49,6 +49,8 @@ export async function POST(
 		avatarColor,
 		gameId,
 		mvId,
+		dotW,
+		dotH,
 		originType,
 		sessionId,
 	} = body;
@@ -99,6 +101,8 @@ export async function POST(
 		avatarColor,
 		gameId: gameId ? Number(gameId) : undefined,
 		mvId: mvId ? Number(mvId) : undefined,
+		dotW: dotW ? Number(dotW) : undefined,
+		dotH: dotH ? Number(dotH) : undefined,
 		...mmlRef,
 		originType,
 	});

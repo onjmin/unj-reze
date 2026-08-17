@@ -82,6 +82,8 @@ export async function POST(request: NextRequest) {
 			avatarColor,
 			gameId,
 			mvId,
+			dotW,
+			dotH,
 			originType,
 			turnstileToken,
 			fingerprint,
@@ -95,6 +97,8 @@ export async function POST(request: NextRequest) {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			dotW?: number;
+			dotH?: number;
 			originType?: OriginType;
 			turnstileToken?: string | null;
 			fingerprint?: FingerprintSignals | null;
@@ -177,6 +181,8 @@ export async function POST(request: NextRequest) {
 			slug: authorSlug,
 			gameId: decodedGameId === null ? undefined : decodedGameId,
 			mvId: decodedMvId === null ? undefined : decodedMvId,
+			dotW: dotW ? Number(dotW) : undefined,
+			dotH: dotH ? Number(dotH) : undefined,
 			...mmlRef,
 			originType,
 		});

@@ -110,7 +110,7 @@ export default function DrawingEditor({
 	const layerEntriesRef = useRef<LayerEntry[]>([]);
 	const activeLayerIndexRef = useRef(0);
 	const [animMode, setAnimMode] = useState(false);
-	const framesRef = useRef<FrameData[]>([]);
+	const frameInstancesRef = useRef<oekaki.LayeredCanvas[][]>([]);
 	const currentFrameRef = useRef(0);
 	const fpsRef = useRef(8);
 	const [isPlaying, setIsPlaying] = useState(false);
@@ -234,25 +234,22 @@ export default function DrawingEditor({
 		const canvas = onionCanvasRef.current;
 		if (!canvas || !onionSkinRef.current) return;
 		const idx = currentFrameRef.current - 1;
-		if (idx < 0 || !framesRef.current[idx]) {
+		const prevLayers = frameInstancesRef.current[idx];
+		if (idx < 0 || !prevLayers) {
 			const ctx = canvas.getContext("2d");
 			if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 			return;
 		}
-		const prev = framesRef.current[idx];
 		const w = canvas.width,
 			h = canvas.height;
 		const temp = document.createElement("canvas");
 		temp.width = w;
 		temp.height = h;
 		const tempCtx = temp.getContext("2d")!;
-		for (const l of prev.layers) {
-			if (!l.visible) continue;
-			tempCtx.putImageData(
-				new ImageData(new Uint8ClampedArray(l.data), w, h),
-				0,
-				0,
-			);
+		for (const l of prevLayers) {
+			if (!l.visible || l.opacity <= 0) continue;
+			tempCtx.globalAlpha = l.opacity / 100;
+			tempCtx.drawImage(l.canvas, 0, 0);
 		}
 		const ctx = canvas.getContext("2d")!;
 		ctx.clearRect(0, 0, w, h);
@@ -403,27 +400,32 @@ export default function DrawingEditor({
 		layerEntriesRef.current = entries;
 	};
 
-	const captureFrame = (): FrameData => ({
-		layers: oekaki.getLayers().map((l) => ({
-			name: l.name,
-			visible: l.visible,
-			locked: l.locked,
-			opacity: l.opacity,
-			data: new Uint8ClampedArray(l.data),
-		})),
-	});
-
-	const applyFrame = (frame: FrameData) => {
-		for (const l of oekaki.getLayers()) l.delete();
-		oekaki.refresh();
-		for (const { name, visible, locked, opacity, data } of frame.layers) {
-			const l = new oekaki.LayeredCanvas(name);
-			l.visible = visible;
-			l.locked = locked;
-			l.opacity = opacity;
-			l.data = new Uint8ClampedArray(data);
+	const captureLiveFrames = (): FrameData[] => {
+		if (frameInstancesRef.current.length > 0) {
+			if (frameInstancesRef.current[currentFrameRef.current]) {
+				frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+			}
+			return frameInstancesRef.current.map((layers) => ({
+				layers: layers.map((l) => ({
+					name: l.name,
+					visible: l.visible,
+					locked: l.locked,
+					opacity: l.opacity,
+					data: new Uint8ClampedArray(l.data),
+				})),
+			}));
 		}
-		syncLayerEntries();
+		return [
+			{
+				layers: oekaki.getLayers().map((l) => ({
+					name: l.name,
+					visible: l.visible,
+					locked: l.locked,
+					opacity: l.opacity,
+					data: new Uint8ClampedArray(l.data),
+				})),
+			},
+		];
 	};
 
 	const getCurrentState = (): DrawingEditorState | null => {
@@ -433,8 +435,8 @@ export default function DrawingEditor({
 		const canvas = active.canvas;
 		const w = canvas.width;
 		const h = canvas.height;
-		if (animMode) {
-			framesRef.current[currentFrameRef.current] = captureFrame();
+		if (animMode || frameInstancesRef.current.length > 1) {
+			const frames = captureLiveFrames();
 			return {
 				mode: "anim",
 				width: w,
@@ -442,7 +444,7 @@ export default function DrawingEditor({
 				gridW: 32,
 				gridH: 32,
 				zoom,
-				frames: serializeFrames(framesRef.current, w, h),
+				frames: serializeFrames(frames, w, h),
 				currentFrame: currentFrameRef.current,
 				fps: fpsRef.current,
 			};
@@ -510,16 +512,45 @@ export default function DrawingEditor({
 		const loadCanvasContent = async () => {
 			if (restoredState) {
 				if (restoredState.mode === "anim" && restoredState.frames) {
+					for (const l of oekaki.getLayers()) l.delete();
+					oekaki.refresh();
 					const deserializedFrames = await deserializeFrames(
 						restoredState.frames,
 						w,
 						h,
 					);
-					framesRef.current = deserializedFrames;
-					currentFrameRef.current = restoredState.currentFrame || 0;
+					const instances: oekaki.LayeredCanvas[][] = [];
+					for (const f of deserializedFrames) {
+						const frameLayers: oekaki.LayeredCanvas[] = [];
+						for (const {
+							name,
+							visible,
+							locked,
+							opacity,
+							data,
+						} of f.layers) {
+							const l = new oekaki.LayeredCanvas(name);
+							l.visible = visible;
+							l.locked = locked;
+							l.opacity = opacity;
+							l.data = new Uint8ClampedArray(data);
+							l.trace();
+							frameLayers.push(l);
+						}
+						instances.push(frameLayers);
+					}
+					frameInstancesRef.current = instances;
+					const targetFrame = Math.max(
+						0,
+						Math.min(restoredState.currentFrame || 0, instances.length - 1),
+					);
+					currentFrameRef.current = targetFrame;
 					fpsRef.current = restoredState.fps || 8;
 					setAnimMode(true);
-					applyFrame(deserializedFrames[currentFrameRef.current]);
+					if (instances[targetFrame]) {
+						oekaki.setLayers(instances[targetFrame]);
+						syncLayerEntries();
+					}
 				} else if (restoredState.layers) {
 					for (const l of oekaki.getLayers()) l.delete();
 					oekaki.refresh();
@@ -1032,56 +1063,122 @@ export default function DrawingEditor({
 	// ── Animation ──
 
 	const selectFrame = (i: number) => {
+		if (i === currentFrameRef.current) return;
 		handleDeselect();
-		framesRef.current[currentFrameRef.current] = captureFrame();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 		currentFrameRef.current = i;
-		applyFrame(framesRef.current[i]);
+		if (frameInstancesRef.current[i]) {
+			oekaki.setLayers(frameInstancesRef.current[i]);
+			syncLayerEntries();
+		}
 		updateOnionSkin();
 		forceRender((n) => n + 1);
 	};
 
 	const addFrame = () => {
-		framesRef.current[currentFrameRef.current] = captureFrame();
-		const blank: FrameData = {
-			layers: oekaki.getLayers().map((l) => ({
-				name: l.name,
-				visible: l.visible,
-				locked: l.locked,
-				opacity: l.opacity,
-				data: new Uint8ClampedArray(l.canvas.width * l.canvas.height * 4),
-			})),
-		};
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const newLayers = (
+			currentLayers.length > 0
+				? currentLayers
+				: [{ name: "レイヤー #1", visible: true, locked: false, opacity: 100 }]
+		).map((l) => {
+			const newL = new oekaki.LayeredCanvas(l.name);
+			newL.visible = l.visible;
+			newL.locked = l.locked;
+			newL.opacity = l.opacity;
+			return newL;
+		});
 		const idx = currentFrameRef.current + 1;
-		framesRef.current.splice(idx, 0, blank);
+		frameInstancesRef.current.splice(idx, 0, newLayers);
 		currentFrameRef.current = idx;
-		applyFrame(blank);
+		oekaki.setLayers(newLayers);
+		syncLayerEntries();
 		updateOnionSkin();
 		forceRender((n) => n + 1);
 	};
 
 	const deleteFrame = () => {
-		if (framesRef.current.length <= 1) return;
-		framesRef.current.splice(currentFrameRef.current, 1);
-		if (currentFrameRef.current >= framesRef.current.length)
-			currentFrameRef.current = framesRef.current.length - 1;
-		applyFrame(framesRef.current[currentFrameRef.current]);
+		if (frameInstancesRef.current.length <= 1) return;
+		handleDeselect();
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const toDelete = frameInstancesRef.current[currentFrameRef.current];
+		toDelete?.forEach((l) => l.delete());
+		frameInstancesRef.current.splice(currentFrameRef.current, 1);
+		if (currentFrameRef.current >= frameInstancesRef.current.length)
+			currentFrameRef.current = frameInstancesRef.current.length - 1;
+		const nextLayers = frameInstancesRef.current[currentFrameRef.current];
+		if (nextLayers) {
+			oekaki.setLayers(nextLayers);
+			syncLayerEntries();
+		}
 		updateOnionSkin();
 		forceRender((n) => n + 1);
 	};
 
 	const duplicateFrame = () => {
-		framesRef.current[currentFrameRef.current] = captureFrame();
-		const src = framesRef.current[currentFrameRef.current];
-		const dup: FrameData = {
-			layers: src.layers.map((l) => ({
-				...l,
-				data: new Uint8ClampedArray(l.data),
-			})),
-		};
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const dupLayers = currentLayers.map((src) => {
+			const dupL = new oekaki.LayeredCanvas(src.name);
+			dupL.visible = src.visible;
+			dupL.locked = src.locked;
+			dupL.opacity = src.opacity;
+			dupL.data = new Uint8ClampedArray(src.data);
+			dupL.trace();
+			return dupL;
+		});
 		const idx = currentFrameRef.current + 1;
-		framesRef.current.splice(idx, 0, dup);
+		frameInstancesRef.current.splice(idx, 0, dupLayers);
 		currentFrameRef.current = idx;
-		applyFrame(dup);
+		oekaki.setLayers(dupLayers);
+		syncLayerEntries();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const reorderFrame = (from: number, to: number) => {
+		if (
+			from === to ||
+			from < 0 ||
+			to < 0 ||
+			from >= frameInstancesRef.current.length ||
+			to >= frameInstancesRef.current.length
+		)
+			return;
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const moved = frameInstancesRef.current.splice(from, 1)[0];
+		frameInstancesRef.current.splice(to, 0, moved);
+
+		let newCurrent = currentFrameRef.current;
+		if (currentFrameRef.current === from) {
+			newCurrent = to;
+		} else if (from < currentFrameRef.current && to >= currentFrameRef.current) {
+			newCurrent--;
+		} else if (from > currentFrameRef.current && to <= currentFrameRef.current) {
+			newCurrent++;
+		}
+		currentFrameRef.current = newCurrent;
+		const target = frameInstancesRef.current[newCurrent];
+		if (target) {
+			oekaki.setLayers(target);
+			syncLayerEntries();
+		}
 		updateOnionSkin();
 		forceRender((n) => n + 1);
 	};
@@ -1093,13 +1190,23 @@ export default function DrawingEditor({
 			isPlayingRef.current = false;
 			setIsPlaying(false);
 		} else {
+			handleDeselect();
+			if (frameInstancesRef.current.length === 0) {
+				frameInstancesRef.current = [oekaki.getLayers()];
+			}
+			frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 			isPlayingRef.current = true;
 			setIsPlaying(true);
 			playTimerRef.current = window.setInterval(() => {
-				const next = (currentFrameRef.current + 1) % framesRef.current.length;
-				framesRef.current[currentFrameRef.current] = captureFrame();
+				if (frameInstancesRef.current.length <= 1) return;
+				const next =
+					(currentFrameRef.current + 1) % frameInstancesRef.current.length;
 				currentFrameRef.current = next;
-				applyFrame(framesRef.current[next]);
+				const target = frameInstancesRef.current[next];
+				if (target) {
+					oekaki.setLayers(target);
+					syncLayerEntries();
+				}
 				updateOnionSkin();
 				forceRender((n) => n + 1);
 			}, 1000 / fpsRef.current);
@@ -1111,10 +1218,15 @@ export default function DrawingEditor({
 		if (isPlayingRef.current) {
 			if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
 			playTimerRef.current = window.setInterval(() => {
-				const next = (currentFrameRef.current + 1) % framesRef.current.length;
-				framesRef.current[currentFrameRef.current] = captureFrame();
+				if (frameInstancesRef.current.length <= 1) return;
+				const next =
+					(currentFrameRef.current + 1) % frameInstancesRef.current.length;
 				currentFrameRef.current = next;
-				applyFrame(framesRef.current[next]);
+				const target = frameInstancesRef.current[next];
+				if (target) {
+					oekaki.setLayers(target);
+					syncLayerEntries();
+				}
 				updateOnionSkin();
 				forceRender((n) => n + 1);
 			}, 1000 / fpsRef.current);
@@ -1123,17 +1235,29 @@ export default function DrawingEditor({
 
 	const enterAnimMode = () => {
 		stopPlayback();
-		framesRef.current = [captureFrame()];
-		currentFrameRef.current = 0;
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			currentFrameRef.current = 0;
+		} else {
+			if (!frameInstancesRef.current[currentFrameRef.current]) {
+				currentFrameRef.current = 0;
+			}
+			const target = frameInstancesRef.current[currentFrameRef.current];
+			if (target) {
+				oekaki.setLayers(target);
+				syncLayerEntries();
+			}
+		}
 		setAnimMode(true);
+		updateOnionSkin();
 	};
 
 	const exitAnimMode = () => {
 		stopPlayback();
-		if (framesRef.current.length > 1) {
-			framesRef.current[currentFrameRef.current] = captureFrame();
-			currentFrameRef.current = 0;
-			applyFrame(framesRef.current[0]);
+		handleDeselect();
+		if (frameInstancesRef.current.length > 0) {
+			frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
 		}
 		onionSkinRef.current = false;
 		setOnionSkin(false);
@@ -1528,7 +1652,7 @@ export default function DrawingEditor({
 				// で管理しており(各更新箇所で forceRender を呼びfresh値を反映)、ここでの ref 読み取りは安全。
 				<AnimationBar
 					// eslint-disable-next-line react-hooks/refs
-					frameCount={framesRef.current.length}
+					frameCount={Math.max(1, frameInstancesRef.current.length)}
 					// eslint-disable-next-line react-hooks/refs
 					currentFrame={currentFrameRef.current}
 					// eslint-disable-next-line react-hooks/refs
@@ -1538,6 +1662,7 @@ export default function DrawingEditor({
 					onAddFrame={addFrame}
 					onDeleteFrame={deleteFrame}
 					onDuplicateFrame={duplicateFrame}
+					onReorderFrame={reorderFrame}
 					onTogglePlay={togglePlay}
 					onFpsChange={handleFpsChange}
 					onionSkin={onionSkin}

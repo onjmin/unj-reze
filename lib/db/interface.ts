@@ -95,6 +95,10 @@ export interface CreatePostParams extends MmlRef {
 	slug?: string;
 	gameId?: number;
 	mvId?: number;
+	/** ドット絵コラボ用のグリッド横解像度 */
+	dotW?: number;
+	/** ドット絵コラボ用のグリッド縦解像度 */
+	dotH?: number;
 	/** 自己申告の権利表記。未設定なら undefined */
 	originType?: OriginType;
 }
@@ -111,6 +115,10 @@ export interface ReplyParams extends MmlRef {
 	avatarColor?: string;
 	gameId?: number;
 	mvId?: number;
+	/** ドット絵コラボ用のグリッド横解像度 */
+	dotW?: number;
+	/** ドット絵コラボ用のグリッド縦解像度 */
+	dotH?: number;
 	originType?: OriginType;
 }
 
