@@ -40,12 +40,13 @@ import {
 	serializeLayers,
 } from "@/lib/history";
 import {
-	blobToDataUrl,
 	exportFramesZip,
 	exportGif,
 	exportSinglePng,
 	exportSpriteSheet,
+	generateSpriteSheetCanvas,
 } from "@/lib/export-drawing";
+import { api } from "@/lib/api";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
@@ -71,9 +72,16 @@ function getEditorFrames(
 	});
 }
 
+export interface DrawingAnimMeta {
+	/** スプライトシート(横1列)のコマ数 */
+	animFrames: number;
+	/** 再生fps */
+	animFps: number;
+}
+
 interface DrawingEditorProps {
 	onClose: () => void;
-	onSave: (data: string) => void;
+	onSave: (data: string, animMeta?: DrawingAnimMeta) => void;
 	collabImageUrl?: string;
 }
 
@@ -1456,9 +1464,10 @@ export default function DrawingEditor({
 		}
 		clearAutosave(storageKey);
 
-		// アニメモードで複数フレームある場合はGIFとして書き出し、
-		// 1枚絵と同じ「string(dataURL)」の口でそのまま onSave に渡す。
-		// <img src> はGIFなら自然に再生されるため、DB/型変更なしでアニメ投稿に対応できる。
+		// アニメモードで複数フレームある場合は横1列のスプライトシートとして書き出す
+		// （GIFではなく静止画スプライトシート＝投稿側の想定フォーマット）。
+		// コマ数/fpsは総ピクセルサイズから逆算できない自由入力値なので、
+		// メタデータとして別途 onSave に渡し posts.anim_frames/anim_fps に保存する。
 		const hasMultipleFrames =
 			animMode && frameInstancesRef.current.length > 1;
 		if (hasMultipleFrames) {
@@ -1467,19 +1476,27 @@ export default function DrawingEditor({
 				const w = frameCanvases[0].width;
 				const h = frameCanvases[0].height;
 				try {
-					const blob = await exportGif({
+					const sheet = generateSpriteSheetCanvas({
+						columns: frameCanvases.length,
+						rows: 1,
+						cellWidth: w,
+						cellHeight: h,
 						frames: frameCanvases,
-						width: w,
-						height: h,
-						fps: fpsRef.current,
-						transparent: true,
-						download: false,
 					});
-					const dataUrl = await blobToDataUrl(blob);
-					onSave(dataUrl);
+					// Neonのcontent_urlに生base64を書き込まないよう、必ずアップロードしてURL化する
+					const { url } = await api.upload.image({
+						image: sheet.toDataURL("image/png"),
+					});
+					onSave(url, {
+						animFrames: frameCanvases.length,
+						animFps: fpsRef.current,
+					});
 					return;
 				} catch (err) {
-					console.error("GIFアニメの書き出しに失敗、1枚絵として保存します", err);
+					console.error(
+						"アニメスプライトシートの書き出しに失敗、1枚絵として保存します",
+						err,
+					);
 				}
 			}
 		}

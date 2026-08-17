@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cachePost } from "@/lib/post-cache";
 import { Post } from "@/lib/types";
+import { walkPresetRows } from "@/lib/walk-cycle";
+import SpriteImage from "./SpriteImage";
 
 type MediaSort = "new" | "likes" | "dislikes";
 
@@ -70,14 +72,28 @@ export default function MediaGrid({ items }: MediaGridProps) {
 						}}
 						className="relative aspect-square bg-[#1a1b26] overflow-hidden group gimp-checkered-background-white"
 					>
-						<img
+						<SpriteImage
 							src={post.imageSrc}
 							alt={post.imageAlt || "ユーザーアート"}
 							className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+							animFrames={post.animFrames}
+							animFps={post.animFps}
+							rows={walkPresetRows(post.walkPreset)}
 						/>
-						{post.imageSrc?.toLowerCase().includes(".gif") && (
+						{(post.imageSrc?.toLowerCase().includes(".gif") ||
+							post.imageSrc?.toLowerCase().startsWith("data:image/gif")) && (
 							<span className="absolute top-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
 								GIF
+							</span>
+						)}
+						{!post.walkPreset && post.animFrames && post.animFrames > 1 && (
+							<span className="absolute top-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+								ANIM
+							</span>
+						)}
+						{post.walkPreset && (
+							<span className="absolute top-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+								歩行
 							</span>
 						)}
 						<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-1 flex items-center gap-2 text-[10px] text-white font-bold opacity-0 group-hover:opacity-100 transition-opacity">

@@ -13,6 +13,13 @@ import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import type { FingerprintSignals } from "@/lib/security/types";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
+import { presets as walkPresets } from "@/lib/walk-cycle";
+
+/** 未知のラベルを混入させない（クライアント由来の生文字列をそのままDBへ入れない） */
+function sanitizeWalkPreset(label: unknown): string | undefined {
+	if (typeof label !== "string") return undefined;
+	return walkPresets.some((p) => p.label === label) ? label : undefined;
+}
 
 export async function GET(request: NextRequest) {
 	try {
@@ -84,6 +91,9 @@ export async function POST(request: NextRequest) {
 			mvId,
 			dotW,
 			dotH,
+			animFrames,
+			animFps,
+			walkPreset,
 			originType,
 			turnstileToken,
 			fingerprint,
@@ -99,6 +109,9 @@ export async function POST(request: NextRequest) {
 			mvId?: string;
 			dotW?: number;
 			dotH?: number;
+			animFrames?: number;
+			animFps?: number;
+			walkPreset?: string;
 			originType?: OriginType;
 			turnstileToken?: string | null;
 			fingerprint?: FingerprintSignals | null;
@@ -182,6 +195,9 @@ export async function POST(request: NextRequest) {
 			mvId: decodedMvId === null ? undefined : decodedMvId,
 			dotW: dotW ? Number(dotW) : undefined,
 			dotH: dotH ? Number(dotH) : undefined,
+			animFrames: animFrames ? Number(animFrames) : undefined,
+			animFps: animFps ? Number(animFps) : undefined,
+			walkPreset: sanitizeWalkPreset(walkPreset),
 			...mmlRef,
 			originType,
 		});

@@ -608,6 +608,9 @@ class MockDB {
 		mvId?: number;
 		dotW?: number;
 		dotH?: number;
+		animFrames?: number;
+		animFps?: number;
+		walkPreset?: string;
 		originType?: OriginType;
 	}): Post {
 		const createdAt = this.now();
@@ -640,6 +643,9 @@ class MockDB {
 			hasMml: extractMmlFromContent(data.content) !== null,
 			dotW: data.dotW,
 			dotH: data.dotH,
+			animFrames: data.animFrames,
+			animFps: data.animFps,
+			walkPreset: data.walkPreset,
 			originType: data.originType,
 			isFalseDeclaration: false,
 			threadId: this.genId(),
@@ -736,6 +742,9 @@ class MockDB {
 			mvId?: number;
 			dotW?: number;
 			dotH?: number;
+			animFrames?: number;
+			animFps?: number;
+			walkPreset?: string;
 			originType?: OriginType;
 		},
 	): Post | null {
@@ -772,6 +781,9 @@ class MockDB {
 			hasMml: extractMmlFromContent(data.content) !== null,
 			dotW: data.dotW,
 			dotH: data.dotH,
+			animFrames: data.animFrames,
+			animFps: data.animFps,
+			walkPreset: data.walkPreset,
 			originType: data.originType,
 		};
 		this.posts.push(reply);
@@ -1032,6 +1044,11 @@ class MockDB {
 		imageSrc?: string;
 		imageAlt?: string;
 		mmlUrl?: string;
+		dotW?: number;
+		dotH?: number;
+		animFrames?: number;
+		animFps?: number;
+		walkPreset?: string;
 		originType?: OriginType;
 		isOwner?: boolean;
 	}[] {
@@ -1057,6 +1074,11 @@ class MockDB {
 				imageSrc: p.imageSrc,
 				imageAlt: p.imageAlt,
 				mmlUrl: kind === "mml" ? p.mmlUrl : undefined,
+				dotW: p.dotW,
+				dotH: p.dotH,
+				animFrames: p.animFrames,
+				animFps: p.animFps,
+				walkPreset: p.walkPreset,
 				originType: p.originType,
 				isOwner: mySlug !== undefined && p.slug === mySlug,
 			}));

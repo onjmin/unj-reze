@@ -160,6 +160,25 @@ export default function App() {
 	const [attachedDotSize, setAttachedDotSize] = useState<
 		{ w: number; h: number } | null
 	>(null);
+	/** アニメ/歩行グラのスプライトシート添付時のメタデータ（コマ数/fps/歩行プリセット） */
+	const [attachedAnim, setAttachedAnim] = useState<{
+		animFrames: number;
+		animFps: number;
+		walkPreset?: string;
+	} | null>(null);
+	/**
+	 * PostComposer の「画像を消す」「別の画像に差し替える」に直接渡す setter。
+	 * DrawingEditor/DotDrawingEditor 経由(handleSaveDrawing/handleSaveDotDrawing)の
+	 * ときはこれを使わず setAttachedImage→setAttachedAnim の順で個別に呼ぶため、
+	 * ここで一律クリアしても後段の setAttachedAnim(meta) が上書きして正しく残る。
+	 * これを挟まないと、アニメを添付→PostComposerの×で消す→別の1枚絵を添付、の
+	 * 順で古い animFrames/fps/walkPreset が新しい投稿に紛れ込む。
+	 */
+	const setAttachedImageDirect = useCallback((v: string | null) => {
+		setAttachedImage(v);
+		setAttachedDotSize(null);
+		setAttachedAnim(null);
+	}, []);
 	const [attachedMml, setAttachedMml] = useState<string | null>(null);
 	const [originType, setOriginType] = useState<OriginType | undefined>(
 		undefined,
@@ -617,6 +636,9 @@ export default function App() {
 			imageSrc: attachedImage ?? undefined,
 			dotW: attachedDotSize?.w,
 			dotH: attachedDotSize?.h,
+			animFrames: attachedAnim?.animFrames,
+			animFps: attachedAnim?.animFps,
+			walkPreset: attachedAnim?.walkPreset,
 			hasMv: !!mvDraft,
 			mvTitle: mvDraft?.title,
 			hasGame: !!gameDraft,
@@ -645,6 +667,7 @@ export default function App() {
 		setInputText("");
 		setAttachedImage(null);
 		setAttachedDotSize(null);
+		setAttachedAnim(null);
 		setAttachedMml(null);
 		setGameDraft(null);
 		setMvDraft(null);
@@ -653,8 +676,11 @@ export default function App() {
 		try {
 			let imageSrc: string | undefined;
 			if (attachedImage) {
-				const result = await api.upload.image({ image: attachedImage });
-				imageSrc = result.url;
+				// 二重アップロード防止＆/api/upload のバリデーション対策は
+				// handleCreatePost と同じ理由（上のコメント参照）
+				imageSrc = attachedImage.startsWith("data:")
+					? (await api.upload.image({ image: attachedImage })).url
+					: attachedImage;
 			}
 			let gameId: string | undefined;
 			if (gameDraft) {
@@ -682,6 +708,9 @@ export default function App() {
 				imageSrc,
 				dotW: attachedDotSize?.w,
 				dotH: attachedDotSize?.h,
+				animFrames: attachedAnim?.animFrames,
+				animFps: attachedAnim?.animFps,
+				walkPreset: attachedAnim?.walkPreset,
 				gameId,
 				mvId,
 				originType,
@@ -787,6 +816,11 @@ export default function App() {
 			parentPostId: undefined,
 			hasImage: !!attachedImage,
 			imageSrc: attachedImage ?? undefined,
+			dotW: attachedDotSize?.w,
+			dotH: attachedDotSize?.h,
+			animFrames: attachedAnim?.animFrames,
+			animFps: attachedAnim?.animFps,
+			walkPreset: attachedAnim?.walkPreset,
 			hasMv: !!mvDraft,
 			mvTitle: mvDraft?.title,
 			hasGame: !!gameDraft,
@@ -808,8 +842,13 @@ export default function App() {
 		try {
 			let imageSrc: string | undefined;
 			if (attachedImage) {
-				const result = await api.upload.image({ image: attachedImage });
-				imageSrc = result.url;
+				// アニメ/歩行グラのスプライトシートは DrawingEditor/DotDrawingEditor が
+				// 保存時点で既にアップロード済みのURLを渡してくる。dataURLのときだけ
+				// ここでアップロードする（二重アップロード防止、かつURLはそのまま
+				// /api/upload の data:image/ バリデーションに弾かれる）。
+				imageSrc = attachedImage.startsWith("data:")
+					? (await api.upload.image({ image: attachedImage })).url
+					: attachedImage;
 			}
 			let gameId: string | undefined;
 			if (gameDraft) {
@@ -838,9 +877,13 @@ export default function App() {
 				mvId,
 				dotW: attachedDotSize?.w,
 				dotH: attachedDotSize?.h,
+				animFrames: attachedAnim?.animFrames,
+				animFps: attachedAnim?.animFps,
+				walkPreset: attachedAnim?.walkPreset,
 				originType,
 			});
 			setAttachedDotSize(null);
+			setAttachedAnim(null);
 			setPosts((prev) => {
 				const next = prev.map((p) =>
 					p.id === tempId
@@ -983,11 +1026,16 @@ export default function App() {
 		}
 	};
 
-	const handleSaveDrawing = async (canvasData: string) => {
+	const handleSaveDrawing = async (
+		canvasData: string,
+		animMeta?: { animFrames: number; animFps: number },
+	) => {
 		// コラボ経由か（#コード進行 / #mml と同じく、実際の投稿にもハッシュタグ風の
 		// マーカーとして残す。誰かの絵を土台にしたことが本文だけ見ても分かるように）
 		const wasCollab = !!collabImageUrl;
 		if (editingPost) {
+			// 編集フローは今のところ dotW/dotH 同様アニメメタデータの更新に未対応
+			// （lib/db/pg.ts editPost が受け取らない）。imageSrcだけ差し替える。
 			setEditingPost((prev) =>
 				prev ? { ...prev, imageSrc: canvasData } : null,
 			);
@@ -997,6 +1045,7 @@ export default function App() {
 			return;
 		}
 		setAttachedImage(canvasData);
+		setAttachedAnim(animMeta ? { ...animMeta } : null);
 		closeScreen();
 		setCollabImageUrl(undefined);
 		setInputText(
@@ -1010,6 +1059,7 @@ export default function App() {
 		canvasData: string,
 		gridW?: number,
 		gridH?: number,
+		animMeta?: { animFrames: number; animFps: number; walkPreset?: string },
 	) => {
 		const wasCollab = !!collabImageUrl;
 		if (gridW && gridH) {
@@ -1034,6 +1084,7 @@ export default function App() {
 			return;
 		}
 		setAttachedImage(canvasData);
+		setAttachedAnim(animMeta ? { ...animMeta } : null);
 		closeScreen();
 		setCollabImageUrl(undefined);
 		setInputText(
@@ -1349,7 +1400,11 @@ export default function App() {
 		if (!discardModalConfig) return;
 		const { discardType, targetScreen } = discardModalConfig;
 
-		if (discardType === "image") setAttachedImage(null);
+		if (discardType === "image") {
+			setAttachedImage(null);
+			setAttachedDotSize(null);
+			setAttachedAnim(null);
+		}
 		if (discardType === "mml") setAttachedMml(null);
 		if (discardType === "game") setGameDraft(null);
 		if (discardType === "mv") setMvDraft(null);
@@ -1554,7 +1609,7 @@ export default function App() {
 													text={inputText}
 													setText={setInputText}
 													image={attachedImage}
-													setImage={setAttachedImage}
+													setImage={setAttachedImageDirect}
 													mml={attachedMml}
 													setMml={setAttachedMml}
 													gameDraft={gameDraft}
@@ -1664,7 +1719,7 @@ export default function App() {
 							text={inputText}
 							setText={setInputText}
 							image={attachedImage}
-							setImage={setAttachedImage}
+							setImage={setAttachedImageDirect}
 							mml={attachedMml}
 							setMml={setAttachedMml}
 							gameDraft={gameDraft}

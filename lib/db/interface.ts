@@ -99,6 +99,17 @@ export interface CreatePostParams extends MmlRef {
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
 	dotH?: number;
+	/** imageSrc が横1列のスプライトシートのときのコマ数（無ければ静止画） */
+	animFrames?: number;
+	/** アニメ/歩行グラの再生fps */
+	animFps?: number;
+	/**
+	 * imageSrc が歩行グラのスプライトシートのとき、`lib/walk-cycle.ts` の
+	 * WalkPreset.label（例: "RPGEN"）。方向数・コマ順はこのラベルから一意に
+	 * 引けるので、画像の画素サイズから推測(detectPreset)する必要が無くなる
+	 * ＝別規格が同じ総ピクセルサイズになる衝突を避けられる。
+	 */
+	walkPreset?: string;
 	/** 自己申告の権利表記。未設定なら undefined */
 	originType?: OriginType;
 }
@@ -119,6 +130,12 @@ export interface ReplyParams extends MmlRef {
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
 	dotH?: number;
+	/** imageSrc が横1列のスプライトシートのときのコマ数（無ければ静止画） */
+	animFrames?: number;
+	/** アニメ/歩行グラの再生fps */
+	animFps?: number;
+	/** imageSrc が歩行グラのスプライトシートのとき、WalkPreset.label */
+	walkPreset?: string;
 	originType?: OriginType;
 }
 

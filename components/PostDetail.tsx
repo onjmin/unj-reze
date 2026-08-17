@@ -51,6 +51,7 @@ import {
 	Post,
 } from "@/lib/types";
 import { fetchText } from "@/lib/uploader";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import BbsThreadView from "./BbsThreadView";
 import ChordPlayer from "./ChordPlayer";
 import EmbedPart from "./EmbedPart";
@@ -60,6 +61,7 @@ import ImagePreview from "./ImagePreview";
 import MmlSource, { useMmlSource } from "./MmlSource";
 import MvBox from "./MvBox";
 import ShareButton from "./ShareButton";
+import SpriteImage from "./SpriteImage";
 
 const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 const DrawingEditor = dynamic(() => import("./DrawingEditor"), { ssr: false });
@@ -1336,10 +1338,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							}}
 							className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
 						>
-							<img
+							<SpriteImage
 								src={post.imageSrc}
 								alt={post.imageAlt || "ユーザーアート"}
 								className="max-w-full h-auto max-h-[220px] block mx-auto"
+								animFrames={post.animFrames}
+								animFps={post.animFps}
+								rows={walkPresetRows(post.walkPreset)}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
@@ -2231,10 +2236,13 @@ function ReplyTreeItem({
 							}}
 							className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
 						>
-							<img
+							<SpriteImage
 								src={localPost.imageSrc}
 								alt={localPost.imageAlt || "ユーザーアート"}
 								className="max-w-full h-auto max-h-[220px] block mx-auto"
+								animFrames={localPost.animFrames}
+								animFps={localPost.animFps}
+								rows={walkPresetRows(localPost.walkPreset)}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;

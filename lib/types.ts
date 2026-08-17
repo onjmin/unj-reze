@@ -114,6 +114,12 @@ export interface Post {
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
 	dotH?: number;
+	/** アニメ投稿: imageSrc が横1列のスプライトシートのときのコマ数（無ければ静止画） */
+	animFrames?: number;
+	/** アニメ投稿の再生fps */
+	animFps?: number;
+	/** imageSrc が歩行グラのスプライトシートのとき、`lib/walk-cycle.ts` の WalkPreset.label */
+	walkPreset?: string;
 	mvId?: string;
 	mvTitle?: string;
 	/** MVのサムネイル（背景画像URL。無ければプリセットの色で描く） */

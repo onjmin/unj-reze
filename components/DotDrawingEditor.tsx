@@ -51,8 +51,10 @@ import {
 	exportSinglePng,
 	exportSpriteSheet,
 	exportWalkAsAniZip,
+	generateSpriteSheetCanvas,
 	resizeCanvas,
 } from "@/lib/export-drawing";
+import { api } from "@/lib/api";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
@@ -79,9 +81,23 @@ function getEditorFrames(
 	});
 }
 
+export interface DotDrawingAnimMeta {
+	/** スプライトシートのコマ数（歩行グラは方向あたりのコマ数） */
+	animFrames: number;
+	/** 再生fps */
+	animFps: number;
+	/** 歩行グラのとき `lib/walk-cycle.ts` の WalkPreset.label。アニメ絵なら未設定 */
+	walkPreset?: string;
+}
+
 interface DotDrawingEditorProps {
 	onClose: () => void;
-	onSave: (data: string, gridW?: number, gridH?: number) => void;
+	onSave: (
+		data: string,
+		gridW?: number,
+		gridH?: number,
+		animMeta?: DotDrawingAnimMeta,
+	) => void;
 	collabImageUrl?: string;
 	initialGridW?: number;
 	initialGridH?: number;
@@ -2146,12 +2162,92 @@ export default function DotDrawingEditor({
 		};
 	});
 
-	const handleSave = () => {
+	const handleSave = async () => {
 		const state = getCurrentState();
 		if (state) {
 			saveHistory(storageKey, state, "dotdrawing", 50);
 		}
 		clearAutosave(storageKey);
+
+		// 歩行グラモード: 今開いている1コマだけでなく、全方向×全フレームの
+		// スプライトシートを埋め込む。`walk:` スキームの分割ロジック(lib/walk-cycle.ts)
+		// はシート全体のサイズからプリセットを自動判定する前提なので、1コマだけ保存すると
+		// 歩行アニメが成立しない。
+		if (walkMode) {
+			const cells: HTMLCanvasElement[] = [];
+			for (let y = 0; y < walkPreset.ways.length; y++) {
+				for (let x = 0; x < walkPreset.frames; x++) {
+					cells.push(getWalkCellCanvas(y, x));
+				}
+			}
+			const sheet = generateSpriteSheetCanvas({
+				columns: walkPreset.frames,
+				rows: walkPreset.ways.length,
+				cellWidth: walkPreset.w,
+				cellHeight: walkPreset.h,
+				frames: cells,
+			});
+			// dotW/dotH は「ドット絵コラボ」再開時の単一キャンバスの解像度に使われる値
+			// (app/page.tsx の collabDotSize)。歩行グラの全方向シートをその値で開くと
+			// シート全体が1コマ用の小さいグリッドに潰れてコラボが壊れるため渡さない。
+			// コマ数/方向数/セルサイズは walkPreset.label から一意に復元できる
+			// （lib/walk-cycle.ts の presets）ので、シートの画素サイズから当てにいく
+			// detectPreset の "auto" 経路は使わない＝別規格が同じ総ピクセルサイズになる
+			// 衝突を踏まない。
+			try {
+				const { url } = await api.upload.image({
+					image: sheet.toDataURL("image/png"),
+				});
+				onSave(url, undefined, undefined, {
+					animFrames: walkPreset.frames,
+					animFps: fpsRef.current,
+					walkPreset: walkPreset.label,
+				});
+				return;
+			} catch (err) {
+				console.error("歩行グラシートのアップロードに失敗しました", err);
+				// アップロード失敗時のみ、フォールバックとして dataURL のまま渡す
+				onSave(sheet.toDataURL("image/png"), undefined, undefined, {
+					animFrames: walkPreset.frames,
+					animFps: fpsRef.current,
+					walkPreset: walkPreset.label,
+				});
+				return;
+			}
+		}
+
+		// アニメモード: 複数フレームあれば横1列のスプライトシートとして書き出す
+		// （GIFではなく静止画スプライトシート＝投稿側の想定フォーマット）。
+		if (animMode && frameInstancesRef.current.length > 1) {
+			const frameCanvases = getAnimFramesForExport(1);
+			if (frameCanvases.length > 1) {
+				const targetW = gridW;
+				const targetH = gridH;
+				try {
+					const sheet = generateSpriteSheetCanvas({
+						columns: frameCanvases.length,
+						rows: 1,
+						cellWidth: targetW,
+						cellHeight: targetH,
+						frames: frameCanvases,
+					});
+					const { url } = await api.upload.image({
+						image: sheet.toDataURL("image/png"),
+					});
+					onSave(url, gridW, gridH, {
+						animFrames: frameCanvases.length,
+						animFps: fpsRef.current,
+					});
+					return;
+				} catch (err) {
+					console.error(
+						"アニメスプライトシートの書き出しに失敗、1枚絵として保存します",
+						err,
+					);
+				}
+			}
+		}
+
 		const canvas = oekaki.render();
 		onSave(canvas.toDataURL("image/png"), gridW, gridH);
 	};

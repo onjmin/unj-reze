@@ -66,6 +66,12 @@ export const toXY = (i: number, frames: number): [number, number] => [
 	Math.floor(i / frames),
 ];
 
+/** ラベル(WalkPreset.label)から方向数(行数)を引く。表示側のSpriteImageが使う。 */
+export function walkPresetRows(label: string | undefined): number {
+	if (!label) return 1;
+	return presets.find((p) => p.label === label)?.ways.length ?? 1;
+}
+
 export function detectPreset(imgW: number, imgH: number): WalkPreset | null {
 	for (const p of presets) {
 		if (imgW === p.w * p.frames && imgH === p.h * p.ways.length) return p;

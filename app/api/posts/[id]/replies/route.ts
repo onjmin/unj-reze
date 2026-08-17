@@ -7,8 +7,15 @@ import { attachEmbedInfo } from "@/lib/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodePost } from "@/lib/sqids";
+import { presets as walkPresets } from "@/lib/walk-cycle";
 
 export const dynamic = "force-dynamic";
+
+/** 未知のラベルを混入させない（クライアント由来の生文字列をそのままDBへ入れない） */
+function sanitizeWalkPreset(label: unknown): string | undefined {
+	if (typeof label !== "string") return undefined;
+	return walkPresets.some((p) => p.label === label) ? label : undefined;
+}
 
 export async function GET(
 	_request: NextRequest,
@@ -53,6 +60,9 @@ export async function POST(
 			mvId,
 			dotW,
 			dotH,
+			animFrames,
+			animFps,
+			walkPreset,
 			originType,
 			sessionId,
 		} = body;
@@ -97,6 +107,9 @@ export async function POST(
 			mvId: mvId ? Number(mvId) : undefined,
 			dotW: dotW ? Number(dotW) : undefined,
 			dotH: dotH ? Number(dotH) : undefined,
+			animFrames: animFrames ? Number(animFrames) : undefined,
+			animFps: animFps ? Number(animFps) : undefined,
+			walkPreset: sanitizeWalkPreset(walkPreset),
 			...mmlRef,
 			originType,
 		});

@@ -18,6 +18,12 @@ export interface DbMediaSearchPost {
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
 	dotH?: number;
+	/** アニメ投稿: imageSrc が横1列のスプライトシートのときのコマ数（無ければ静止画） */
+	animFrames?: number;
+	/** アニメ投稿の再生fps */
+	animFps?: number;
+	/** imageSrc が歩行グラのスプライトシートのとき、WalkPreset.label */
+	walkPreset?: string;
 	/** 自己申告の権利表記。参照ピッカーで改変NG/無断使用禁止の導線を出さないために使う。 */
 	originType?: OriginType;
 	/**
@@ -91,6 +97,12 @@ export interface DbPost {
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
 	dotH?: number;
+	/** アニメ投稿: imageSrc が横1列のスプライトシートのときのコマ数（無ければ静止画） */
+	animFrames?: number;
+	/** アニメ投稿の再生fps */
+	animFps?: number;
+	/** imageSrc が歩行グラのスプライトシートのとき、WalkPreset.label */
+	walkPreset?: string;
 	originType?: OriginType;
 	isFalseDeclaration?: boolean;
 	isEdited?: boolean;

@@ -158,6 +158,9 @@ const staticApi = {
 			mvId?: string;
 			dotW?: number;
 			dotH?: number;
+			animFrames?: number;
+			animFps?: number;
+			walkPreset?: string;
 			originType?: OriginType;
 		}) => {
 			const decodedGameId = data.gameId
@@ -243,6 +246,9 @@ const staticApi = {
 					mvId?: string | number;
 					dotW?: number;
 					dotH?: number;
+					animFrames?: number;
+					animFps?: number;
+					walkPreset?: string;
 					originType?: OriginType;
 				},
 			) => {
@@ -598,6 +604,9 @@ const liveApi = {
 			mvId?: string;
 			dotW?: number;
 			dotH?: number;
+			animFrames?: number;
+			animFps?: number;
+			walkPreset?: string;
 			originType?: OriginType;
 		}) =>
 			fetcher<Post>("/posts", {
@@ -676,6 +685,9 @@ const liveApi = {
 					mvId?: string | number;
 					dotW?: number;
 					dotH?: number;
+					animFrames?: number;
+					animFps?: number;
+					walkPreset?: string;
 					originType?: OriginType;
 				},
 			) =>
