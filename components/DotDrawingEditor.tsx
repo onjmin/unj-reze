@@ -74,7 +74,7 @@ function getEditorFrames(
 		const l = i === currentFrame ? currentLayers : layers;
 		return {
 			id,
-			color: computeFrameColor(l),
+			color: computeFrameColor(l, id),
 		};
 	});
 }
@@ -1245,7 +1245,6 @@ export default function DotDrawingEditor({
 					setAnimMode(true);
 					if (instances[targetFrame]) {
 						oekaki.setLayers(instances[targetFrame]);
-						syncLayerEntries();
 					}
 				} else if (restoredState.layers) {
 					for (const l of oekaki.getLayers()) l.delete();
@@ -1268,6 +1267,11 @@ export default function DotDrawingEditor({
 						l.opacity = opacity;
 						l.data = new Uint8ClampedArray(data);
 					}
+					setAnimMode(false);
+					frameInstancesRef.current = [];
+					frameIdsRef.current = [1];
+					nextFrameIdRef.current = 2;
+					currentFrameRef.current = 0;
 				}
 				setRestoredState(null);
 			} else {

@@ -65,7 +65,7 @@ function getEditorFrames(
 		const l = i === currentFrame ? currentLayers : layers;
 		return {
 			id,
-			color: computeFrameColor(l),
+			color: computeFrameColor(l, id),
 		};
 	});
 }
@@ -691,7 +691,6 @@ export default function DrawingEditor({
 					setAnimMode(true);
 					if (instances[targetFrame]) {
 						oekaki.setLayers(instances[targetFrame]);
-						syncLayerEntries();
 					}
 				} else if (restoredState.layers) {
 					for (const l of oekaki.getLayers()) l.delete();
@@ -714,7 +713,11 @@ export default function DrawingEditor({
 						l.opacity = opacity;
 						l.data = new Uint8ClampedArray(data);
 					}
-					syncLayerEntries();
+					setAnimMode(false);
+					frameInstancesRef.current = [];
+					frameIdsRef.current = [1];
+					nextFrameIdRef.current = 2;
+					currentFrameRef.current = 0;
 				}
 				setRestoredState(null);
 			} else {
@@ -734,34 +737,19 @@ export default function DrawingEditor({
 							target.paste(img);
 							target.trace();
 						}
-						// re-populate layer entries
-						const updated: LayerEntry[] = oekaki
-							.getLayers()
-							.map((inst) => ({
-								instance: inst,
-								name: inst.name,
-							}))
-							.reverse();
-						setLayerEntries(updated);
-						layerEntriesRef.current = updated;
+						syncLayerEntries();
 						setActiveLayerIndex(0);
 						activeLayerIndexRef.current = 0;
+						forceRender((n) => n + 1);
 					};
 				}
 			}
 
-			// populate layer entries (topmost first)
-			const initEntries: LayerEntry[] = oekaki
-				.getLayers()
-				.map((inst) => ({
-					instance: inst,
-					name: inst.name,
-				}))
-				.reverse();
-			setLayerEntries(initEntries);
-			layerEntriesRef.current = initEntries;
+			syncLayerEntries();
 			setActiveLayerIndex(0);
 			activeLayerIndexRef.current = 0;
+			updateOnionSkin();
+			forceRender((n) => n + 1);
 		};
 
 		loadCanvasContent();

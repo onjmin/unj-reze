@@ -37,20 +37,27 @@ export function computeFrameColor(
 		visible?: boolean;
 		opacity?: number;
 	}[],
+	frameId?: number,
 ): string {
-	let hash = 0x811c9dc5;
-	let hasPixels = false;
+	// 初期ハッシュとして frameId をシードとして使用（IDごとに明確に色分け）
+	let hash = 0x811c9dc5 ^ ((frameId ?? 1) * 0x9e3779b9);
+	let drawnPixelCount = 0;
+
 	for (const l of layers) {
 		if (l.visible === false || (l.opacity !== undefined && l.opacity <= 0))
 			continue;
 		const d = l.data;
 		if (!d || d.length === 0) continue;
 		const len = d.length;
-		const step = Math.max(4, Math.floor(len / 256) * 4);
-		for (let i = 0; i < len; i += step) {
+		// 最大 2048 サンプルで高速かつ漏れなく走査
+		const totalPixels = len >>> 2;
+		const stepPixels = Math.max(1, Math.floor(totalPixels / 2048));
+		const stepBytes = stepPixels * 4;
+
+		for (let i = 0; i < len; i += stepBytes) {
 			const a = d[i + 3];
 			if (a > 0) {
-				hasPixels = true;
+				drawnPixelCount++;
 				const pixelVal =
 					(d[i] & 0xff) |
 					((d[i + 1] & 0xff) << 8) |
@@ -61,12 +68,17 @@ export function computeFrameColor(
 			}
 		}
 	}
-	if (!hasPixels) {
-		return "#27272a";
+
+	// 描画ピクセル数もハッシュに混ぜる
+	if (drawnPixelCount > 0) {
+		hash ^= drawnPixelCount;
+		hash = Math.imul(hash, 0x01000193);
 	}
+
+	// 視認性の高い HSL カラーコードを生成
 	const h = Math.abs(hash) % 360;
-	const s = 65 + (Math.abs(hash >> 8) % 25);
-	const l = 32 + (Math.abs(hash >> 16) % 16);
+	const s = 55 + (Math.abs(hash >> 8) % 30);
+	const l = 28 + (Math.abs(hash >> 16) % 15);
 	return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
