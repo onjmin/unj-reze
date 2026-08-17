@@ -72,6 +72,31 @@ export function walkPresetRows(label: string | undefined): number {
 	return presets.find((p) => p.label === label)?.ways.length ?? 1;
 }
 
+/**
+ * `WalkPreset.label`(この投稿編集UIの規格名。例:"RPGEN") →
+ * `lib/walk-sprite.ts` の `WalkStandard.id`(GameMakerアセット系の規格ID。例:"rpgen")。
+ *
+ * 両モジュールは同じ5規格(RPGEN/ツクール2000/XP/VX/MV)を別々に定義しており、
+ * w/h/frames/ways の並びが完全一致することを前提にラベル文字列で対応づける
+ * （walk-sprite.ts側にはRPGツクールという接頭辞が無く、ラベル文字列そのものは違う）。
+ * SMC/ROW_ANIM はDotDrawingEditorの歩行グラ編集に無い規格なので対応が無い。
+ * 一致しなければ undefined（呼び出し側は "auto" 等にフォールバックすること）。
+ */
+const PRESET_LABEL_TO_STD_ID: Record<string, string> = {
+	RPGEN: "rpgen",
+	RPGツクール2000: "rm2k",
+	RPGツクールXP: "rmxp",
+	RPGツクールVX: "rmvx",
+	RPGツクールMV: "rmmv",
+};
+
+export function walkPresetToStdId(
+	label: string | undefined,
+): string | undefined {
+	if (!label) return undefined;
+	return PRESET_LABEL_TO_STD_ID[label];
+}
+
 export function detectPreset(imgW: number, imgH: number): WalkPreset | null {
 	for (const p of presets) {
 		if (imgW === p.w * p.frames && imgH === p.h * p.ways.length) return p;

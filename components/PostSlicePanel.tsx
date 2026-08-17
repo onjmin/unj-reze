@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseWalkRef } from "@/lib/asset-ref";
 import type { Post } from "@/lib/types";
-import { walkPresetRows } from "@/lib/walk-cycle";
+import { walkPresetRows, walkPresetToStdId } from "@/lib/walk-cycle";
 import {
 	animatedCellInRect,
 	detectStandard,
@@ -42,6 +42,8 @@ interface Rect {
 interface SliceImage {
 	id: string | number;
 	url: string;
+	/** 投稿の walk_preset から復元済みの WalkStandard.id。分かっていれば規格選択を自動化する */
+	walkStdId?: string;
 }
 
 const DISPLAY_MAX = 320;
@@ -229,7 +231,13 @@ export default function PostSlicePanel({
 						.map((p) => (
 							<button
 								key={p.id}
-								onClick={() => setSelected({ id: p.id, url: p.imageSrc! })}
+								onClick={() =>
+									setSelected({
+										id: p.id,
+										url: p.imageSrc!,
+										walkStdId: walkPresetToStdId(p.walkPreset),
+									})
+								}
 								className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background-white"
 							>
 								<SpriteImage
@@ -367,26 +375,32 @@ function SliceEditor({
 	const [tileW, setTileW] = useState(32);
 	const [tileH, setTileH] = useState(32);
 
+	// 投稿の walk_preset から規格が分かっていれば(=歩行グラモードで保存された投稿)、
+	// initialRef が無くても自動的に「歩行グラ」モード＆その規格を初期値にする。
+	// pixel-size推測(detectStandard)に頼らず、保存時に確定した規格をそのまま使う。
+	const presetStd = image.walkStdId ? standardById(image.walkStdId) : null;
+
 	const [outKind, setOutKind] = useState<"sprite" | "walk">(
-		initialCrop?.outKind ?? "sprite",
+		initialCrop?.outKind ?? (presetStd ? "walk" : "sprite"),
 	);
 
 	// 歩行グラの「コマ数/サイズ」。テンプレ選択時は既定値を一度だけ流し込むだけで、
 	// 以後は自由に編集できる入力欄にする（選択に連動して固定はしない）。
 	const [templateId, setTemplateId] = useState<string>(
-		initialCrop?.templateId ?? WALK_STANDARDS[0].id,
+		initialCrop?.templateId ?? presetStd?.id ?? WALK_STANDARDS[0].id,
 	);
 	const [fieldW, setFieldW] = useState<number>(
-		initialCrop?.fieldW ?? WALK_STANDARDS[0].w,
+		initialCrop?.fieldW ?? presetStd?.w ?? WALK_STANDARDS[0].w,
 	);
 	const [fieldH, setFieldH] = useState<number>(
-		initialCrop?.fieldH ?? WALK_STANDARDS[0].h,
+		initialCrop?.fieldH ?? presetStd?.h ?? WALK_STANDARDS[0].h,
 	);
 	const [fieldFrames, setFieldFrames] = useState<number>(
-		initialCrop?.fieldFrames ?? WALK_STANDARDS[0].frames,
+		initialCrop?.fieldFrames ?? presetStd?.frames ?? WALK_STANDARDS[0].frames,
 	);
 	const [fieldWays, setFieldWays] = useState<string>(
-		initialCrop?.fieldWays ?? WALK_STANDARDS[0].ways.map((w) => w.key).join(""),
+		initialCrop?.fieldWays ??
+			(presetStd ?? WALK_STANDARDS[0]).ways.map((w) => w.key).join(""),
 	);
 	const [fieldRow, setFieldRow] = useState<number>(initialCrop?.fieldRow ?? 0);
 	const [fieldPlayMode, setFieldPlayMode] = useState<
