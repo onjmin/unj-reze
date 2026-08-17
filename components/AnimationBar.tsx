@@ -37,10 +37,10 @@ export function computeFrameColor(
 		visible?: boolean;
 		opacity?: number;
 	}[],
-	frameId?: number,
+	_frameId?: number,
 ): string {
-	// 初期ハッシュとして frameId をシードとして使用（IDごとに明確に色分け）
-	let hash = 0x811c9dc5 ^ ((frameId ?? 1) * 0x9e3779b9);
+	// レイヤーのピクセルデータから純粋にハッシュを計算（同一内容のフレームは同一色になる）
+	let hash = 0x811c9dc5;
 	let drawnPixelCount = 0;
 
 	for (const l of layers) {
