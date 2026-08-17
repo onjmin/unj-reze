@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cachePost } from "@/lib/post-cache";
 import { Post } from "@/lib/types";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import SpriteImage from "./SpriteImage";
 
 type MediaSort = "new" | "likes" | "dislikes";
@@ -79,7 +78,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
 						fit="cover"
 							animFrames={post.animFrames}
 							animFps={post.animFps}
-							rows={walkPresetRows(post.walkPreset)}
+							walkPreset={post.walkPreset}
 						/>
 						{(post.imageSrc?.toLowerCase().includes(".gif") ||
 							post.imageSrc?.toLowerCase().startsWith("data:image/gif")) && (

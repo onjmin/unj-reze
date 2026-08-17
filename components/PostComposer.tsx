@@ -13,7 +13,6 @@ import dynamic from "next/dynamic";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { getAvatarInfo } from "@/lib/avatar";
 import { ORIGIN_TYPE_OPTIONS, OriginType } from "@/lib/types";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import OriginTypeModal from "./OriginTypeModal";
 import SpriteImage from "./SpriteImage";
 
@@ -181,7 +180,7 @@ export default function PostComposer({
 								fit="cover"
 								animFrames={imageAnim?.animFrames}
 								animFps={imageAnim?.animFps}
-								rows={walkPresetRows(imageAnim?.walkPreset)}
+								walkPreset={imageAnim?.walkPreset}
 							/>
 							<div className="absolute top-1 right-1 flex items-center gap-1.5">
 								<button

@@ -18,7 +18,6 @@ import { extractMmlFromContent } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { getThreadDisplayTime } from "@/lib/time";
 import { Post } from "@/lib/types";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import SpriteImage from "./SpriteImage";
 
 interface BbsBoardViewProps {
@@ -351,7 +350,7 @@ export default function BbsBoardView({
 													fit="cover"
 													animFrames={post.animFrames}
 													animFps={post.animFps}
-													rows={walkPresetRows(post.walkPreset)}
+													walkPreset={post.walkPreset}
 													animate={false}
 												/>
 											</div>

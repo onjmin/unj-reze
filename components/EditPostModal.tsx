@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { MML_MARKERS } from "@/lib/mml";
 import type { Post } from "@/lib/types";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import { useMmlSource } from "./MmlSource";
 import SpriteImage from "./SpriteImage";
 
@@ -178,10 +177,8 @@ export default function EditPostModal({
 								currentImageSrc === post.imageSrc ? post.animFrames : undefined
 							}
 							animFps={post.animFps}
-							rows={
-								currentImageSrc === post.imageSrc
-									? walkPresetRows(post.walkPreset)
-									: 1
+							walkPreset={
+								currentImageSrc === post.imageSrc ? post.walkPreset : undefined
 							}
 						/>
 						<div className="absolute top-1.5 right-1.5 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">

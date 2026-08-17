@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseWalkRef } from "@/lib/asset-ref";
 import type { Post } from "@/lib/types";
-import { walkPresetRows, walkPresetToStdId } from "@/lib/walk-cycle";
+import { walkPresetToStdId } from "@/lib/walk-cycle";
 import {
 	animatedCellInRect,
 	detectStandard,
@@ -250,7 +250,7 @@ export default function PostSlicePanel({
 									fit="cover"
 									animFrames={p.animFrames}
 									animFps={p.animFps}
-									rows={walkPresetRows(p.walkPreset)}
+									walkPreset={p.walkPreset}
 									animate={false}
 								/>
 								<span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">

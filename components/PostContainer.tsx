@@ -37,7 +37,6 @@ import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
 import { getThreadDisplayTime } from "@/lib/time";
 import { showToast } from "@/lib/toast";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import {
 	isCollabAllowed,
 	ORIGIN_TYPE_OPTIONS,
@@ -700,7 +699,7 @@ export default function PostContainer({
 								className="max-w-full h-auto max-h-55 block mx-auto"
 								animFrames={post.animFrames}
 								animFps={post.animFps}
-								rows={walkPresetRows(post.walkPreset)}
+								walkPreset={post.walkPreset}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
@@ -872,7 +871,7 @@ export default function PostContainer({
 											className="mt-1.5 max-h-[120px] rounded-lg object-cover"
 											animFrames={quotedPost.animFrames}
 											animFps={quotedPost.animFps}
-											rows={walkPresetRows(quotedPost.walkPreset)}
+											walkPreset={quotedPost.walkPreset}
 										/>
 									)}
 								</div>
@@ -1206,7 +1205,7 @@ function ReplyPreview({
 						fit="cover"
 							animFrames={reply.animFrames}
 							animFps={reply.animFps}
-							rows={walkPresetRows(reply.walkPreset)}
+							walkPreset={reply.walkPreset}
 							animate={false}
 							onError={(e) => {
 								e.currentTarget.style.display = "none";

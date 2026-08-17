@@ -36,7 +36,6 @@ import {
 	userSheetsServerSnapshot,
 	userSheetsSnapshot,
 } from "@/lib/user-sheets";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import { loadImage, WALK_STANDARDS } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import type { PickResult } from "./ContentPicker";
@@ -749,7 +748,7 @@ function PostImageGrid({
 									fit="cover"
 									animFrames={p.animFrames}
 									animFps={p.animFps}
-									rows={walkPresetRows(p.walkPreset)}
+									walkPreset={p.walkPreset}
 									animate={false}
 								/>
 							</button>

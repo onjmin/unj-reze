@@ -72,6 +72,12 @@ export function walkPresetRows(label: string | undefined): number {
 	return presets.find((p) => p.label === label)?.ways.length ?? 1;
 }
 
+/** ラベル(WalkPreset.label)から方向配列(行順)を引く。方向転換ボタンの表示側が使う。 */
+export function walkPresetWays(label: string | undefined): Way[] | null {
+	if (!label) return null;
+	return presets.find((p) => p.label === label)?.ways ?? null;
+}
+
 /**
  * `WalkPreset.label`(この投稿編集UIの規格名。例:"RPGEN") →
  * `lib/walk-sprite.ts` の `WalkStandard.id`(GameMakerアセット系の規格ID。例:"rpgen")。

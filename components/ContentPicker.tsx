@@ -25,7 +25,6 @@ import {
 	ORIGIN_TYPE_OPTIONS,
 } from "@/lib/types";
 import { fetchSize, fetchText } from "@/lib/uploader";
-import { walkPresetRows } from "@/lib/walk-cycle";
 import { loadImage } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
@@ -1046,7 +1045,7 @@ export default function ContentPicker({
 													fit="cover"
 													animFrames={p.animFrames}
 													animFps={p.animFps}
-													rows={walkPresetRows(p.walkPreset)}
+													walkPreset={p.walkPreset}
 													animate={false}
 												/>
 												{(() => {
