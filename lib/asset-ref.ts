@@ -18,6 +18,7 @@
 //    none / 空           なし
 
 import type { BgmAsset } from "./game-config";
+import { parseTimeToSeconds } from "./embed";
 
 type LoopOption = BgmAsset["loop"];
 
@@ -329,10 +330,12 @@ export function youtubeRefFromUrl(url: string): string {
 	const m = url.match(
 		/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/,
 	);
-	const tMatch = url.match(/(?:[?&]t=|\bstart=)(\d+)/);
+	const timeParam =
+		url.match(/(?:[?&#](?:t|start|time_continue)=)([^&]+)/i)?.[1] || "";
+	const startSeconds = parseTimeToSeconds(timeParam);
 	const base = m ? `youtube:${m[1]}` : `youtube:${url}`;
-	if (tMatch) {
-		return updateRefBgmParams(base, { start: parseInt(tMatch[1], 10) });
+	if (startSeconds !== undefined && startSeconds > 0) {
+		return updateRefBgmParams(base, { start: startSeconds });
 	}
 	return base;
 }
@@ -352,7 +355,18 @@ export function toYoutubeWatchUrl(val: string): string {
 	const m = val.match(
 		/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/,
 	);
-	const id = m ? m[1] : val;
+	const id = m ? m[1] : val.replace(/^youtube:/, "").split("#")[0];
+	const params = parseBgmParams(val);
+	const timeParam =
+		val.match(/(?:[?&#](?:t|start|time_continue)=)([^&#]+)/i)?.[1] || "";
+	const startSeconds =
+		params.start && params.start > 0
+			? params.start
+			: parseTimeToSeconds(timeParam);
+
+	if (startSeconds && startSeconds > 0) {
+		return `https://www.youtube.com/watch?v=${id}&t=${startSeconds}s`;
+	}
 	return `https://www.youtube.com/watch?v=${id}`;
 }
 

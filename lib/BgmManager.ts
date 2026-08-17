@@ -3,6 +3,7 @@ import type {
 	LoopPoint as DtmLoopPoint,
 } from "@onjmin/dtm";
 import type { AssetManifest, BgmAsset } from "./game-config";
+import { parseTimeToSeconds } from "./embed";
 import { applyMasterVolume, subscribeMasterVolume } from "./master-volume";
 
 type LoopPointInput = { bar?: number; step?: number; seconds?: number };
@@ -345,9 +346,10 @@ class BgmManager {
 		);
 		if (!m) return null;
 		let start: number | undefined;
-		const tMatch = url.match(/(?:[?&]t=|\bstart=)(\d+)/);
-		if (tMatch) {
-			start = parseInt(tMatch[1], 10);
+		const timeParam =
+			url.match(/(?:[?&#](?:t|start|time_continue)=)([^&#]+)/i)?.[1] || "";
+		if (timeParam) {
+			start = parseTimeToSeconds(timeParam);
 		}
 		return { videoId: m[1], start };
 	}

@@ -149,7 +149,15 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 		iframe.className = "w-full h-full rounded-b-xl";
 		iframe.style.border = "none";
 		if (isYt) {
-			iframe.src = `${embed.embedUrl}?autoplay=1&enablejsapi=1`;
+			try {
+				const u = new URL(embed.embedUrl);
+				u.searchParams.set("autoplay", "1");
+				u.searchParams.set("enablejsapi", "1");
+				iframe.src = u.toString();
+			} catch {
+				const sep = embed.embedUrl.includes("?") ? "&" : "?";
+				iframe.src = `${embed.embedUrl}${sep}autoplay=1&enablejsapi=1`;
+			}
 		} else {
 			iframe.src = embed.embedUrl;
 		}

@@ -82,12 +82,51 @@ export const parseGifEmbedGIPHY = (url: URL): string | undefined => {
 	if (!id) return;
 	return `https://media3.giphy.com/media/${id}/giphy.gif`;
 };
+/**
+ * 時間指定文字列（例: "21", "21s", "1m30s", "1h2m3s", "90s", "1:30" など）を秒数に変換する。
+ */
+export function parseTimeToSeconds(timeStr?: string | null): number | undefined {
+	if (!timeStr) return undefined;
+	const trimmed = timeStr.trim();
+	if (!trimmed) return undefined;
+
+	// 純粋な数値または秒単位表記 ("21", "21s")
+	if (/^\d+s?$/i.test(trimmed)) {
+		const s = parseInt(trimmed.replace(/s$/i, ""), 10);
+		return Number.isNaN(s) ? undefined : s;
+	}
+
+	// "1h2m3s", "2m30s", "1h30s", "2m", "45s" など
+	const hmsMatch = trimmed.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+	if (hmsMatch && (hmsMatch[1] || hmsMatch[2] || hmsMatch[3])) {
+		const hours = parseInt(hmsMatch[1] || "0", 10);
+		const minutes = parseInt(hmsMatch[2] || "0", 10);
+		const seconds = parseInt(hmsMatch[3] || "0", 10);
+		return hours * 3600 + minutes * 60 + seconds;
+	}
+
+	// コロン区切り "1:23", "01:23:45"
+	if (/^\d+(?::\d+)+$/.test(trimmed)) {
+		const parts = trimmed.split(":").map((p) => parseInt(p, 10));
+		if (parts.some((n) => Number.isNaN(n))) return undefined;
+		if (parts.length === 2) {
+			return parts[0] * 60 + parts[1];
+		}
+		if (parts.length === 3) {
+			return parts[0] * 3600 + parts[1] * 60 + parts[2];
+		}
+	}
+
+	const num = parseInt(trimmed, 10);
+	return Number.isNaN(num) ? undefined : num;
+}
+
 export const parseVideoEmbedYouTube = (url: URL): string | undefined => {
 	const path = url.pathname;
 	let id = "";
 
 	if (url.hostname === "youtu.be") {
-		id = path.slice(1);
+		id = path.slice(1).split("/")[0];
 	} else if (path.startsWith("/live/")) {
 		const parts = path.split("/");
 		id = parts[2];
@@ -102,12 +141,33 @@ export const parseVideoEmbedYouTube = (url: URL): string | undefined => {
 	}
 
 	if (!id) return;
-	return `https://www.youtube.com/embed/${id}`;
+
+	// 開始秒数の抽出 (t=21s, start=21, time_continue=21, ハッシュ内の #t=21s など)
+	const timeParam =
+		url.searchParams.get("t") ||
+		url.searchParams.get("start") ||
+		url.searchParams.get("time_continue") ||
+		(url.hash.match(/[#&?](?:t|start|time_continue)=([^&]+)/i)?.[1] ?? "");
+	const startSeconds = parseTimeToSeconds(timeParam);
+
+	const embedUrl = new URL(`https://www.youtube.com/embed/${id}`);
+	if (startSeconds !== undefined && startSeconds > 0) {
+		embedUrl.searchParams.set("start", String(startSeconds));
+	}
+	return embedUrl.toString();
 };
 export const parseVideoEmbedNicovideo = (url: URL): string | undefined => {
-	const id = url.pathname.match(/sm([0-9]+)/)?.[1];
+	const id = url.pathname.match(/(sm[0-9]+|so[0-9]+|nm[0-9]+|[0-9]+)/i)?.[1];
 	if (!id) return;
-	return `https://embed.nicovideo.jp/watch/sm${id}?jsapi=1&amp;from=0`;
+	const timeParam =
+		url.searchParams.get("from") ||
+		url.searchParams.get("start") ||
+		url.searchParams.get("t") ||
+		(url.hash.match(/[#&?](?:from|start|t)=([^&]+)/i)?.[1] ?? "") ||
+		(url.hash.match(/^#(\d+)/)?.[1] ?? "");
+	const fromSeconds = parseTimeToSeconds(timeParam);
+	const from = fromSeconds !== undefined && fromSeconds > 0 ? fromSeconds : 0;
+	return `https://embed.nicovideo.jp/watch/${id.startsWith("sm") || id.startsWith("so") || id.startsWith("nm") ? id : `sm${id}`}?jsapi=1&amp;from=${from}`;
 };
 export const parseAudioEmbedSoundCloud = (url: URL): string | undefined => {
 	return `https://w.soundcloud.com/player/?url=${encodeURIComponent(url.href)}&visual=true`;
