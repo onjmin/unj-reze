@@ -30,8 +30,8 @@ importers:
         specifier: 0.1.83
         version: 0.1.83
       '@onjmin/oekaki':
-        specifier: 1.0.62
-        version: 1.0.62
+        specifier: 1.0.63
+        version: 1.0.63
       '@rpgja/rpgen-map':
         specifier: 1.1.7
         version: 1.1.7
@@ -1247,8 +1247,8 @@ packages:
     resolution: {integrity: sha512-wMqD7iOz1VN76cc9ChKlDZD7vkhq2Aq+gQc81YU/7NjN+CoowxkRhyTVstUzSLuuDuPrRLDCklKY8JCcTqfdAg==}
     hasBin: true
 
-  '@onjmin/oekaki@1.0.62':
-    resolution: {integrity: sha512-1NAorevKZtD4c4qqU+tSWSlWbCUA0lnjViKd+ZLiyNNhTgEA9B1qUq4jmK81T/75HHrrBF6fJoATPMZyEK43Dw==}
+  '@onjmin/oekaki@1.0.63':
+    resolution: {integrity: sha512-qf6Yx81NylOlPWpwVmNqtA/6qdqaLe47WWHQTqyUJK+AZb5yps1YcyQTJv2GWGAWFEFGNwdtzIo5pOguGzirHg==}
 
   '@opennextjs/aws@4.1.0':
     resolution: {integrity: sha512-GuKkdUbnJhLvtwTiJlytNtWIcSYN3+Dzi+OusUlRgf+Ur7dGoXdzBopd+VFiSdTBduPOvr9lPFDg6BYNjEV3wQ==}
@@ -5079,7 +5079,7 @@ snapshots:
 
   '@onjmin/koe@1.0.4': {}
 
-  '@onjmin/oekaki@1.0.62': {}
+  '@onjmin/oekaki@1.0.63': {}
 
   '@opennextjs/aws@4.1.0(next@16.2.7(@babel/core@7.29.7)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))':
     dependencies:

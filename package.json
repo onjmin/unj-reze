@@ -21,7 +21,7 @@
     "@neondatabase/serverless": "1.1.0",
     "@onjmin/chord-parser": "1.0.4",
     "@onjmin/dtm": "0.1.83",
-    "@onjmin/oekaki": "1.0.62",
+    "@onjmin/oekaki": "1.0.63",
     "@rpgja/rpgen-map": "1.1.7",
     "@webtoon/psd": "0.4.0",
     "ag-psd": "31.0.2",

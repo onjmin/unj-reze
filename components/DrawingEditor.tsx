@@ -168,6 +168,38 @@ export default function DrawingEditor({
 	const currentSize =
 		tool === "brush" ? brushSize : tool === "eraser" ? eraserSize : penSize;
 
+	const notDrawing = (e: Event) => {
+		const target = e.target as HTMLElement | null;
+		if (!target) return false;
+		return (
+			target.tagName === "INPUT" ||
+			target.tagName === "TEXTAREA" ||
+			target.isContentEditable
+		);
+	};
+
+	const handleDeselect = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (active) {
+			active.deselect();
+			if (active.modified()) active.trace();
+		}
+		const upperCtx = oekaki.upperLayer.value?.ctx;
+		if (upperCtx) {
+			upperCtx.clearRect(0, 0, upperCtx.canvas.width, upperCtx.canvas.height);
+		}
+		forceRender((n) => n + 1);
+	};
+
+	const selectTool = (t: Tool) => {
+		if (toolRef.current !== t && t !== "select" && t !== "lasso") {
+			handleDeselect();
+		}
+		setTool(t);
+		toolRef.current = t;
+	};
+
 	const applyColor = (c: string) => {
 		setColor(c);
 		oekaki.color.value = c;
@@ -178,8 +210,7 @@ export default function DrawingEditor({
 		});
 		if (toolRef.current === "eraser" || toolRef.current === "dropper") {
 			const nextTool = lastDrawToolRef.current || "pen";
-			setTool(nextTool);
-			toolRef.current = nextTool;
+			selectTool(nextTool);
 		}
 	};
 
@@ -247,7 +278,11 @@ export default function DrawingEditor({
 			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 		const sel = active?.selection;
 		const ctx = oekaki.upperLayer.value?.ctx;
-		if (!sel || !ctx) return;
+		if (!ctx) return;
+		if (!sel || (toolRef.current !== "select" && toolRef.current !== "lasso")) {
+			ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+			return;
+		}
 		const hx = sel.x + sel.w;
 		const hy = sel.y + sel.h;
 		ctx.save();
@@ -600,11 +635,9 @@ export default function DrawingEditor({
 						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 						applyColor(hex);
 						const nextTool = lastDrawToolRef.current || "pen";
-						setTool(nextTool);
-						toolRef.current = nextTool;
+						selectTool(nextTool);
 					} else {
-						setTool("eraser");
-						toolRef.current = "eraser";
+						selectTool("eraser");
 					}
 				}
 				px = null;
@@ -924,6 +957,7 @@ export default function DrawingEditor({
 	};
 
 	const selectLayer = (i: number) => {
+		handleDeselect();
 		setActiveLayerIndex(i);
 		activeLayerIndexRef.current = i;
 	};
@@ -998,6 +1032,7 @@ export default function DrawingEditor({
 	// ── Animation ──
 
 	const selectFrame = (i: number) => {
+		handleDeselect();
 		framesRef.current[currentFrameRef.current] = captureFrame();
 		currentFrameRef.current = i;
 		applyFrame(framesRef.current[i]);
@@ -1128,42 +1163,133 @@ export default function DrawingEditor({
 		onSave(oekaki.render().toDataURL());
 	};
 
+	const handleCopy = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const target =
+			layerEntriesRef.current
+				.map((l) => l.instance)
+				.find((l) => l.selection) || active;
+		if (!target) return;
+		let copyCanvas: HTMLCanvasElement | null = null;
+		if (target.selection) {
+			copyCanvas = target.copySelection();
+		} else if (target.canvas) {
+			copyCanvas = document.createElement("canvas");
+			copyCanvas.width = target.canvas.width;
+			copyCanvas.height = target.canvas.height;
+			const ctx = copyCanvas.getContext("2d");
+			if (ctx) ctx.drawImage(target.canvas, 0, 0);
+		}
+		if (copyCanvas) {
+			internalClipboardRef.current = copyCanvas;
+			if (navigator.clipboard?.write && window.isSecureContext) {
+				copyCanvas.toBlob((blob) => {
+					if (blob) {
+						try {
+							navigator.clipboard
+								.write([new ClipboardItem({ "image/png": blob })])
+								.catch(() => {});
+						} catch {}
+					}
+				});
+			}
+		}
+	};
+
+	const handleCut = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const target =
+			layerEntriesRef.current
+				.map((l) => l.instance)
+				.find((l) => l.selection) || active;
+		if (!target?.selection) return;
+		handleCopy();
+		target.deleteSelection();
+		if (target.modified()) target.trace();
+		forceRender((n) => n + 1);
+	};
+
+	const handleImport = async (
+		image: HTMLImageElement,
+		_opts: { opacity: number; simple: boolean },
+	) => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active?.editable) return;
+		const bitmap = await createImageBitmap(image);
+		active.paste(bitmap);
+		active.trace();
+		setTool("select");
+		toolRef.current = "select";
+		drawSelectionHandle();
+		forceRender((n) => n + 1);
+	};
+
 	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
+		const onCopy = (e: ClipboardEvent) => {
+			if (notDrawing(e)) return;
+			e.preventDefault();
+			handleCopy();
+		};
+
+		const onPaste = async (e: ClipboardEvent) => {
+			if (notDrawing(e)) return;
 			const active =
 				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-			if (e.ctrlKey) {
-				switch (e.key.toLowerCase()) {
-					case "z":
-						if (e.shiftKey) {
-							e.preventDefault();
-							handleRedo();
-						} else {
-							e.preventDefault();
-							handleUndo();
-						}
-						break;
-					case "s":
-						e.preventDefault();
-						handleSave();
-						break;
-					case "c":
-						if (active?.selection) {
-							e.preventDefault();
-							const copy = active.copySelection();
-							if (copy) internalClipboardRef.current = copy;
-						}
-						break;
-					case "x":
-						if (active?.selection) {
-							e.preventDefault();
-							const copy = active.copySelection();
-							if (copy) internalClipboardRef.current = copy;
-							active.deleteSelection();
-							if (active.modified()) active.trace();
-							forceRender((n) => n + 1);
-						}
-						break;
+			if (!active?.editable) return;
+			const imageItem = Array.from(e.clipboardData?.items || []).find(
+				(v) => v.kind === "file" && v.type.startsWith("image/"),
+			);
+			let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
+			if (imageItem) {
+				const blob = imageItem.getAsFile();
+				if (!blob) return;
+				bitmap = await createImageBitmap(blob);
+			} else if (internalClipboardRef.current) {
+				bitmap = internalClipboardRef.current;
+			} else {
+				return;
+			}
+			e.preventDefault();
+			active.paste(bitmap);
+			if (active.modified()) active.trace();
+			setTool("select");
+			toolRef.current = "select";
+			drawSelectionHandle();
+			forceRender((n) => n + 1);
+		};
+
+		const handler = (e: KeyboardEvent) => {
+			if (notDrawing(e)) return;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			if (e.ctrlKey || e.metaKey) {
+				const key = e.key.toLowerCase();
+				if (key === "z" || e.code === "KeyZ") {
+					e.preventDefault();
+					if (e.shiftKey) {
+						handleRedo();
+					} else {
+						handleUndo();
+					}
+					return;
+				}
+				if (key === "s" || e.code === "KeyS") {
+					e.preventDefault();
+					handleSave();
+					return;
+				}
+				if (key === "c" || e.code === "KeyC") {
+					e.preventDefault();
+					handleCopy();
+					return;
+				}
+				if (key === "x" || e.code === "KeyX") {
+					e.preventDefault();
+					handleCut();
+					return;
 				}
 				return;
 			}
@@ -1176,8 +1302,7 @@ export default function DrawingEditor({
 					return;
 				} else if (e.key === "Escape") {
 					e.preventDefault();
-					active.deselect();
-					forceRender((n) => n + 1);
+					handleDeselect();
 					return;
 				} else if (
 					["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
@@ -1208,82 +1333,40 @@ export default function DrawingEditor({
 			}
 			switch (e.key) {
 				case "1":
-					setTool("pen");
-					toolRef.current = "pen";
+					selectTool("pen");
 					break;
 				case "2":
-					setTool("brush");
-					toolRef.current = "brush";
+					selectTool("brush");
 					break;
 				case "3":
-					setTool("eraser");
-					toolRef.current = "eraser";
+					selectTool("eraser");
 					break;
 				case "4":
-					setTool("dropper");
-					toolRef.current = "dropper";
+					selectTool("dropper");
 					break;
 				case "5":
-					setTool("fill");
-					toolRef.current = "fill";
+					selectTool("fill");
 					break;
 				case "6":
-					setTool("select");
-					toolRef.current = "select";
+					selectTool("select");
 					break;
 				case "7":
-					setTool("lasso");
-					toolRef.current = "lasso";
+					selectTool("lasso");
 					break;
 				case "g":
 					setShowGrid((v) => !v);
 					break;
 			}
 		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	});
-
-	useEffect(() => {
-		const onPaste = async (e: ClipboardEvent) => {
-			const active =
-				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-			if (!active?.editable) return;
-			const imageItem = Array.from(e.clipboardData?.items || []).find(
-				(v) => v.kind === "file" && v.type.startsWith("image/"),
-			);
-			let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
-			if (imageItem) {
-				const blob = imageItem.getAsFile();
-				if (!blob) return;
-				bitmap = await createImageBitmap(blob);
-			} else if (internalClipboardRef.current) {
-				bitmap = internalClipboardRef.current;
-			} else {
-				return;
-			}
-			e.preventDefault();
-			active.paste(bitmap);
-			if (active.modified()) active.trace();
-			drawSelectionHandle();
-			forceRender((n) => n + 1);
-		};
+		window.addEventListener("copy", onCopy);
 		window.addEventListener("paste", onPaste);
-		return () => window.removeEventListener("paste", onPaste);
-	}, []);
-
-	const handleImport = async (
-		image: HTMLImageElement,
-		_opts: { opacity: number; simple: boolean },
-	) => {
-		const active =
-			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-		if (!active?.editable) return;
-		const bitmap = await createImageBitmap(image);
-		active.paste(bitmap);
-		active.trace();
-		forceRender((n) => n + 1);
-	};
+		window.addEventListener("keydown", handler);
+		return () => {
+			window.removeEventListener("copy", onCopy);
+			window.removeEventListener("paste", onPaste);
+			window.removeEventListener("keydown", handler);
+		};
+	}, [showGrid]);
 
 	// スマホでの2本指ピンチによるズームは行わない（描画中に不用意に拡大縮小されるため）。
 	// ただし複数指タッチの検出自体は残す — 2本目の指がそのまま線として描かれるのを防ぐ必要がある。
@@ -1349,10 +1432,7 @@ export default function DrawingEditor({
 
 	const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
 		<button
-			onClick={() => {
-				setTool(t);
-				toolRef.current = t;
-			}}
+			onClick={() => selectTool(t)}
 			className={
 				"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
 				(tool === t
@@ -1621,32 +1701,17 @@ export default function DrawingEditor({
 				{(tool === "select" || tool === "lasso") && (
 					<div className="flex items-center space-x-1">
 						<button
-							onClick={() => {
-								const active =
-									layerEntriesRef.current[activeLayerIndexRef.current]
-										?.instance;
-								if (!active?.selection) return;
-								const copy = active.copySelection();
-								if (copy) internalClipboardRef.current = copy;
-							}}
-							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
-							title="選択範囲をコピー"
+							onClick={handleCopy}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲をコピー (Ctrl+C)"
 						>
 							<Copy size={11} />
 							<span>コピー</span>
 						</button>
 						<button
-							onClick={() => {
-								const active =
-									layerEntriesRef.current[activeLayerIndexRef.current]
-										?.instance;
-								if (!active?.selection) return;
-								active.deleteSelection();
-								if (active.modified()) active.trace();
-								forceRender((n) => n + 1);
-							}}
-							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
-							title="選択範囲を削除"
+							onClick={handleCut}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲を削除 (Delete)"
 						>
 							<Trash2 size={11} />
 							<span>削除</span>
@@ -1668,7 +1733,7 @@ export default function DrawingEditor({
 								drawSelectionHandle();
 								forceRender((n) => n + 1);
 							}}
-							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
 							title="反時計回りに回転"
 						>
 							<RotateCcw size={11} />
@@ -1690,11 +1755,20 @@ export default function DrawingEditor({
 								drawSelectionHandle();
 								forceRender((n) => n + 1);
 							}}
-							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
 							title="時計回りに回転"
 						>
 							<RotateCw size={11} />
 							<span>回転</span>
+						</button>
+						<div className="w-px h-5 bg-gray-800 mx-1" />
+						<button
+							onClick={handleDeselect}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲を解除 (Esc)"
+						>
+							<X size={11} />
+							<span>解除</span>
 						</button>
 					</div>
 				)}

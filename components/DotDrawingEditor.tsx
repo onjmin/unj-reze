@@ -187,6 +187,28 @@ export default function DotDrawingEditor({
 		walkPresetRef.current = walkPreset;
 	});
 
+	const handleDeselect = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (active) {
+			active.deselect();
+			if (active.modified()) active.trace();
+		}
+		const upperCtx = oekaki.upperLayer.value?.ctx;
+		if (upperCtx) {
+			upperCtx.clearRect(0, 0, upperCtx.canvas.width, upperCtx.canvas.height);
+		}
+		forceRender((n) => n + 1);
+	};
+
+	const selectTool = (t: Tool) => {
+		if (toolRef.current !== t && t !== "select" && t !== "lasso") {
+			handleDeselect();
+		}
+		setTool(t);
+		toolRef.current = t;
+	};
+
 	const applyColor = (c: string) => {
 		setColor(c);
 		oekaki.color.value = c;
@@ -196,17 +218,16 @@ export default function DotDrawingEditor({
 			return [c, ...filtered].slice(0, 8);
 		});
 		if (toolRef.current === "eraser" || toolRef.current === "dropper") {
-			setTool("pen");
-			toolRef.current = "pen";
+			selectTool("pen");
 		}
 	};
 
 	const CANVAS_SIZE = 384;
 
 	const notDrawing = (e: Event) => {
-		const target = e.target as HTMLElement;
+		const target = e.target as HTMLElement | null;
+		if (!target) return false;
 		return (
-			!window.getSelection()?.isCollapsed ||
 			target.tagName === "INPUT" ||
 			target.tagName === "TEXTAREA" ||
 			target.isContentEditable
@@ -232,11 +253,11 @@ export default function DotDrawingEditor({
 		ctx.imageSmoothingEnabled = false;
 		const srcW = bitmap.width;
 		const srcH = bitmap.height;
-		const ratio = Math.min(gw / srcW, gh / srcH);
-		const dstW = srcW * ratio;
-		const dstH = srcH * ratio;
-		const ox = (gw - dstW) / 2;
-		const oy = (gh - dstH) / 2;
+		const ratio = Math.min(1, Math.min(gw / srcW, gh / srcH));
+		const dstW = Math.round(srcW * ratio);
+		const dstH = Math.round(srcH * ratio);
+		const ox = Math.floor((gw - dstW) / 2);
+		const oy = Math.floor((gh - dstH) / 2);
 		ctx.drawImage(bitmap, ox, oy, dstW, dstH);
 		const { data } = ctx.getImageData(0, 0, gw, gh);
 		for (let y = 0; y < gh; y++) {
@@ -367,6 +388,54 @@ export default function DotDrawingEditor({
 		if (blob) pasteImage(blob, opts.opacity);
 	};
 
+	const handleCopy = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const target =
+			layerEntriesRef.current
+				.map((l) => l.instance)
+				.find((l) => l.selection) || active;
+		if (!target) return;
+		let copyCanvas: HTMLCanvasElement | null = null;
+		if (target.selection) {
+			copyCanvas = target.copySelection();
+		} else if (target.canvas) {
+			copyCanvas = document.createElement("canvas");
+			copyCanvas.width = target.canvas.width;
+			copyCanvas.height = target.canvas.height;
+			const ctx = copyCanvas.getContext("2d");
+			if (ctx) ctx.drawImage(target.canvas, 0, 0);
+		}
+		if (copyCanvas) {
+			internalClipboardRef.current = copyCanvas;
+			if (navigator.clipboard?.write && window.isSecureContext) {
+				copyCanvas.toBlob((blob) => {
+					if (blob) {
+						try {
+							navigator.clipboard
+								.write([new ClipboardItem({ "image/png": blob })])
+								.catch(() => {});
+						} catch {}
+					}
+				});
+			}
+		}
+	};
+
+	const handleCut = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const target =
+			layerEntriesRef.current
+				.map((l) => l.instance)
+				.find((l) => l.selection) || active;
+		if (!target?.selection) return;
+		handleCopy();
+		target.deleteSelection();
+		if (target.modified()) target.trace();
+		forceRender((n) => n + 1);
+	};
+
 	const handlePaste = async (e: ClipboardEvent) => {
 		if (notDrawing(e)) return;
 		const active =
@@ -388,6 +457,8 @@ export default function DotDrawingEditor({
 			const bitmap = await createImageBitmap(internalClipboardRef.current);
 			active.paste(bitmap);
 			if (active.modified()) active.trace();
+			setTool("select");
+			toolRef.current = "select";
 			drawSelectionHandle();
 			forceRender((n) => n + 1);
 		}
@@ -489,7 +560,11 @@ export default function DotDrawingEditor({
 			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 		const sel = active?.selection;
 		const ctx = oekaki.upperLayer.value?.ctx;
-		if (!sel || !ctx) return;
+		if (!ctx) return;
+		if (!sel || (toolRef.current !== "select" && toolRef.current !== "lasso")) {
+			ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+			return;
+		}
 		const hx = sel.x + sel.w;
 		const hy = sel.y + sel.h;
 		ctx.save();
@@ -976,11 +1051,9 @@ export default function DotDrawingEditor({
 					if (a) {
 						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 						applyColor(hex);
-						setTool("pen");
-						toolRef.current = "pen";
+						selectTool("pen");
 					} else {
-						setTool("eraser");
-						toolRef.current = "eraser";
+						selectTool("eraser");
 					}
 				}
 				px = null;
@@ -1322,6 +1395,8 @@ export default function DotDrawingEditor({
 	};
 
 	const selectWalkCell = (index: number) => {
+		handleDeselect();
+		walkDataRef.current.set(walkActiveIndex, oekaki.render().toDataURL());
 		setWalkActiveIndex(index);
 	};
 
@@ -1354,6 +1429,7 @@ export default function DotDrawingEditor({
 	};
 
 	const selectLayer = (i: number) => {
+		handleDeselect();
 		setActiveLayerIndex(i);
 		activeLayerIndexRef.current = i;
 	};
@@ -1428,6 +1504,7 @@ export default function DotDrawingEditor({
 	// ── Animation ──
 
 	const selectFrame = (i: number) => {
+		handleDeselect();
 		framesRef.current[currentFrameRef.current] = captureFrame();
 		currentFrameRef.current = i;
 		applyFrame(framesRef.current[i]);
@@ -1658,40 +1735,41 @@ export default function DotDrawingEditor({
 	};
 
 	useEffect(() => {
+		const onCopy = (e: ClipboardEvent) => {
+			if (notDrawing(e)) return;
+			e.preventDefault();
+			handleCopy();
+		};
+
 		const handler = (e: KeyboardEvent) => {
+			if (notDrawing(e)) return;
 			const active =
 				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-			if (e.ctrlKey) {
-				switch (e.key) {
-					case "z":
-						e.preventDefault();
-						handleUndo();
-						break;
-					case "Z":
-						e.preventDefault();
+			if (e.ctrlKey || e.metaKey) {
+				const key = e.key.toLowerCase();
+				if (key === "z" || e.code === "KeyZ") {
+					e.preventDefault();
+					if (e.shiftKey) {
 						handleRedo();
-						break;
-					case "s":
-						e.preventDefault();
-						handleSave();
-						break;
-					case "c":
-						if (active?.selection) {
-							e.preventDefault();
-							const copy = active.copySelection();
-							if (copy) internalClipboardRef.current = copy;
-						}
-						break;
-					case "x":
-						if (active?.selection) {
-							e.preventDefault();
-							const copy = active.copySelection();
-							if (copy) internalClipboardRef.current = copy;
-							active.deleteSelection();
-							if (active.modified()) active.trace();
-							forceRender((n) => n + 1);
-						}
-						break;
+					} else {
+						handleUndo();
+					}
+					return;
+				}
+				if (key === "s" || e.code === "KeyS") {
+					e.preventDefault();
+					handleSave();
+					return;
+				}
+				if (key === "c" || e.code === "KeyC") {
+					e.preventDefault();
+					handleCopy();
+					return;
+				}
+				if (key === "x" || e.code === "KeyX") {
+					e.preventDefault();
+					handleCut();
+					return;
 				}
 				return;
 			}
@@ -1704,8 +1782,7 @@ export default function DotDrawingEditor({
 					return;
 				} else if (e.key === "Escape") {
 					e.preventDefault();
-					active.deselect();
-					forceRender((n) => n + 1);
+					handleDeselect();
 					return;
 				} else if (
 					["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
@@ -1732,28 +1809,22 @@ export default function DotDrawingEditor({
 			}
 			switch (e.key) {
 				case "1":
-					setTool("pen");
-					toolRef.current = "pen";
+					selectTool("pen");
 					break;
 				case "2":
-					setTool("eraser");
-					toolRef.current = "eraser";
+					selectTool("eraser");
 					break;
 				case "3":
-					setTool("dropper");
-					toolRef.current = "dropper";
+					selectTool("dropper");
 					break;
 				case "4":
-					setTool("fill");
-					toolRef.current = "fill";
+					selectTool("fill");
 					break;
 				case "5":
-					setTool("select");
-					toolRef.current = "select";
+					selectTool("select");
 					break;
 				case "6":
-					setTool("lasso");
-					toolRef.current = "lasso";
+					selectTool("lasso");
 					break;
 				case "b":
 					zoomIn();
@@ -1763,20 +1834,19 @@ export default function DotDrawingEditor({
 					break;
 			}
 		};
-		window.addEventListener("keydown", handler);
+		window.addEventListener("copy", onCopy);
 		window.addEventListener("paste", handlePaste);
+		window.addEventListener("keydown", handler);
 		return () => {
-			window.removeEventListener("keydown", handler);
+			window.removeEventListener("copy", onCopy);
 			window.removeEventListener("paste", handlePaste);
+			window.removeEventListener("keydown", handler);
 		};
-	});
+	}, []);
 
 	const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
 		<button
-			onClick={() => {
-				setTool(t);
-				toolRef.current = t;
-			}}
+			onClick={() => selectTool(t)}
 			className={
 				"w-8 h-8 rounded-lg flex items-center justify-center transition-colors " +
 				(tool === t
@@ -2093,32 +2163,17 @@ export default function DotDrawingEditor({
 				{(tool === "select" || tool === "lasso") && (
 					<div className="flex items-center space-x-1">
 						<button
-							onClick={() => {
-								const active =
-									layerEntriesRef.current[activeLayerIndexRef.current]
-										?.instance;
-								if (!active?.selection) return;
-								const copy = active.copySelection();
-								if (copy) internalClipboardRef.current = copy;
-							}}
-							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40"
-							title="選択範囲をコピー"
+							onClick={handleCopy}
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
+							title="選択範囲をコピー (Ctrl+C)"
 						>
 							<Copy size={10} />
 							<span>コピー</span>
 						</button>
 						<button
-							onClick={() => {
-								const active =
-									layerEntriesRef.current[activeLayerIndexRef.current]
-										?.instance;
-								if (!active?.selection) return;
-								active.deleteSelection();
-								if (active.modified()) active.trace();
-								forceRender((n) => n + 1);
-							}}
-							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40"
-							title="選択範囲を削除"
+							onClick={handleCut}
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
+							title="選択範囲を削除 (Delete)"
 						>
 							<Trash2 size={10} />
 							<span>削除</span>
@@ -2135,7 +2190,7 @@ export default function DotDrawingEditor({
 								drawSelectionHandle();
 								forceRender((n) => n + 1);
 							}}
-							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40"
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
 							title="反時計回りに回転"
 						>
 							<RotateCcw size={10} />
@@ -2152,11 +2207,20 @@ export default function DotDrawingEditor({
 								drawSelectionHandle();
 								forceRender((n) => n + 1);
 							}}
-							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40"
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
 							title="時計回りに回転"
 						>
 							<RotateCw size={10} />
 							<span>回転</span>
+						</button>
+						<div className="w-px h-4 bg-gray-800 mx-1" />
+						<button
+							onClick={handleDeselect}
+							className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20"
+							title="選択範囲を解除 (Esc)"
+						>
+							<X size={10} />
+							<span>解除</span>
 						</button>
 					</div>
 				)}
