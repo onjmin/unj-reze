@@ -596,13 +596,16 @@ export default function App() {
 			repliesCount: 0,
 			reposts: 0,
 			reposted: false,
-			avatarColor: "from-blue-500 to-indigo-600",
+			avatarColor: currentUser?.avatarColor || "from-blue-500 to-indigo-600",
+			avatarUrl: currentUser?.avatarUrl,
 			heartsTotal: 0,
 			replies: [],
 			threadId: postId,
 			parentPostId: postId,
 			hasImage: !!attachedImage,
 			imageSrc: attachedImage ?? undefined,
+			dotW: attachedDotSize?.w,
+			dotH: attachedDotSize?.h,
 			hasMv: !!mvDraft,
 			mvTitle: mvDraft?.title,
 			hasGame: !!gameDraft,
@@ -625,6 +628,7 @@ export default function App() {
 
 		setInputText("");
 		setAttachedImage(null);
+		setAttachedDotSize(null);
 		setAttachedMml(null);
 		setGameDraft(null);
 		setMvDraft(null);
@@ -661,6 +665,8 @@ export default function App() {
 				parentPostId: postId,
 				hasImage: !!attachedImage,
 				imageSrc,
+				dotW: attachedDotSize?.w,
+				dotH: attachedDotSize?.h,
 				gameId,
 				mvId,
 				originType,
@@ -841,6 +847,7 @@ export default function App() {
 			// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
 			if (!isCollabAllowed(post.originType)) return;
 			clearEditingContext();
+			setReplyTargetPost(post);
 			// MML本文はR2にある。content にはマーカーしか残っていないので、
 			// hasMml/mmlUrl を経由しないと(inline抽出は常に空文字になる)コラボ編集を開始できない
 			if (
@@ -853,7 +860,7 @@ export default function App() {
 					(post.mmlUrl ? await fetchText(post.mmlUrl).catch(() => "") : "");
 				if (postMml) {
 					setAttachedMml(postMml);
-					openScreen("mml");
+					openScreen("mml", true);
 					return;
 				}
 			}
@@ -870,7 +877,7 @@ export default function App() {
 
 	const handleCollabSelectDrawing = useCallback(() => {
 		setShowCollabSelector(false);
-		openScreen("drawing");
+		openScreen("drawing", true);
 	}, [openScreen]);
 
 	const handleCollabSelectDotDrawing = useCallback(
@@ -881,7 +888,7 @@ export default function App() {
 				setCollabDotSize(undefined);
 			}
 			setShowCollabSelector(false);
-			openScreen("dotdrawing");
+			openScreen("dotdrawing", true);
 		},
 		[openScreen],
 	);
@@ -890,6 +897,7 @@ export default function App() {
 		setShowCollabSelector(false);
 		setCollabImageUrl(undefined);
 		setCollabDotSize(undefined);
+		setReplyTargetPost(null);
 	}, []);
 
 	const handleEditPost = (post: Post) => {
