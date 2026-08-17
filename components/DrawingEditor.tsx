@@ -155,9 +155,14 @@ export default function DrawingEditor({
 		data: Uint8ClampedArray;
 	} | null>(null);
 
+	const lastDrawToolRef = useRef<"pen" | "brush">("pen");
+
 	useEffect(() => {
 		toolRef.current = tool;
 		colorRef.current = color;
+		if (tool === "pen" || tool === "brush") {
+			lastDrawToolRef.current = tool;
+		}
 	});
 
 	const currentSize =
@@ -167,9 +172,15 @@ export default function DrawingEditor({
 		setColor(c);
 		oekaki.color.value = c;
 		setRecentColors((prev) => {
+			if (prev[0] === c) return prev;
 			const filtered = prev.filter((x) => x !== c);
 			return [c, ...filtered].slice(0, 8);
 		});
+		if (toolRef.current === "eraser" || toolRef.current === "dropper") {
+			const nextTool = lastDrawToolRef.current || "pen";
+			setTool(nextTool);
+			toolRef.current = nextTool;
+		}
 	};
 
 	const toggleOnionSkin = () => {
@@ -588,6 +599,12 @@ export default function DrawingEditor({
 					if (a) {
 						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 						applyColor(hex);
+						const nextTool = lastDrawToolRef.current || "pen";
+						setTool(nextTool);
+						toolRef.current = nextTool;
+					} else {
+						setTool("eraser");
+						toolRef.current = "eraser";
 					}
 				}
 				px = null;

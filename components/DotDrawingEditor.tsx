@@ -191,9 +191,14 @@ export default function DotDrawingEditor({
 		setColor(c);
 		oekaki.color.value = c;
 		setRecentColors((prev) => {
+			if (prev[0] === c) return prev;
 			const filtered = prev.filter((x) => x !== c);
 			return [c, ...filtered].slice(0, 8);
 		});
+		if (toolRef.current === "eraser" || toolRef.current === "dropper") {
+			setTool("pen");
+			toolRef.current = "pen";
+		}
 	};
 
 	const CANVAS_SIZE = 384;
@@ -971,6 +976,11 @@ export default function DotDrawingEditor({
 					if (a) {
 						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 						applyColor(hex);
+						setTool("pen");
+						toolRef.current = "pen";
+					} else {
+						setTool("eraser");
+						toolRef.current = "eraser";
 					}
 				}
 				px = null;
