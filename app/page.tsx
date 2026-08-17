@@ -44,6 +44,7 @@ import {
 import { ensureSessionId } from "@/lib/session";
 import { decodeId } from "@/lib/sqids";
 import { showToast, triggerHeartBurst } from "@/lib/toast";
+import { cachePost, readCachedPost } from "@/lib/post-cache";
 import { AnonymousUser, isCollabAllowed, OriginType, Post } from "@/lib/types";
 import { fetchText } from "@/lib/uploader";
 
@@ -593,9 +594,14 @@ export default function App() {
 		handleAddReply,
 	} = usePostActions(userId, updatePost, { avatarUrl: currentUser?.avatarUrl });
 
-	const handleCreateReplyFromComposer = async (postId: string) => {
+	const handleCreateReplyFromComposer = async (targetPost: Post) => {
 		if (replySubmittingRef.current) return;
 		replySubmittingRef.current = true;
+		const postId = targetPost.id;
+		const threadId = targetPost.threadId || targetPost.id;
+		const currentParent =
+			postsRef.current.find((p) => p.id === threadId) || targetPost;
+
 		const parts: string[] = [];
 		if (inputText.trim()) parts.push(inputText.trim());
 		if (attachedMml) parts.push(`#mml ${attachedMml}`);
@@ -619,7 +625,7 @@ export default function App() {
 			avatarUrl: currentUser?.avatarUrl,
 			heartsTotal: 0,
 			replies: [],
-			threadId: postId,
+			threadId,
 			parentPostId: postId,
 			hasImage: !!attachedImage,
 			imageSrc: attachedImage ?? undefined,
@@ -631,15 +637,20 @@ export default function App() {
 			gameTitle: gameDraft?.title,
 			originType,
 		};
+
+		const optimisticThreadPost: Post = {
+			...currentParent,
+			repliesCount: (currentParent.repliesCount || 0) + 1,
+			replies: [...(currentParent.replies || []), optimisticReply],
+		};
+
+		// タイムラインから取得済みの情報＋楽観的返信を即座にキャッシュし、ノータイムでスレッドを開く
+		cachePost(optimisticThreadPost);
+		router.push(`/post/${threadId}`);
+
 		setPosts((prev) => {
 			const next = prev.map((p) =>
-				p.id === postId
-					? {
-							...p,
-							repliesCount: p.repliesCount + 1,
-							replies: [...p.replies, optimisticReply],
-						}
-					: p,
+				p.id === threadId ? optimisticThreadPost : p,
 			);
 			postsRef.current = next;
 			return next;
@@ -690,18 +701,28 @@ export default function App() {
 				originType,
 			});
 
+			const updatedReplyWithAvatar = {
+				...reply,
+				avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl,
+			};
+
+			const currentCached = readCachedPost(threadId);
+			if (currentCached) {
+				cachePost({
+					...currentCached,
+					replies: currentCached.replies.map((r) =>
+						r.id === tempId ? updatedReplyWithAvatar : r,
+					),
+				});
+			}
+
 			setPosts((prev) => {
 				const next = prev.map((p) =>
-					p.id === postId
+					p.id === threadId
 						? {
 								...p,
 								replies: p.replies.map((r) =>
-									r.id === tempId
-										? {
-												...reply,
-												avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl,
-											}
-										: r,
+									r.id === tempId ? updatedReplyWithAvatar : r,
 								),
 							}
 						: p,
@@ -710,9 +731,17 @@ export default function App() {
 				return next;
 			});
 		} catch {
+			const currentCached = readCachedPost(threadId);
+			if (currentCached) {
+				cachePost({
+					...currentCached,
+					repliesCount: Math.max(0, currentCached.repliesCount - 1),
+					replies: currentCached.replies.filter((r) => r.id !== tempId),
+				});
+			}
 			setPosts((prev) => {
 				const next = prev.map((p) =>
-					p.id === postId
+					p.id === threadId
 						? {
 								...p,
 								repliesCount: Math.max(0, p.repliesCount - 1),
@@ -1665,7 +1694,7 @@ export default function App() {
 							onSubmit={() => {
 								if (replySubmittingRef.current) return;
 								if (replyTargetPost) {
-									handleCreateReplyFromComposer(replyTargetPost.id);
+									handleCreateReplyFromComposer(replyTargetPost);
 								} else {
 									handleCreatePost();
 								}

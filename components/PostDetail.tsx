@@ -199,6 +199,26 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			.catch(() => {});
 	}, [userSlug, post.slug, post.displayName]);
 
+	const [prevInitial, setPrevInitial] = useState(initial);
+	if (prevInitial !== initial) {
+		setPrevInitial(initial);
+		setPost((prev) => {
+			if (prev.id !== initial.id) return initial;
+			const pendingReplies = prev.replies.filter((r) =>
+				r.id.startsWith("temp-"),
+			);
+			if (pendingReplies.length === 0) return initial;
+			const existingIds = new Set(initial.replies.map((r) => r.id));
+			const unmerged = pendingReplies.filter((r) => !existingIds.has(r.id));
+			if (unmerged.length === 0) return initial;
+			return {
+				...initial,
+				repliesCount: initial.replies.length + unmerged.length,
+				replies: [...initial.replies, ...unmerged],
+			};
+		});
+	}
+
 	useEffect(() => {
 		cachePost(initial);
 	}, [initial]);
