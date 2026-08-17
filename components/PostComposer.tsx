@@ -13,7 +13,9 @@ import dynamic from "next/dynamic";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { getAvatarInfo } from "@/lib/avatar";
 import { ORIGIN_TYPE_OPTIONS, OriginType } from "@/lib/types";
+import { walkPresetRows } from "@/lib/walk-cycle";
 import OriginTypeModal from "./OriginTypeModal";
+import SpriteImage from "./SpriteImage";
 
 const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 
@@ -24,6 +26,12 @@ interface PostComposerProps {
 	setText: (v: string) => void;
 	image: string | null;
 	setImage: (v: string | null) => void;
+	/** 添付画像がアニメ/歩行グラのスプライトシートのときのプレビュー再生用メタデータ */
+	imageAnim?: {
+		animFrames?: number;
+		animFps?: number;
+		walkPreset?: string;
+	} | null;
 	mml: string | null;
 	setMml: (v: string | null) => void;
 	gameDraft: { title: string } | null;
@@ -73,6 +81,7 @@ export default function PostComposer({
 	setText,
 	image,
 	setImage,
+	imageAnim,
 	mml,
 	setMml,
 	gameDraft,
@@ -165,7 +174,15 @@ export default function PostComposer({
 						<div
 							className={`gimp-checkered-background-white relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? "max-w-[180px] md:max-w-[260px]" : "max-w-[180px]"}`}
 						>
-							<img src={image} alt="添付画像" className="w-full h-auto" />
+							<SpriteImage
+								src={image}
+								alt="添付画像"
+								className="w-full h-auto"
+								fit="cover"
+								animFrames={imageAnim?.animFrames}
+								animFps={imageAnim?.animFps}
+								rows={walkPresetRows(imageAnim?.walkPreset)}
+							/>
 							<div className="absolute top-1 right-1 flex items-center gap-1.5">
 								<button
 									onClick={() => {

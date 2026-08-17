@@ -348,6 +348,7 @@ export default function BbsBoardView({
 													src={post.imageSrc}
 													alt=""
 													className="w-full h-full object-cover"
+													fit="cover"
 													animFrames={post.animFrames}
 													animFps={post.animFps}
 													rows={walkPresetRows(post.walkPreset)}

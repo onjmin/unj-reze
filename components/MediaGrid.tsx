@@ -76,6 +76,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
 							src={post.imageSrc}
 							alt={post.imageAlt || "ユーザーアート"}
 							className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+						fit="cover"
 							animFrames={post.animFrames}
 							animFps={post.animFps}
 							rows={walkPresetRows(post.walkPreset)}

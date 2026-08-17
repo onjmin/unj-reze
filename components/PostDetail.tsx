@@ -160,6 +160,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [replyDotSize, setReplyDotSize] = useState<
 		{ w: number; h: number } | null
 	>(null);
+	const [replyAnim, setReplyAnim] = useState<{
+		animFrames: number;
+		animFps: number;
+		walkPreset?: string;
+	} | null>(null);
 	const [showCollabSelector, setShowCollabSelector] = useState(false);
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
@@ -437,6 +442,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		if (replyMml) parts.push(`#mml ${replyMml}`);
 		const content = parts.join("\n");
 
+		const capturedImage = replyImage;
+		const capturedMml = replyMml;
+		const capturedGameDraft = replyGameDraft;
+		const capturedMvDraft = replyMvDraft;
+		const capturedOriginType = replyOriginType;
+		const capturedDotSize = replyDotSize;
+		const capturedAnim = replyAnim;
+
 		const tempId = `temp-${Date.now()}`;
 		const optimisticReply: Post = {
 			id: tempId,
@@ -459,6 +472,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			parentPostId: targetParent.id,
 			hasImage: !!replyImage,
 			imageSrc: replyImage ?? undefined,
+			dotW: replyDotSize?.w,
+			dotH: replyDotSize?.h,
+			animFrames: replyAnim?.animFrames,
+			animFps: replyAnim?.animFps,
+			walkPreset: replyAnim?.walkPreset,
 			originType: replyOriginType,
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
@@ -471,6 +489,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 		setReplyText("");
 		setReplyImage(null);
+		setReplyDotSize(null);
+		setReplyAnim(null);
 		setReplyMml(null);
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
@@ -480,28 +500,30 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		const toastId = showToast("info", "送信中...", { duration: 0 });
 
 		try {
+			// dataURLのときだけアップロードしてURL化する（アニメ/歩行グラ等はエディタ保存時にアップロード済みURLが渡される）
 			let imageSrc: string | undefined;
-			if (replyImage) {
-				const result = await api.upload.image({ image: replyImage });
-				imageSrc = result.url;
+			if (capturedImage) {
+				imageSrc = capturedImage.startsWith("data:")
+					? (await api.upload.image({ image: capturedImage })).url
+					: capturedImage;
 			}
 			// manifest はR2へ上げてからURLだけをAPIに渡す（createGame/createMvが面倒を見る）
 			let gameId: string | undefined;
-			if (replyGameDraft) {
+			if (capturedGameDraft) {
 				const saved = await createGame({
-					preset: replyGameDraft.preset,
-					title: replyGameDraft.title,
-					manifest: replyGameDraft.manifest,
+					preset: capturedGameDraft.preset,
+					title: capturedGameDraft.title,
+					manifest: capturedGameDraft.manifest,
 				});
 				gameId = saved.id;
 			}
 
 			let mvId: string | undefined;
-			if (replyMvDraft) {
+			if (capturedMvDraft) {
 				const saved = await createMv({
-					preset: replyMvDraft.preset,
-					title: replyMvDraft.title,
-					manifest: replyMvDraft.manifest,
+					preset: capturedMvDraft.preset,
+					title: capturedMvDraft.title,
+					manifest: capturedMvDraft.manifest,
 				});
 				mvId = saved.id;
 			}
@@ -509,15 +531,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			const reply = await api.posts.replies.create(post.id, {
 				content,
 				parentPostId: targetParent.id,
-				hasImage: !!replyImage,
+				hasImage: !!capturedImage,
 				imageSrc,
 				gameId,
 				mvId,
-				dotW: replyDotSize?.w,
-				dotH: replyDotSize?.h,
-				originType: replyOriginType,
+				dotW: capturedDotSize?.w,
+				dotH: capturedDotSize?.h,
+				animFrames: capturedAnim?.animFrames,
+				animFps: capturedAnim?.animFps,
+				walkPreset: capturedAnim?.walkPreset,
+				originType: capturedOriginType,
 			});
-			setReplyDotSize(null);
 
 			setPost((p) => ({
 				...p,
@@ -694,8 +718,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setCollabDotSize(undefined);
 	}, []);
 
-	const handleSaveDrawing = (canvasData: string) => {
+	const handleSaveDrawing = (
+		canvasData: string,
+		animMeta?: { animFrames: number; animFps: number },
+	) => {
 		setReplyImage(canvasData);
+		if (animMeta) {
+			setReplyAnim(animMeta);
+		} else {
+			setReplyAnim(null);
+		}
 		setActiveScreen(null);
 		setCollabImageUrl(undefined);
 		setReplyText("#お絵描き 自作イラスト完成！");
@@ -705,12 +737,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		canvasData: string,
 		gridW?: number,
 		gridH?: number,
+		animMeta?: { animFrames: number; animFps: number; walkPreset?: string },
 	) => {
 		setReplyImage(canvasData);
 		if (gridW && gridH) {
 			setReplyDotSize({ w: gridW, h: gridH });
 		} else {
 			setReplyDotSize(null);
+		}
+		if (animMeta) {
+			setReplyAnim(animMeta);
+		} else {
+			setReplyAnim(null);
 		}
 		setActiveScreen(null);
 		setCollabImageUrl(undefined);
@@ -791,9 +829,19 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		const prevPost = post;
 		setActiveScreen(null);
 		setCollabImageUrl(undefined);
+		let finalImageSrc = canvasData;
+		if (canvasData.startsWith("data:")) {
+			try {
+				const res = await api.upload.image({ image: canvasData });
+				finalImageSrc = res.url;
+			} catch {
+				showToast("error", "画像のアップロードに失敗しました");
+				return;
+			}
+		}
 		setPost((p) => ({
 			...p,
-			imageSrc: canvasData,
+			imageSrc: finalImageSrc,
 			hasImage: true,
 			isEdited: true,
 		}));
@@ -803,7 +851,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				userId,
 				post.content,
 				post.originType,
-				canvasData,
+				finalImageSrc,
 			);
 			setPost(updated);
 			router.refresh();

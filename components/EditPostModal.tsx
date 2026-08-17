@@ -170,6 +170,7 @@ export default function EditPostModal({
 							src={currentImageSrc ?? undefined}
 							alt="添付画像"
 							className="w-full h-auto"
+							fit="cover"
 							// 編集でimageSrcが差し替わった場合、元投稿のanimFrames/walkPresetは
 							// もう対応しない（editPostがこれらの更新を受け付けないため）。
 							// 差し替わっていない＝元のまま表示のときだけアニメ扱いにする。

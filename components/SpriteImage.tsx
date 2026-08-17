@@ -15,9 +15,15 @@ import type {
  *
  * 通常の静止画(animFramesが無い/1以下)は素の <img> と同じ見た目・挙動になる。
  *
- * コマ単体の縦横比はDBに持っていない（シート全体のURLしか無い）ため、
+ * コマ単体のサイズはDBに持っていない（シート全体のURLしか無い）ため、
  * 一度画像を読み込んで naturalWidth/Height から逆算する。測定が終わるまでは
  * 1:1のプレースホルダー比率で待つ（一瞬だけ縦横比がズレる場合がある）。
+ *
+ * <img>と同じ「自然サイズを超えて拡大表示しない」挙動に合わせるため、コマ単体の
+ * 実ピクセル幅を明示的な width として与える（className の max-w-full 等で狭い画面では
+ * 縮む）。これをやらないと、div+background-imageには<img>のような内在サイズが無いため
+ * width:auto がブロック要素として親幅いっぱいに広がり、小さいドット絵アニメが
+ * 投稿カードの横幅まで間延びして表示されてしまう（静止画<img>は自然な小サイズのまま）。
  */
 export interface SpriteImageProps {
 	src: string | undefined;
@@ -30,6 +36,15 @@ export interface SpriteImageProps {
 	rows?: number;
 	/** false でCSSアニメを止め、先頭コマだけの静止表示にする（小さいアイコン用途など） */
 	animate?: boolean;
+	/**
+	 * "natural"(既定): <img>と同じく自然なピクセル幅で表示し、狭い画面でだけ縮む
+	 * （投稿本文の画像など、幅をこちらが決めない場所向け）。
+	 * "cover": 呼び出し側が className で決めた固定サイズの箱(aspect-square グリッド、
+	 * w-5 h-5 アイコン等)いっぱいに詰めて表示する。div+background-imageには<img>の
+	 * ような内在サイズが無いので、"natural" のまま w-full/h-full な箱に置くと
+	 * 自然ピクセル幅で上書きされて箱からはみ出す/縮まったりする。
+	 */
+	fit?: "natural" | "cover";
 	draggable?: boolean;
 	onClick?: (e: ReactMouseEvent) => void;
 	/** 静止画(<img>)のときだけ発火する。アニメ/歩行グラのCSS背景描画では読み込み失敗を検知できない */
@@ -45,12 +60,15 @@ export default function SpriteImage({
 	animFps,
 	rows = 1,
 	animate = true,
+	fit = "natural",
 	draggable,
 	onClick,
 	onError,
 }: SpriteImageProps) {
 	const frames = animFrames && animFrames > 1 ? animFrames : 1;
-	const [cellRatio, setCellRatio] = useState<number | null>(null);
+	const [cell, setCell] = useState<{ ratio: number; widthPx: number } | null>(
+		null,
+	);
 
 	useEffect(() => {
 		if (frames <= 1 || !src) return;
@@ -58,7 +76,9 @@ export default function SpriteImage({
 		const img = new Image();
 		img.onload = () => {
 			if (!cancelled && img.naturalWidth && img.naturalHeight) {
-				setCellRatio(img.naturalWidth / frames / (img.naturalHeight / rows));
+				const cellW = img.naturalWidth / frames;
+				const cellH = img.naturalHeight / rows;
+				setCell({ ratio: cellW / cellH, widthPx: cellW });
 			}
 		};
 		img.src = src;
@@ -94,7 +114,12 @@ export default function SpriteImage({
 			onClick={onClick}
 			style={{
 				...style,
-				aspectRatio: cellRatio ?? 1,
+				aspectRatio: cell?.ratio ?? 1,
+				// fit="natural": <img>と同じ「自然サイズより大きく表示しない」。
+				// fit="cover": 呼び出し側の className(w-full h-full 等)にサイズを委ねる。
+				...(fit === "natural" && cell
+					? { width: cell.widthPx, maxWidth: "100%" }
+					: {}),
 				backgroundImage: `url(${src})`,
 				backgroundSize: `${frames * 100}% ${rows * 100}%`,
 				backgroundPosition: "0% 0%",

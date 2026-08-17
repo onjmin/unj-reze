@@ -1610,6 +1610,7 @@ export default function App() {
 													setText={setInputText}
 													image={attachedImage}
 													setImage={setAttachedImageDirect}
+													imageAnim={attachedAnim}
 													mml={attachedMml}
 													setMml={setAttachedMml}
 													gameDraft={gameDraft}
@@ -1720,6 +1721,7 @@ export default function App() {
 							setText={setInputText}
 							image={attachedImage}
 							setImage={setAttachedImageDirect}
+							imageAnim={attachedAnim}
 							mml={attachedMml}
 							setMml={setAttachedMml}
 							gameDraft={gameDraft}

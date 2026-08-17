@@ -746,6 +746,7 @@ function PostImageGrid({
 									alt=""
 									className="w-full h-full object-cover"
 									style={{ imageRendering: "pixelated" }}
+									fit="cover"
 									animFrames={p.animFrames}
 									animFps={p.animFps}
 									rows={walkPresetRows(p.walkPreset)}

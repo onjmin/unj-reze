@@ -1203,6 +1203,7 @@ function ReplyPreview({
 							src={reply.imageSrc}
 							alt={reply.imageAlt || "ユーザーアート"}
 							className="shrink-0 w-5 h-5 rounded object-cover border border-gray-800 mr-1.5"
+						fit="cover"
 							animFrames={reply.animFrames}
 							animFps={reply.animFps}
 							rows={walkPresetRows(reply.walkPreset)}

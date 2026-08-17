@@ -247,6 +247,7 @@ export default function PostSlicePanel({
 										setFailedPostIds((prev) => new Set(prev).add(p.id))
 									}
 									className="w-full h-full object-cover"
+									fit="cover"
 									animFrames={p.animFrames}
 									animFps={p.animFps}
 									rows={walkPresetRows(p.walkPreset)}

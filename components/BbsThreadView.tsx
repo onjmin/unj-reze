@@ -136,6 +136,21 @@ export default function BbsThreadView({
 	const [replyDotSize, setReplyDotSize] = useState<
 		{ w: number; h: number } | null
 	>(null);
+	const [replyAnim, setReplyAnim] = useState<{
+		animFrames: number;
+		animFps: number;
+		walkPreset?: string;
+	} | null>(null);
+	/**
+	 * PostComposer の「画像を消す」に直接渡す setter。DrawingEditor/DotDrawingEditor経由の
+	 * ときはこれを使わず setReplyImage→setReplyAnim/setReplyDotSize の順で個別に呼ぶため、
+	 * ここで一律クリアしても問題ない（app/page.tsx の setAttachedImageDirect と同じ理由）。
+	 */
+	const setReplyImageDirect = useCallback((v: string | null) => {
+		setReplyImage(v);
+		setReplyDotSize(null);
+		setReplyAnim(null);
+	}, []);
 	const [replyTo, setReplyTo] = useState<number | null>(null);
 	/** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
 	 *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
@@ -216,6 +231,11 @@ export default function BbsThreadView({
 			parentPostId: post.id,
 			hasImage: !!replyImage,
 			imageSrc: replyImage ?? undefined,
+			dotW: replyDotSize?.w,
+			dotH: replyDotSize?.h,
+			animFrames: replyAnim?.animFrames,
+			animFps: replyAnim?.animFps,
+			walkPreset: replyAnim?.walkPreset,
 			originType: replyOriginType,
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
@@ -226,13 +246,16 @@ export default function BbsThreadView({
 			repliesCount: p.repliesCount + 1,
 		}));
 		const capturedImage = replyImage;
+		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
 		const capturedOriginType = replyOriginType;
 		const capturedDotSize = replyDotSize;
+		const capturedAnim = replyAnim;
 		setReplyText("");
 		setReplyImage(null);
 		setReplyDotSize(null);
+		setReplyAnim(null);
 		setReplyMml(null);
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
@@ -242,11 +265,12 @@ export default function BbsThreadView({
 		const toastId = showToast("info", "送信中...", { duration: 0 });
 
 		try {
-			// dataURLのまま送るとDBに巨大な文字列が入ってしまうため、必ずアップロードしてURL化する
+			// dataURLのときだけアップロードしてURL化する（アニメ/歩行グラ等はエディタ保存時にアップロード済みURLが渡される）
 			let imageSrc: string | undefined;
 			if (capturedImage) {
-				const result = await api.upload.image({ image: capturedImage });
-				imageSrc = result.url;
+				imageSrc = capturedImage.startsWith("data:")
+					? (await api.upload.image({ image: capturedImage })).url
+					: capturedImage;
 			}
 			// manifest はR2へ上げてからURLだけをAPIに渡す（createGame/createMvが面倒を見る）
 			let gameId: string | undefined;
@@ -278,6 +302,9 @@ export default function BbsThreadView({
 				mvId,
 				dotW: capturedDotSize?.w,
 				dotH: capturedDotSize?.h,
+				animFrames: capturedAnim?.animFrames,
+				animFps: capturedAnim?.animFps,
+				walkPreset: capturedAnim?.walkPreset,
 				originType: capturedOriginType,
 			});
 			setPost((p) => ({
@@ -297,8 +324,16 @@ export default function BbsThreadView({
 		}
 	};
 
-	const handleSaveDrawing = (canvasData: string) => {
+	const handleSaveDrawing = (
+		canvasData: string,
+		animMeta?: { animFrames: number; animFps: number },
+	) => {
 		setReplyImage(canvasData);
+		if (animMeta) {
+			setReplyAnim(animMeta);
+		} else {
+			setReplyAnim(null);
+		}
 		setActiveScreen(null);
 		setReplyText((prev) =>
 			prev.trim() ? prev : "#お絵描き 自作イラスト完成！",
@@ -666,7 +701,8 @@ export default function BbsThreadView({
 					text={replyText}
 					setText={setReplyText}
 					image={replyImage}
-					setImage={setReplyImage}
+					setImage={setReplyImageDirect}
+					imageAnim={replyAnim}
 					mml={replyMml}
 					setMml={setReplyMml}
 					gameDraft={replyGameDraft}
