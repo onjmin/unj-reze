@@ -1,36 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser } from "@/lib/types";
 
-function getCachedUser(): AnonymousUser | null {
+let cachedUserSnapshot: AnonymousUser | null = null;
+const userListeners = new Set<() => void>();
+
+function emitUserChange() {
+	for (const listener of userListeners) {
+		listener();
+	}
+}
+
+function subscribeUser(listener: () => void) {
+	userListeners.add(listener);
+	return () => {
+		userListeners.delete(listener);
+	};
+}
+
+function getUserSnapshot(): AnonymousUser | null {
+	if (cachedUserSnapshot) return cachedUserSnapshot;
 	if (typeof window === "undefined" || typeof localStorage === "undefined")
 		return null;
 	try {
 		const cached = localStorage.getItem("unj_current_user");
-		return cached ? JSON.parse(cached) : null;
-	} catch {
-		return null;
-	}
+		if (cached) {
+			cachedUserSnapshot = JSON.parse(cached);
+			return cachedUserSnapshot;
+		}
+	} catch {}
+	return null;
 }
 
+const SERVER_USER_SNAPSHOT = () => null;
+
 export function useCurrentUser() {
-	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(getCachedUser);
+	const user = useSyncExternalStore(
+		subscribeUser,
+		getUserSnapshot,
+		SERVER_USER_SNAPSHOT,
+	);
 
 	useEffect(() => {
 		const sessionId = ensureSessionId();
 		api.auth
 			.anonymous(sessionId)
-			.then((user) => {
-				setCurrentUser(user);
+			.then((freshUser) => {
+				cachedUserSnapshot = freshUser;
 				try {
-					localStorage.setItem("unj_current_user", JSON.stringify(user));
+					localStorage.setItem("unj_current_user", JSON.stringify(freshUser));
 				} catch {}
+				emitUserChange();
 			})
 			.catch(() => {});
 	}, []);
 
-	return currentUser;
+	return user;
 }

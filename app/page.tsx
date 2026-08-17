@@ -104,27 +104,8 @@ export default function App() {
 	/** 返信送信の排他制御。送信中の再送信を弾き、遅れて完了した送信が
 	 *  その後に開いたコンポーザ/エディタの状態を壊さないようにする。 */
 	const replySubmittingRef = useRef(false);
-	const [userId, setUserId] = useState(() => {
-		if (typeof localStorage !== "undefined") {
-			try {
-				const saved = localStorage.getItem("unj_current_user");
-				if (saved) {
-					const parsed = JSON.parse(saved);
-					if (parsed?.displayName) return parsed.displayName;
-				}
-			} catch {}
-		}
-		return "名無しvFZ";
-	});
-	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(() => {
-		if (typeof localStorage !== "undefined") {
-			try {
-				const saved = localStorage.getItem("unj_current_user");
-				if (saved) return JSON.parse(saved);
-			} catch {}
-		}
-		return null;
-	});
+	const [userId, setUserId] = useState("名無しvFZ");
+	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
 	// 本人識別（通知/メッセージ/リアルタイムchannel/ブロック絞り込み）は必ずこちら＝users.id。
 	// userId state は displayName で、投稿作成の displayName フィールド用に別途残している
 	// （紛らわしいが、これを users.id に変えると自分の投稿の名乗りが変わってしまう）。
@@ -149,8 +130,13 @@ export default function App() {
 
 		try {
 			const cached = localStorage.getItem("unj_current_user");
-			if (cached)
-				Promise.resolve().then(() => setCurrentUser(JSON.parse(cached)));
+			if (cached) {
+				const parsed = JSON.parse(cached);
+				Promise.resolve().then(() => {
+					setCurrentUser(parsed);
+					if (parsed?.displayName) setUserId(parsed.displayName);
+				});
+			}
 		} catch {}
 
 		if (typeof window !== "undefined") {

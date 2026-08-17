@@ -143,6 +143,8 @@ export interface GifExportOptions {
 	fileName?: string;
 	transparent?: boolean;
 	backgroundColor?: string;
+	/** false でファイルダウンロードを行わない（投稿添付など、Blobだけ欲しい場合） */
+	download?: boolean;
 }
 
 export const exportGif = async ({
@@ -153,6 +155,7 @@ export const exportGif = async ({
 	fileName = "animation.gif",
 	transparent = true,
 	backgroundColor,
+	download = true,
 }: GifExportOptions): Promise<Blob> => {
 	const gif = GIFEncoder();
 	const delay = Math.max(1, Math.round(1000 / Math.max(1, fps)));
@@ -235,9 +238,18 @@ export const exportGif = async ({
 	gif.finish();
 	const bytes = gif.bytes();
 	const blob = new Blob([bytes as BlobPart], { type: "image/gif" });
-	downloadBlob(blob, fileName);
+	if (download) downloadBlob(blob, fileName);
 	return blob;
 };
+
+/** Blob → data URL 変換（GIFを投稿の imageSrc としてそのまま埋め込むため） */
+export const blobToDataUrl = (blob: Blob): Promise<string> =>
+	new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(reader.result as string);
+		reader.onerror = reject;
+		reader.readAsDataURL(blob);
+	});
 
 /* ------------------------------------------------------------------
    個別フレーム (ZIP) エクスポート

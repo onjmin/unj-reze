@@ -86,14 +86,18 @@ interface PostDetailProps {
 	post: Post;
 }
 
-function getSavedBbsMode(): string {
-	if (typeof localStorage === "undefined") return "SNSモード";
-	return localStorage.getItem("unj_bbs_mode") || "SNSモード";
-}
-
 export default function PostDetail({ post: initial }: PostDetailProps) {
 	const router = useRouter();
-	const [bbsMode, setBbsMode] = useState(getSavedBbsMode);
+	const [bbsMode, setBbsMode] = useState("SNSモード");
+
+	useEffect(() => {
+		if (typeof localStorage !== "undefined") {
+			const saved = localStorage.getItem("unj_bbs_mode");
+			if (saved) {
+				Promise.resolve().then(() => setBbsMode(saved));
+			}
+		}
+	}, []);
 
 	const [post, setPost] = useState<Post>(initial);
 	// MML本文はR2にある（content にはマーカーだけ）。「曲を編集」導線はここで

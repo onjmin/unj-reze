@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PROD_URL = "https://unj-reze.onjmin.workers.dev/";
 const DISMISS_KEY = "unj_demo_notice_dismissed";
@@ -21,7 +21,13 @@ function shouldShowNotice(): boolean {
 }
 
 export default function DemoNoticeModal() {
-	const [visible, setVisible] = useState(shouldShowNotice);
+	const [visible, setVisible] = useState(false);
+
+	useEffect(() => {
+		Promise.resolve().then(() => {
+			setVisible(shouldShowNotice());
+		});
+	}, []);
 
 	const dismiss = () => {
 		try {

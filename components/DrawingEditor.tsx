@@ -40,6 +40,7 @@ import {
 	serializeLayers,
 } from "@/lib/history";
 import {
+	blobToDataUrl,
 	exportFramesZip,
 	exportGif,
 	exportSinglePng,
@@ -1448,12 +1449,41 @@ export default function DrawingEditor({
 		};
 	}, []);
 
-	const handleSave = () => {
+	const handleSave = async () => {
 		const state = getCurrentState();
 		if (state) {
 			saveHistory(storageKey, state, "drawing", 50);
 		}
 		clearAutosave(storageKey);
+
+		// アニメモードで複数フレームある場合はGIFとして書き出し、
+		// 1枚絵と同じ「string(dataURL)」の口でそのまま onSave に渡す。
+		// <img src> はGIFなら自然に再生されるため、DB/型変更なしでアニメ投稿に対応できる。
+		const hasMultipleFrames =
+			animMode && frameInstancesRef.current.length > 1;
+		if (hasMultipleFrames) {
+			const frameCanvases = getAnimFramesForExport();
+			if (frameCanvases.length > 1) {
+				const w = frameCanvases[0].width;
+				const h = frameCanvases[0].height;
+				try {
+					const blob = await exportGif({
+						frames: frameCanvases,
+						width: w,
+						height: h,
+						fps: fpsRef.current,
+						transparent: true,
+						download: false,
+					});
+					const dataUrl = await blobToDataUrl(blob);
+					onSave(dataUrl);
+					return;
+				} catch (err) {
+					console.error("GIFアニメの書き出しに失敗、1枚絵として保存します", err);
+				}
+			}
+		}
+
 		onSave(oekaki.render().toDataURL());
 	};
 

@@ -5,6 +5,7 @@ import {
 	Geist_Mono,
 	Press_Start_2P,
 } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import DemoNoticeModal from "@/components/DemoNoticeModal";
 import PwaRegister from "@/components/PwaRegister";
@@ -129,21 +130,19 @@ export default function RootLayout({
 					type="application/ld+json"
 					dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
 				/>
-				<script
-					async
+				<Script
 					src="https://www.googletagmanager.com/gtag/js?id=G-HL7EMH1N1B"
-				></script>
-				<script
-					dangerouslySetInnerHTML={{
-						__html: `
+					strategy="afterInteractive"
+				/>
+				<Script id="gtag-init" strategy="afterInteractive">
+					{`
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
 
               gtag('config', 'G-HL7EMH1N1B');
-            `,
-					}}
-				/>
+            `}
+				</Script>
 				{process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" && (
 					<meta
 						httpEquiv="refresh"
