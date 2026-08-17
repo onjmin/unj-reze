@@ -753,20 +753,23 @@ export default function DotDrawingEditor({
 				break;
 			}
 		}
+		let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
 		if (imageItem) {
-			e.preventDefault();
 			const file = imageItem.getAsFile();
-			if (file) pasteImage(file);
+			if (!file) return;
+			bitmap = await createImageBitmap(file);
 		} else if (internalClipboardRef.current) {
-			e.preventDefault();
-			const bitmap = await createImageBitmap(internalClipboardRef.current);
-			active.paste(bitmap);
-			if (active.modified()) active.trace();
-			setTool("select");
-			toolRef.current = "select";
-			drawSelectionHandle();
-			forceRender((n) => n + 1);
+			bitmap = internalClipboardRef.current;
+		} else {
+			return;
 		}
+		e.preventDefault();
+		active.paste(bitmap);
+		if (active.modified()) active.trace();
+		setTool("select");
+		toolRef.current = "select";
+		drawSelectionHandle();
+		forceRender((n) => n + 1);
 	};
 
 	const toggleOnionSkin = () => {
@@ -2373,7 +2376,7 @@ export default function DotDrawingEditor({
 					["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
 				) {
 					e.preventDefault();
-					const step = 1;
+					const step = oekaki.getDotSize() || 1;
 					const dx =
 						e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
 					const dy =
