@@ -52,7 +52,7 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
 			{
 				name: "kusa鯖",
 				description: "Minecraft Realms サーバー招待リンク",
-				src: "https://realms.gg/aasxKKAsUBkfvVg",
+				src: "https://realms.gg/UVm8QuFGQdYMWGY",
 			},
 			{
 				name: "kusa避難所",
