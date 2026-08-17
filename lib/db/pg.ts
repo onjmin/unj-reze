@@ -117,18 +117,32 @@ function getLocalPool(): Promise<Pool> {
 	return localPoolPromise;
 }
 
+/**
+ * Postgres/Neon クエリパラメータ型。
+ * undefined の混入をコンパイルレベルで完全に禁止し、Neon HTTP 520 クラッシュを恒久防止する。
+ */
+export type SqlParam =
+	| string
+	| number
+	| boolean
+	| null
+	| Date
+	| Uint8Array
+	| Buffer
+	| readonly (string | number | boolean)[];
+
 async function q<T = any>(
 	text: string,
-	params: any[] = [],
+	params: readonly SqlParam[] = [],
 ): Promise<{ rows: T[]; rowCount?: number }> {
 	const sanitizedParams = params.map((p) => (p === undefined ? null : p));
 	if (isLocalDatabaseUrl()) {
 		const pool = await getLocalPool();
-		const res = await pool.query(text, sanitizedParams);
+		const res = await pool.query(text, sanitizedParams as any[]);
 		return { rows: res.rows as T[], rowCount: res.rowCount ?? undefined };
 	}
 	const sql = getDb();
-	const res = await sql.query(text, sanitizedParams, { fullResults: true });
+	const res = await sql.query(text, sanitizedParams as any[], { fullResults: true });
 	return res as { rows: T[]; rowCount?: number };
 }
 
@@ -638,7 +652,7 @@ export const pgStore: DataStore = {
 						// board_id は上のVALUES句と同じく固定で 1。
 						authorId,
 						genBbsId(authorId, 1),
-						data.displayName,
+						data.displayName || "名無し",
 						data.avatarColor ?? null,
 						c.contentText,
 						c.contentUrl,
@@ -796,7 +810,7 @@ export const pgStore: DataStore = {
 						authorId === Number(thread.user_id),
 						authorId,
 						genBbsId(authorId, 1),
-						data.displayName,
+						data.displayName || "名無し",
 						data.avatarColor ?? null,
 						c.contentText,
 						c.contentUrl,
