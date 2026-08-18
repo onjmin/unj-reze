@@ -10,12 +10,18 @@ import { walkPresetWays } from "@/lib/walk-cycle";
 
 /**
  * 投稿画像の表示用。`animFrames`(>1) があれば横1列のアニメスプライトシートとして
- * CSSアニメで再生する。`walkPreset` を渡すと歩行グラ(複数行のシート)として扱い、
- * `fit="natural"`（本文サイズの画像。既定）のときは方向転換の十字ボタンつきで
- * 選択した向きを歩行アニメ再生する。`fit="cover"`（サムネイル/アイコン用途）や
- * `walkPreset` 無指定のときは先頭コマだけの静止表示にする
- * （小さい枠に十字ボタンを出すと崩れるため、また向きの並び順が分からないと
- * 十字ボタンを正しく機能させられないため）。
+ * CSSアニメで再生する。`walkPreset` を渡すと歩行グラ(複数行のシート)として扱う。
+ * サイズに関わらず既定(`animate=true`)では常に再生する — 十字ボタン(方向転換UI)だけが
+ * `fit="natural"`（本文サイズの画像）のときに限定される（`fit="cover"`のサムネイル等の
+ * 小さい枠に十字ボタンを出すと崩れるため、また向きの並び順が分からないと十字ボタンを
+ * 正しく機能させられないため）。十字ボタンが無いときは既定の向き(sキー="前"優先、
+ * 無ければ規格の先頭方向)を再生する。「小さい枠だから静止画にする」判断はしない
+ * ＝拡大表示でも縮小表示でもアニメは常に動く。`animate={false}`を明示的に渡した
+ * ときだけ止まる（多数並ぶ極小アイコン等、呼び出し側が意図して止めたい場合用）。
+ *
+ * `fit="natural"`では右上に切替ボタン(▦/▶)も出す。既定はクロップして再生する
+ * "play"、押すと元のスプライトシート画像をそのまま(全コマ並び)静止表示する"sheet"に
+ * 切り替わる。
  *
  * 通常の静止画(animFramesが無い/1以下)は素の <img> と同じ見た目・挙動になる。
  *
@@ -120,11 +126,17 @@ export default function SpriteImage({
 	const rows = ways?.length ?? 1;
 	const isWalkPreview = fit === "natural" && rows > 1;
 
-	const [cell, setCell] = useState<{ ratio: number; widthPx: number } | null>(
-		null,
-	);
+	const [cell, setCell] = useState<{
+		ratio: number;
+		widthPx: number;
+		sheetRatio: number;
+		sheetWidthPx: number;
+	} | null>(null);
 	const [selectedWay, setSelectedWay] = useState<string | null>(null);
 	const [staticWidthPx, setStaticWidthPx] = useState<number | null>(null);
+	// "play"(既定)=クロップして選択中のコマ/向きを再生。"sheet"=元のスプライトシート
+	// 画像をそのまま(全コマ並び)静止表示する。fit="natural"のときだけ切替ボタンを出す。
+	const [viewMode, setViewMode] = useState<"play" | "sheet">("play");
 
 	useEffect(() => {
 		if (frames <= 1 || !src) return;
@@ -134,7 +146,12 @@ export default function SpriteImage({
 			if (!cancelled && img.naturalWidth && img.naturalHeight) {
 				const cellW = img.naturalWidth / frames;
 				const cellH = img.naturalHeight / rows;
-				setCell({ ratio: cellW / cellH, widthPx: cellW });
+				setCell({
+					ratio: cellW / cellH,
+					widthPx: cellW,
+					sheetRatio: img.naturalWidth / img.naturalHeight,
+					sheetWidthPx: img.naturalWidth,
+				});
 			}
 		};
 		img.src = src;
@@ -187,36 +204,21 @@ export default function SpriteImage({
 		);
 	}
 
+	const showSheetToggle = fit === "natural";
+	const isSheet = showSheetToggle && viewMode === "sheet";
+
 	const sizingStyle: CSSProperties = {
-		aspectRatio: cell?.ratio ?? 1,
+		aspectRatio: (isSheet ? cell?.sheetRatio : cell?.ratio) ?? 1,
 		...(fit === "natural" && cell
 			? {
-					width: Math.max(cell.widthPx, MIN_DISPLAY_PX),
+					width: Math.max(
+						isSheet ? cell.sheetWidthPx : cell.widthPx,
+						MIN_DISPLAY_PX,
+					),
 					maxWidth: "100%",
 				}
 			: {}),
 	};
-
-	// 歩行グラの静止プレビュー(cover/小さい枠)は先頭セル(1コマ目・1方向目)だけを切り出す
-	if (rows > 1 && !isWalkPreview) {
-		return (
-			<div
-				role="img"
-				aria-label={alt || ""}
-				className={className}
-				onClick={onClick}
-				style={{
-					...style,
-					...sizingStyle,
-					backgroundImage: `url(${src})`,
-					backgroundSize: `${frames * 100}% ${rows * 100}%`,
-					backgroundPosition: "0% 0%",
-					backgroundRepeat: "no-repeat",
-					imageRendering: "pixelated",
-				}}
-			/>
-		);
-	}
 
 	const fps = animFps && animFps > 0 ? animFps : 8;
 	const duration = frames / fps;
@@ -237,23 +239,26 @@ export default function SpriteImage({
 		: 0;
 	const yPos = rows > 1 ? (100 * rowIndex) / (rows - 1) : 0;
 	const keyframesName = `sprite-anim-steps-${frames}`;
+	const playing = animate && !isSheet;
 
 	return (
 		<div
 			role="img"
 			aria-label={alt || ""}
 			className={className}
-			onClick={onClick}
+			onClick={isSheet ? undefined : onClick}
 			style={{
 				...style,
 				...sizingStyle,
-				...(isWalkPreview ? { position: "relative" } : {}),
+				...(isWalkPreview || showSheetToggle ? { position: "relative" } : {}),
 				backgroundImage: `url(${src})`,
-				backgroundSize: `${frames * 100}% ${rows * 100}%`,
-				backgroundPosition: `0% ${yPos}%`,
+				backgroundSize: isSheet
+					? "100% 100%"
+					: `${frames * 100}% ${rows * 100}%`,
+				backgroundPosition: isSheet ? "0% 0%" : `0% ${yPos}%`,
 				backgroundRepeat: "no-repeat",
 				imageRendering: "pixelated",
-				...(animate
+				...(playing
 					? {
 							animationName: keyframesName,
 							animationDuration: `${duration}s`,
@@ -263,14 +268,14 @@ export default function SpriteImage({
 					: {}),
 			}}
 		>
-			{animate && (
+			{playing && (
 				<style
 					dangerouslySetInnerHTML={{
 						__html: `@keyframes ${keyframesName} { from { background-position: 0% ${yPos}%; } to { background-position: ${xTarget}% ${yPos}%; } }`,
 					}}
 				/>
 			)}
-			{isWalkPreview && ways && ways.length > 1 && (
+			{!isSheet && isWalkPreview && ways && ways.length > 1 && (
 				<div className="absolute inset-0 pointer-events-none">
 					{(["w", "a", "s", "d"] as const)
 						.filter((k) => ways.some((w) => w.key === k))
@@ -293,6 +298,20 @@ export default function SpriteImage({
 							</button>
 						))}
 				</div>
+			)}
+			{showSheetToggle && (
+				<button
+					type="button"
+					aria-label={isSheet ? "再生表示に切り替え" : "スプライトシート表示に切り替え"}
+					title={isSheet ? "再生表示に切り替え" : "スプライトシート表示に切り替え"}
+					onClick={(e) => {
+						e.stopPropagation();
+						setViewMode((v) => (v === "sheet" ? "play" : "sheet"));
+					}}
+					className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold bg-black/60 text-gray-300 hover:bg-black/80 transition-colors"
+				>
+					{isSheet ? "▶" : "▦"}
+				</button>
 			)}
 		</div>
 	);
