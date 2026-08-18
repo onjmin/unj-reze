@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
 import PostPageClient from "@/components/PostPageClient";
@@ -30,6 +31,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 	]);
 }
 
+// headers()（Dynamic API）を generateMetadata で使うため、このルートは常に
+// per-request の動的レンダリングに固定する。generateStaticParams があるだけで
+// Next.js はビルド時に静的フォールバックシェルを1枚生成しようとし、そのビルド時
+// パスにはリクエストコンテキストが無いので headers() が DYNAMIC_SERVER_USAGE で
+// 例外を投げる（本番ビルドではそれが500として表面化する。wrangler dev実機で確認済み）。
+export const dynamic = "force-dynamic";
+
 export function generateStaticParams() {
 	if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== "true") return [];
 	const params = mockDb.getPosts().map((post) => ({ id: encodePost(post).id }));
@@ -45,6 +53,15 @@ export async function generateMetadata({
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
 	const url = `${SITE_URL}/post/${id}`;
+
+	// クライアント側遷移（router.push/prefetch）のRSCフェッチには "RSC" ヘッダーが
+	// 付く。一覧から来た人は既にキャッシュ/クライアントフェッチ（PostPageClient側）で
+	// 正しい情報を持っているので、ここでDBを叩かずに返す。DBが必要なのは
+	// 直リンク・リロード・クローラーによる「フルページ読み込み」のときだけ。
+	const isSoftNavigation = (await headers()).has("rsc");
+	if (isSoftNavigation) {
+		return { alternates: { canonical: url } };
+	}
 
 	const post = await withTimeout(
 		getMetadataPost(decodedId).catch(() => null),

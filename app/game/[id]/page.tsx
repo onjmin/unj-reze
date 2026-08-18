@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
 import GamePageClient from "@/components/GamePageClient";
@@ -33,6 +34,10 @@ function thumbnailOf(bgRef: string | undefined): string | undefined {
 		: undefined;
 }
 
+// post/[id] と同じ理由（DYNAMIC_SERVER_USAGE対策。下記コメント参照）で
+// このルートも常に動的レンダリングに固定する。
+export const dynamic = "force-dynamic";
+
 export function generateStaticParams() {
 	if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== "true") return [];
 	return [{ id: encodeId(1) }];
@@ -47,6 +52,13 @@ export async function generateMetadata({
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
 	const url = `${SITE_URL}/game/${id}`;
+
+	// post/[id] と同じ理由でクライアント側遷移はDBを叩かない
+	// （wrangler dev実機で headers()＋force-dynamicの組み合わせを確認済み）。
+	const isSoftNavigation = (await headers()).has("rsc");
+	if (isSoftNavigation) {
+		return { alternates: { canonical: url } };
+	}
 
 	const game = await withTimeout(
 		getCachedGame(decodedId).catch(() => null),
