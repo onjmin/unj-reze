@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { MML_MARKERS } from "@/lib/mml";
 import type { Post } from "@/lib/types";
+import { presets as walkPresets } from "@/lib/walk-cycle";
 import { useMmlSource } from "./MmlSource";
 import SpriteImage from "./SpriteImage";
 
@@ -42,6 +43,19 @@ export interface PostEditCapabilities {
 	editMv: (() => void) | null;
 }
 
+/**
+ * 投稿済みの画像を後から「ドット絵素材」として（再）設定するための編集値。
+ * これを設定した画像URLはSpriteImageのアニメ/歩行グラ再生対象になる＝
+ * 一般の画像投稿を後からアニメ/歩行グラ素材化する唯一の導線。
+ */
+export interface DotMetaEdit {
+	dotW?: number | null;
+	dotH?: number | null;
+	animFrames?: number | null;
+	animFps?: number | null;
+	walkPreset?: string | null;
+}
+
 interface EditPostModalProps {
 	/**
 	 * 編集対象。添付の表示情報（画像・ゲーム・MV）はすべてここから引く。
@@ -52,7 +66,11 @@ interface EditPostModalProps {
 	originalContent?: string;
 	capabilities: PostEditCapabilities;
 	onClose: () => void;
-	onSave: (content: string, imageSrc?: string | null) => void;
+	onSave: (
+		content: string,
+		imageSrc?: string | null,
+		dotMeta?: DotMetaEdit,
+	) => void;
 }
 
 /** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
@@ -94,6 +112,64 @@ export default function EditPostModal({
 	const [expanded, setExpanded] = useState(false); // プレビュー展開
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+	// ドット絵素材メタ。dotW有無が「ドット絵素材扱いか」のフラグそのもの
+	// （lib/db/interface.ts DotMetaEdit 参照）。
+	const [dotArtEnabled, setDotArtEnabled] = useState(!!post.dotW);
+	const [dotW, setDotW] = useState(post.dotW ?? 32);
+	const [dotH, setDotH] = useState(post.dotH ?? 32);
+	type DotMode = "none" | "anim" | "walk";
+	const [dotMode, setDotMode] = useState<DotMode>(
+		post.walkPreset ? "walk" : post.animFrames ? "anim" : "none",
+	);
+	const [animFrames, setAnimFrames] = useState(post.animFrames ?? 4);
+	const [animFps, setAnimFps] = useState(post.animFps ?? 8);
+	const [walkPresetLabel, setWalkPresetLabel] = useState(
+		post.walkPreset ?? walkPresets[0].label,
+	);
+
+	// プレビュー・保存の両方で使う実効値（歩行グラのときはコマ数を規格から強制する）
+	const selectedWalkPreset = walkPresets.find(
+		(p) => p.label === walkPresetLabel,
+	);
+	const effectiveAnimFrames =
+		dotMode === "walk"
+			? (selectedWalkPreset?.frames ?? animFrames)
+			: dotMode === "anim"
+				? animFrames
+				: undefined;
+	const effectiveWalkPreset = dotMode === "walk" ? walkPresetLabel : undefined;
+
+	const dotMeta: DotMetaEdit | undefined = (() => {
+		if (!dotArtEnabled) {
+			// 元々ドット絵素材だった投稿を「なし」に戻すときだけ明示的にクリアする。
+			// 元から素材でなければ何も送らない（余計な差分を出さない）。
+			if (!post.dotW) return undefined;
+			return {
+				dotW: null,
+				dotH: null,
+				animFrames: null,
+				animFps: null,
+				walkPreset: null,
+			};
+		}
+		return {
+			dotW,
+			dotH,
+			animFrames: effectiveAnimFrames ?? null,
+			animFps: dotMode === "none" ? null : animFps,
+			walkPreset: effectiveWalkPreset ?? null,
+		};
+	})();
+	const dotMetaChanged =
+		dotArtEnabled !== !!post.dotW ||
+		(dotArtEnabled &&
+			(dotW !== (post.dotW ?? dotW) ||
+				dotH !== (post.dotH ?? dotH) ||
+				effectiveAnimFrames !== (post.animFrames ?? undefined) ||
+				(dotMode !== "none" ? animFps : undefined) !==
+					(post.animFps ?? undefined) ||
+				effectiveWalkPreset !== (post.walkPreset ?? undefined)));
+
 	useEffect(() => {
 		textareaRef.current?.focus();
 		const len = initialText.length;
@@ -108,7 +184,7 @@ export default function EditPostModal({
 		if (text.trim()) parts.push(text.trim());
 		if (mmlLine) parts.push(mmlLine);
 		const final = parts.join("\n");
-		onSave(final, currentImageSrc);
+		onSave(final, currentImageSrc, dotMeta);
 	};
 
 	// mmlLine の埋め込みテキストは外部化済みだと空になるため、resolvedMml を優先して使う。
@@ -130,7 +206,7 @@ export default function EditPostModal({
 		const textOrMmlChanged = parts.join("\n") !== compareBase;
 		const imageChanged = currentImageSrc !== post.imageSrc;
 		const gameChanged = currentHasGame !== post.hasGame;
-		return textOrMmlChanged || imageChanged || gameChanged;
+		return textOrMmlChanged || imageChanged || gameChanged || dotMetaChanged;
 	})();
 
 	return (
@@ -170,16 +246,9 @@ export default function EditPostModal({
 							alt="添付画像"
 							className="w-full h-auto"
 							fit="cover"
-							// 編集でimageSrcが差し替わった場合、元投稿のanimFrames/walkPresetは
-							// もう対応しない（editPostがこれらの更新を受け付けないため）。
-							// 差し替わっていない＝元のまま表示のときだけアニメ扱いにする。
-							animFrames={
-								currentImageSrc === post.imageSrc ? post.animFrames : undefined
-							}
-							animFps={post.animFps}
-							walkPreset={
-								currentImageSrc === post.imageSrc ? post.walkPreset : undefined
-							}
+							animFrames={dotArtEnabled ? effectiveAnimFrames : undefined}
+							animFps={dotArtEnabled ? animFps : undefined}
+							walkPreset={dotArtEnabled ? effectiveWalkPreset : undefined}
 						/>
 						<div className="absolute top-1.5 right-1.5 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
 							{capabilities.editImage && (
@@ -201,6 +270,142 @@ export default function EditPostModal({
 								</button>
 							)}
 						</div>
+					</div>
+				)}
+
+				{/* ドット絵素材の設定。自分の投稿の画像に対して後からdotW/dotH等を（再）設定できる。
+				    dotW/dotHが入っている画像は「ドット絵素材」扱いになりSpriteImageの
+				    アニメ/歩行グラ再生対象になる（一般の画像投稿を後から素材化する唯一の導線）。 */}
+				{currentImageSrc && (
+					<div className="rounded-lg border border-gray-800 bg-gray-100/5 px-3 py-2.5 space-y-2">
+						<label className="flex items-center gap-2 text-xs font-bold text-gray-300 cursor-pointer">
+							<input
+								type="checkbox"
+								checked={dotArtEnabled}
+								onChange={(e) => setDotArtEnabled(e.target.checked)}
+								className="accent-blue-600"
+							/>
+							ドット絵素材として設定する
+						</label>
+						{dotArtEnabled && (
+							<div className="space-y-2 pl-1">
+								<div className="flex items-center gap-2 text-[11px] text-gray-400">
+									<label className="flex items-center gap-1">
+										幅(dot)
+										<input
+											type="number"
+											min={1}
+											max={512}
+											value={dotW}
+											onChange={(e) =>
+												setDotW(Math.max(1, Number(e.target.value) || 1))
+											}
+											className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+										/>
+									</label>
+									<span>×</span>
+									<label className="flex items-center gap-1">
+										高さ(dot)
+										<input
+											type="number"
+											min={1}
+											max={512}
+											value={dotH}
+											onChange={(e) =>
+												setDotH(Math.max(1, Number(e.target.value) || 1))
+											}
+											className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+										/>
+									</label>
+								</div>
+								<div className="flex items-center gap-1.5 text-[11px]">
+									{(
+										[
+											{ v: "none", label: "静止画のみ" },
+											{ v: "anim", label: "アニメ" },
+											{ v: "walk", label: "歩行グラ" },
+										] as const
+									).map((opt) => (
+										<button
+											key={opt.v}
+											type="button"
+											onClick={() => setDotMode(opt.v)}
+											className={`px-2 py-1 rounded-full font-bold transition-colors ${
+												dotMode === opt.v
+													? "bg-blue-600 text-white"
+													: "bg-gray-800 text-gray-400 hover:bg-gray-700"
+											}`}
+										>
+											{opt.label}
+										</button>
+									))}
+								</div>
+								{dotMode === "anim" && (
+									<div className="flex items-center gap-2 text-[11px] text-gray-400">
+										<label className="flex items-center gap-1">
+											コマ数
+											<input
+												type="number"
+												min={2}
+												max={200}
+												value={animFrames}
+												onChange={(e) =>
+													setAnimFrames(
+														Math.max(2, Number(e.target.value) || 2),
+													)
+												}
+												className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+											/>
+										</label>
+										<label className="flex items-center gap-1">
+											fps
+											<input
+												type="number"
+												min={1}
+												max={60}
+												value={animFps}
+												onChange={(e) =>
+													setAnimFps(Math.max(1, Number(e.target.value) || 1))
+												}
+												className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+											/>
+										</label>
+									</div>
+								)}
+								{dotMode === "walk" && (
+									<div className="flex items-center gap-2 text-[11px] text-gray-400">
+										<select
+											value={walkPresetLabel}
+											onChange={(e) => setWalkPresetLabel(e.target.value)}
+											className="bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+										>
+											{walkPresets.map((p) => (
+												<option key={p.label} value={p.label}>
+													{p.label}（{p.frames}コマ×{p.ways.length}方向）
+												</option>
+											))}
+										</select>
+										<label className="flex items-center gap-1">
+											fps
+											<input
+												type="number"
+												min={1}
+												max={60}
+												value={animFps}
+												onChange={(e) =>
+													setAnimFps(Math.max(1, Number(e.target.value) || 1))
+												}
+												className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+											/>
+										</label>
+									</div>
+								)}
+								<p className="text-[10px] text-gray-600">
+									横1列(歩行グラは方向×コマ)のスプライトシート画像を想定しています。
+									上のプレビューがずれて見える場合はコマ数/規格を見直してください。
+								</p>
+							</div>
+						)}
 					</div>
 				)}
 

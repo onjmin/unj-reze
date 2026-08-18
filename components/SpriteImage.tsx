@@ -23,9 +23,14 @@ import { walkPresetWays } from "@/lib/walk-cycle";
  * 一度画像を読み込んで naturalWidth/Height から逆算する。測定が終わるまでは
  * 1:1のプレースホルダー比率で待つ（一瞬だけ縦横比がズレる場合がある）。
  *
- * <img>と同じ「自然サイズを超えて拡大表示しない」挙動に合わせるため、コマ単体の
- * 実ピクセル幅を明示的な width として与える（className の max-w-full 等で狭い画面では
- * 縮む）。これをやらないと、div+background-imageには<img>のような内在サイズが無いため
+ * <img>と同じ「自然サイズを超えて拡大表示しない」挙動を基本にしつつ、ドット絵は
+ * 1ドット=1pxのネイティブ解像度で書き出す（DBに残す本体データはドット絵のドット数
+ * ＝dotW/dotHが正で、表示用に水増ししたビットマップをR2に置くと転送量/ストレージの
+ * 無駄になる）ため、コマ単体の実ピクセル幅を明示的な width として与えつつ、それが
+ * `MIN_DISPLAY_PX` より小さい場合は表示側でCSS拡大する（`image-rendering:pixelated`で
+ * にじませず、くっきりドット単位で拡大表示。豆粒のまま埋め込まれるのを防ぐ）。
+ * className の max-w-full 等で狭い画面では縮む。
+ * これをやらないと、div+background-imageには<img>のような内在サイズが無いため
  * width:auto がブロック要素として親幅いっぱいに広がり、小さいドット絵アニメが
  * 投稿カードの横幅まで間延びして表示されてしまう（静止画<img>は自然な小サイズのまま）。
  *
@@ -45,6 +50,13 @@ export interface SpriteImageProps {
 	animFps?: number;
 	/** 歩行グラのとき `lib/walk-cycle.ts` の WalkPreset.label（例:"RPGEN"）。方向転換UIに必要 */
 	walkPreset?: string | null;
+	/**
+	 * ドット絵投稿か（`post.dotW`/`dotH` の有無で分かる）。1枚絵(静止画・frames<=1)のときだけ
+	 * 効く: trueなら実サイズが `MIN_DISPLAY_PX` 未満のときCSSでピクセレート拡大する。
+	 * 何も指定しない通常の画像投稿（写真アップロード等）を誤って拡大しないためのガード。
+	 * アニメ/歩行グラは常にドット絵前提のため関係なく拡大される。
+	 */
+	dotArt?: boolean;
 	/** false でCSSアニメを止め、先頭コマだけの静止表示にする（小さいアイコン用途など） */
 	animate?: boolean;
 	/**
@@ -80,6 +92,14 @@ const WAY_ARROW_ALT: Record<string, string> = {
 	d: "右",
 };
 
+/**
+ * ドット絵は1ドット=1pxのまま書き出す方針（DB本体はドット数が正）なので、
+ * ネイティブ解像度が小さいコマは投稿フィードで豆粒になる。これを下回るときだけ
+ * この幅までCSSで拡大する（imageRendering:pixelatedでにじませずドット単位で拡大）。
+ * 実サイズがこれより大きい画像はそのまま＝拡大も縮小もしない。
+ */
+const MIN_DISPLAY_PX = 200;
+
 export default function SpriteImage({
 	src,
 	alt,
@@ -88,6 +108,7 @@ export default function SpriteImage({
 	animFrames,
 	animFps,
 	walkPreset,
+	dotArt = false,
 	animate = true,
 	fit = "natural",
 	draggable,
@@ -103,6 +124,7 @@ export default function SpriteImage({
 		null,
 	);
 	const [selectedWay, setSelectedWay] = useState<string | null>(null);
+	const [staticWidthPx, setStaticWidthPx] = useState<number | null>(null);
 
 	useEffect(() => {
 		if (frames <= 1 || !src) return;
@@ -121,13 +143,43 @@ export default function SpriteImage({
 		};
 	}, [src, frames, rows]);
 
+	// 静止画のドット絵: <img>の内在サイズはブラウザが自然に処理してくれるが、
+	// MIN_DISPLAY_PX未満かどうかの判定にはnaturalWidthの計測が要る。
+	useEffect(() => {
+		if (frames > 1 || !src || fit !== "natural" || !dotArt) return;
+		let cancelled = false;
+		const img = new Image();
+		img.onload = () => {
+			if (!cancelled && img.naturalWidth) setStaticWidthPx(img.naturalWidth);
+		};
+		img.src = src;
+		return () => {
+			cancelled = true;
+		};
+	}, [src, frames, fit, dotArt]);
+
 	if (frames <= 1 || !src) {
+		const enlarge =
+			dotArt &&
+			fit === "natural" &&
+			staticWidthPx !== null &&
+			staticWidthPx < MIN_DISPLAY_PX;
 		return (
 			<img
 				src={src}
 				alt={alt || ""}
 				className={className}
-				style={style}
+				style={
+					enlarge
+						? {
+								...style,
+								width: MIN_DISPLAY_PX,
+								maxWidth: "100%",
+								height: "auto",
+								imageRendering: "pixelated",
+							}
+						: style
+				}
 				draggable={draggable}
 				onClick={onClick}
 				onError={onError}
@@ -138,7 +190,10 @@ export default function SpriteImage({
 	const sizingStyle: CSSProperties = {
 		aspectRatio: cell?.ratio ?? 1,
 		...(fit === "natural" && cell
-			? { width: cell.widthPx, maxWidth: "100%" }
+			? {
+					width: Math.max(cell.widthPx, MIN_DISPLAY_PX),
+					maxWidth: "100%",
+				}
 			: {}),
 	};
 

@@ -1,11 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
+import type { DotMetaEdit } from "@/lib/db/interface";
 import { parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { tryHeart, tryVote } from "@/lib/vote-guard";
+import { isValidWalkPreset } from "@/lib/walk-cycle";
+
+/**
+ * ドット絵素材メタの後付け編集。投稿済みの任意の画像URLに dotW/dotH/animFrames/animFps/
+ * walkPreset を（再）設定でき、これを設定した画像はSpriteImageのアニメ/歩行グラ再生対象に
+ * なる＝一般の画像投稿を後からドット絵素材化する導線。キー省略＝既存値を保つ、
+ * 値がnull＝その列だけクリア、として渡ってくる。不正な値は 400 で弾く（黙って捨てない
+ * ＝ユーザーが明示的に設定しようとした値が消えたように見える事故を防ぐ）。
+ */
+function parseDotMeta(raw: unknown): DotMetaEdit | undefined | "invalid" {
+	if (raw === undefined) return undefined;
+	if (raw === null || typeof raw !== "object") return "invalid";
+	const r = raw as Record<string, unknown>;
+	const out: DotMetaEdit = {};
+
+	const posInt = (v: unknown, max: number): number | null | "invalid" => {
+		if (v === null) return null;
+		if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > max)
+			return "invalid";
+		return v;
+	};
+
+	if ("dotW" in r) {
+		const v = posInt(r.dotW, 512);
+		if (v === "invalid") return "invalid";
+		out.dotW = v;
+	}
+	if ("dotH" in r) {
+		const v = posInt(r.dotH, 512);
+		if (v === "invalid") return "invalid";
+		out.dotH = v;
+	}
+	if ("animFrames" in r) {
+		const v = posInt(r.animFrames, 200);
+		if (v === "invalid") return "invalid";
+		out.animFrames = v;
+	}
+	if ("animFps" in r) {
+		const v = posInt(r.animFps, 60);
+		if (v === "invalid") return "invalid";
+		out.animFps = v;
+	}
+	if ("walkPreset" in r) {
+		if (r.walkPreset === null) out.walkPreset = null;
+		else if (isValidWalkPreset(r.walkPreset)) out.walkPreset = r.walkPreset;
+		else return "invalid";
+	}
+	return out;
+}
 
 export async function GET(
 	_request: NextRequest,
@@ -137,8 +187,9 @@ export async function PATCH(
 		originType?: OriginType | null;
 		imageSrc?: string;
 		sessionId?: string;
+		dotMeta?: unknown;
 	};
-	const { content, originType, imageSrc, sessionId } = body;
+	const { content, originType, imageSrc, sessionId, dotMeta: rawDotMeta } = body;
 	// 所有者判定に使う身元は必ずセッションから取る。body の userId を信じると
 	// display_name / slug はどちらも公開情報なので、他人の投稿を編集できてしまう。
 	const user = await resolveSessionUser(request, sessionId);
@@ -147,6 +198,10 @@ export async function PATCH(
 	}
 	if (typeof content !== "string") {
 		return NextResponse.json({ error: "content is required" }, { status: 400 });
+	}
+	const dotMeta = parseDotMeta(rawDotMeta);
+	if (dotMeta === "invalid") {
+		return NextResponse.json({ error: "Invalid dotMeta" }, { status: 400 });
 	}
 	// 編集でMMLを差し替えたときは新しいURLが来る。未指定なら既存のMMLを触らない
 	const mmlRef = parseMmlRef(body);
@@ -160,6 +215,7 @@ export async function PATCH(
 		originType,
 		imageSrc,
 		mmlRef,
+		dotMeta,
 	);
 	if (!result) {
 		return NextResponse.json(

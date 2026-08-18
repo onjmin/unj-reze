@@ -69,6 +69,7 @@ import type {
 	CreateMvParams,
 	CreatePostParams,
 	DataStore,
+	DotMetaEdit,
 	MessageParams,
 	MmlRef,
 	RecordGamePlayParams,
@@ -910,6 +911,7 @@ export const pgStore: DataStore = {
 		originType?: OriginType | null,
 		imageSrc?: string,
 		mml?: MmlRef,
+		dotMeta?: DotMetaEdit,
 	) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
@@ -967,6 +969,16 @@ export const pgStore: DataStore = {
 			push("content_text", content);
 		}
 		if (originType !== undefined) push("origin_type", originType);
+		// ドット絵素材メタの後付け編集。キーが渡された列だけ更新する（省略キーは既存値を保つ、
+		// 値がnullならその列だけクリア）。これを設定した画像は SpriteImage のアニメ/歩行グラ
+		// 再生対象になる＝一般の画像投稿を後からドット絵素材化する唯一の導線。
+		if (dotMeta) {
+			if ("dotW" in dotMeta) push("dot_w", dotMeta.dotW ?? null);
+			if ("dotH" in dotMeta) push("dot_h", dotMeta.dotH ?? null);
+			if ("animFrames" in dotMeta) push("anim_frames", dotMeta.animFrames ?? null);
+			if ("animFps" in dotMeta) push("anim_fps", dotMeta.animFps ?? null);
+			if ("walkPreset" in dotMeta) push("walk_preset", dotMeta.walkPreset ?? null);
+		}
 		push("is_edited", true);
 
 		vals.push(rawId);

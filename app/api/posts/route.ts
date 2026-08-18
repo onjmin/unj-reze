@@ -13,13 +13,7 @@ import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import type { FingerprintSignals } from "@/lib/security/types";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
-import { presets as walkPresets } from "@/lib/walk-cycle";
-
-/** 未知のラベルを混入させない（クライアント由来の生文字列をそのままDBへ入れない） */
-function sanitizeWalkPreset(label: unknown): string | undefined {
-	if (typeof label !== "string") return undefined;
-	return walkPresets.some((p) => p.label === label) ? label : undefined;
-}
+import { sanitizeWalkPreset } from "@/lib/walk-cycle";
 
 export async function GET(request: NextRequest) {
 	try {

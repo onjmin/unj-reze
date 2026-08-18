@@ -103,6 +103,16 @@ export function walkPresetToStdId(
 	return PRESET_LABEL_TO_STD_ID[label];
 }
 
+/** 既知の規格ラベルか（サーバー側でクライアント由来の生文字列をそのまま保存しないための検証） */
+export function isValidWalkPreset(label: unknown): label is string {
+	return typeof label === "string" && presets.some((p) => p.label === label);
+}
+
+/** 未知のラベルを混入させない（クライアント由来の生文字列をそのままDBへ入れない） */
+export function sanitizeWalkPreset(label: unknown): string | undefined {
+	return isValidWalkPreset(label) ? label : undefined;
+}
+
 export function detectPreset(imgW: number, imgH: number): WalkPreset | null {
 	for (const p of presets) {
 		if (imgW === p.w * p.frames && imgH === p.h * p.ways.length) return p;

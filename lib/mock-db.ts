@@ -1344,6 +1344,14 @@ class MockDB {
 		content: string,
 		originType?: OriginType | null,
 		imageSrc?: string,
+		_mml?: unknown,
+		dotMeta?: {
+			dotW?: number | null;
+			dotH?: number | null;
+			animFrames?: number | null;
+			animFps?: number | null;
+			walkPreset?: string | null;
+		},
 	): Post | null {
 		const post = this.posts.find((p) => p.id === id);
 		if (!post || !this.ownsPost(post, userId)) return null;
@@ -1351,7 +1359,13 @@ class MockDB {
 		const hasOriginTypeChanged =
 			originType !== undefined &&
 			post.originType !== (originType == null ? undefined : originType);
-		if (hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined) {
+		const hasDotMetaChanged = !!dotMeta;
+		if (
+			hasContentChanged ||
+			hasOriginTypeChanged ||
+			imageSrc !== undefined ||
+			hasDotMetaChanged
+		) {
 			post.isEdited = true;
 		}
 		post.content = content;
@@ -1359,6 +1373,15 @@ class MockDB {
 		if (originType !== undefined)
 			post.originType = originType == null ? undefined : originType;
 		if (imageSrc !== undefined) post.imageSrc = imageSrc;
+		if (dotMeta) {
+			if ("dotW" in dotMeta) post.dotW = dotMeta.dotW ?? undefined;
+			if ("dotH" in dotMeta) post.dotH = dotMeta.dotH ?? undefined;
+			if ("animFrames" in dotMeta)
+				post.animFrames = dotMeta.animFrames ?? undefined;
+			if ("animFps" in dotMeta) post.animFps = dotMeta.animFps ?? undefined;
+			if ("walkPreset" in dotMeta)
+				post.walkPreset = dotMeta.walkPreset ?? undefined;
+		}
 		// 親スレッドの replies 配列内の同一投稿も更新
 		for (const thread of this.posts) {
 			const child = thread.replies?.find((r) => r.id === id);
@@ -1368,10 +1391,21 @@ class MockDB {
 				if (originType !== undefined)
 					child.originType = originType == null ? undefined : originType;
 				if (imageSrc !== undefined) child.imageSrc = imageSrc;
+				if (dotMeta) {
+					if ("dotW" in dotMeta) child.dotW = dotMeta.dotW ?? undefined;
+					if ("dotH" in dotMeta) child.dotH = dotMeta.dotH ?? undefined;
+					if ("animFrames" in dotMeta)
+						child.animFrames = dotMeta.animFrames ?? undefined;
+					if ("animFps" in dotMeta)
+						child.animFps = dotMeta.animFps ?? undefined;
+					if ("walkPreset" in dotMeta)
+						child.walkPreset = dotMeta.walkPreset ?? undefined;
+				}
 				if (
 					hasContentChanged ||
 					hasOriginTypeChanged ||
-					imageSrc !== undefined
+					imageSrc !== undefined ||
+					hasDotMetaChanged
 				) {
 					child.isEdited = true;
 				}

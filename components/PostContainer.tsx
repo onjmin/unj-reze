@@ -252,7 +252,17 @@ export default function PostContainer({
 	);
 
 	const handleSaveEdit = useCallback(
-		async (next: string, nextImageSrc?: string | null) => {
+		async (
+			next: string,
+			nextImageSrc?: string | null,
+			dotMeta?: {
+				dotW?: number | null;
+				dotH?: number | null;
+				animFrames?: number | null;
+				animFps?: number | null;
+				walkPreset?: string | null;
+			},
+		) => {
 			setShowEditModal(false);
 			if (!currentUserDisplayName) return;
 			try {
@@ -262,6 +272,7 @@ export default function PostContainer({
 					next,
 					post.originType,
 					nextImageSrc === null ? "" : nextImageSrc,
+					dotMeta,
 				);
 				// フィード全再取得（onModerationChange = fetchPosts）はMMLが空で再描画される原因になる。
 				// PATCHレスポンスで該当エントリだけを差し替える。
@@ -700,6 +711,7 @@ export default function PostContainer({
 								animFrames={post.animFrames}
 								animFps={post.animFps}
 								walkPreset={post.walkPreset}
+								dotArt={!!post.dotW}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
@@ -872,6 +884,7 @@ export default function PostContainer({
 											animFrames={quotedPost.animFrames}
 											animFps={quotedPost.animFps}
 											walkPreset={quotedPost.walkPreset}
+											dotArt={!!quotedPost.dotW}
 										/>
 									)}
 								</div>

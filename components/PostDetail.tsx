@@ -565,6 +565,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		content: string,
 		originType?: OriginType,
 		imageSrc?: string | null,
+		dotMeta?: {
+			dotW?: number | null;
+			dotH?: number | null;
+			animFrames?: number | null;
+			animFps?: number | null;
+			walkPreset?: string | null;
+		},
 	) => {
 		const prevReply = post.replies.find((r) => r.id === replyId);
 		setPost((p) => ({
@@ -591,6 +598,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				content,
 				originType,
 				imageSrc === null ? "" : imageSrc,
+				dotMeta,
 			);
 			setPost((p) => ({
 				...p,
@@ -602,6 +610,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								originType: updated.originType,
 								imageSrc: updated.imageSrc,
 								hasImage: updated.hasImage,
+								dotW: updated.dotW,
+								dotH: updated.dotH,
+								animFrames: updated.animFrames,
+								animFps: updated.animFps,
+								walkPreset: updated.walkPreset,
 								isEdited: true,
 							}
 						: r,
@@ -786,6 +799,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const handleSaveEdit = async (
 		newContent: string,
 		nextImageSrc?: string | null,
+		dotMeta?: {
+			dotW?: number | null;
+			dotH?: number | null;
+			animFrames?: number | null;
+			animFps?: number | null;
+			walkPreset?: string | null;
+		},
 	) => {
 		const prevPost = post;
 		setShowEditModal(false);
@@ -805,6 +825,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				newContent,
 				post.originType,
 				nextImageSrc === null ? "" : nextImageSrc,
+				dotMeta,
 			);
 			setPost(updated);
 			router.refresh();
@@ -1392,6 +1413,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								animFrames={post.animFrames}
 								animFps={post.animFps}
 								walkPreset={post.walkPreset}
+								dotArt={!!post.dotW}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
@@ -1842,6 +1864,13 @@ function ReplyTreeItem({
 		content: string,
 		originType?: OriginType,
 		imageSrc?: string | null,
+		dotMeta?: {
+			dotW?: number | null;
+			dotH?: number | null;
+			animFrames?: number | null;
+			animFps?: number | null;
+			walkPreset?: string | null;
+		},
 	) => Promise<void>;
 	onDelete: (replyId: string) => Promise<void>;
 	onAvatarClick: (
@@ -1959,9 +1988,22 @@ function ReplyTreeItem({
 	const handleSaveEdit = async (
 		newContent: string,
 		nextImageSrc?: string | null,
+		dotMeta?: {
+			dotW?: number | null;
+			dotH?: number | null;
+			animFrames?: number | null;
+			animFps?: number | null;
+			walkPreset?: string | null;
+		},
 	) => {
 		setShowEditModal(false);
-		await onEdit(localPost.id, newContent, localPost.originType, nextImageSrc);
+		await onEdit(
+			localPost.id,
+			newContent,
+			localPost.originType,
+			nextImageSrc,
+			dotMeta,
+		);
 	};
 
 	const handleSelectOriginType = async (ot: OriginType | undefined) => {
@@ -2290,6 +2332,7 @@ function ReplyTreeItem({
 								animFrames={localPost.animFrames}
 								animFps={localPost.animFps}
 								walkPreset={localPost.walkPreset}
+								dotArt={!!localPost.dotW}
 								onError={(e) => {
 									const target = e.currentTarget;
 									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;

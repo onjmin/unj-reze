@@ -7,6 +7,7 @@ import type {
 	CreateMvParams,
 	CreatePostParams,
 	DataStore,
+	DotMetaEdit,
 	MessageParams,
 	MmlRef,
 	RecordGamePlayParams,
@@ -72,8 +73,17 @@ export const mockStore: DataStore = {
 		originType?: OriginType | null,
 		imageSrc?: string,
 		mml?: MmlRef,
+		dotMeta?: DotMetaEdit,
 	) {
-		return mockDb.editPost(id, userId, content, originType, imageSrc);
+		return mockDb.editPost(
+			id,
+			userId,
+			content,
+			originType,
+			imageSrc,
+			mml,
+			dotMeta,
+		);
 	},
 
 	async deletePost(id: number, userId: string) {

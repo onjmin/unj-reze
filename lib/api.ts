@@ -208,6 +208,13 @@ const staticApi = {
 			content: string,
 			originType?: OriginType | null,
 			imageSrc?: string,
+			dotMeta?: {
+				dotW?: number | null;
+				dotH?: number | null;
+				animFrames?: number | null;
+				animFps?: number | null;
+				walkPreset?: string | null;
+			},
 		) => {
 			const post = mockDbInstance.editPost(
 				decodeIdOrThrow(id),
@@ -215,6 +222,8 @@ const staticApi = {
 				content,
 				originType,
 				imageSrc,
+				undefined,
+				dotMeta,
 			);
 			if (!post) throw new Error("Post not found or not owned");
 			return encodePost(post);
@@ -650,6 +659,13 @@ const liveApi = {
 			content: string,
 			originType?: OriginType | null,
 			imageSrc?: string,
+			dotMeta?: {
+				dotW?: number | null;
+				dotH?: number | null;
+				animFrames?: number | null;
+				animFps?: number | null;
+				walkPreset?: string | null;
+			},
 		) =>
 			fetcher<Post>(`/posts/${id}`, {
 				method: "PATCH",
@@ -657,6 +673,7 @@ const liveApi = {
 					userId,
 					originType,
 					imageSrc,
+					...(dotMeta ? { dotMeta } : {}),
 					...(await externalizeMml(content)),
 					sessionId: ensureSessionId(),
 				}),

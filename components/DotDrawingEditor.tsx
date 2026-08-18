@@ -2221,6 +2221,10 @@ export default function DotDrawingEditor({
 
 		// アニメモード: 複数フレームあれば横1列のスプライトシートとして書き出す
 		// （GIFではなく静止画スプライトシート＝投稿側の想定フォーマット）。
+		// scale=1(=1ドット=1px)の等倍で書き出す。表示サイズを大きく見せる処理は
+		// 表示側(SpriteImage.tsx)がdotW/dotHを見てCSSで拡大する役目で、ここでは
+		// 持たない（ビットマップ自体を拡大して書き出すとR2ストレージ/転送量を無駄に
+		// 消費する。dotW/dotH＝ドット数こそがDBに残すべき正の値）。
 		if (animMode && frameInstancesRef.current.length > 1) {
 			const frameCanvases = getAnimFramesForExport(1);
 			if (frameCanvases.length > 1) {
@@ -2251,7 +2255,15 @@ export default function DotDrawingEditor({
 			}
 		}
 
-		const canvas = oekaki.render();
+		// アニメ書き出しと同じ方針: 1ドット=1pxのネイティブ解像度で保存する
+		// （DB本体はドット数=gridW/gridHが正。表示用の拡大はSpriteImage側のCSSで行う）。
+		// oekaki.render() は作業キャンバス解像度(CANVAS_SIZE基準、数百px)を返すので
+		// gridW×gridHへ最近傍縮小してから保存する。
+		const rendered = oekaki.render();
+		const canvas =
+			rendered.width === gridW && rendered.height === gridH
+				? rendered
+				: resizeCanvas(rendered, gridW, gridH);
 		onSave(canvas.toDataURL("image/png"), gridW, gridH);
 	};
 

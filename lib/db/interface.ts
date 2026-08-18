@@ -114,6 +114,21 @@ export interface CreatePostParams extends MmlRef {
 	originType?: OriginType;
 }
 
+/**
+ * 投稿済みの画像を、後から「ドット絵素材」として（再）設定するための編集パラメータ。
+ * `editPost` にこれを渡したときだけ dot_w/dot_h/anim_frames/anim_fps/walk_preset を更新する
+ * （キー省略時は既存値を保つ。値を明示的に null にすればその列だけクリアできる）。
+ * これを設定した画像URLはドット絵素材扱いになり、SpriteImageのアニメ/歩行グラ再生対象になる
+ * ＝一般の画像投稿を後からアニメ/歩行グラ素材化する唯一の導線。
+ */
+export interface DotMetaEdit {
+	dotW?: number | null;
+	dotH?: number | null;
+	animFrames?: number | null;
+	animFps?: number | null;
+	walkPreset?: string | null;
+}
+
 export interface ReplyParams extends MmlRef {
 	displayName?: string;
 	/** セッションから解決済みのスラッグ。省略時は displayName から導出する。 */
@@ -190,6 +205,7 @@ export interface DataStore {
 		originType?: OriginType | null,
 		imageSrc?: string,
 		mml?: MmlRef,
+		dotMeta?: DotMetaEdit,
 	): Promise<DbPost | null>;
 	deletePost(id: number, userId: string): Promise<boolean>;
 	deleteMessage(id: number, userId: string): Promise<boolean>;
