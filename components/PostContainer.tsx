@@ -480,7 +480,7 @@ export default function PostContainer({
 				<div className="flex-1 min-w-0">
 					<div className="flex justify-between items-baseline mb-0.5">
 						<div className="flex items-baseline space-x-1.5 flex-wrap gap-y-1">
-							<span className="font-bold text-xs text-gray-200">
+							<span className="font-bold text-sm text-gray-200">
 								{avatarInfo.username}
 							</span>
 							{isSelf && (
@@ -506,7 +506,7 @@ export default function PostContainer({
 								</span>
 							)}
 							<span
-								className="text-gray-500 text-[10px] font-medium"
+								className="text-gray-500 text-xs font-medium"
 								title={
 									threadTime.isReplyUpdate
 										? `投稿日時: ${post.time} (最新返信: ${threadTime.time})`
@@ -640,7 +640,7 @@ export default function PostContainer({
 
 					<div
 						onClick={handlePostClick}
-						className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
+						className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
 					>
 						{(() => {
 							const displayText = stripAnkaPrefixForSnsDisplay(
@@ -796,7 +796,7 @@ export default function PostContainer({
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 											>
 												{mmlMarker}
 											</a>
@@ -835,7 +835,7 @@ export default function PostContainer({
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 									>
 										#コード進行
 									</a>

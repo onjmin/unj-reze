@@ -1296,7 +1296,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				</div>
 				<div className="flex-1 min-w-0">
 					<div className="flex items-baseline space-x-1.5 mb-0.5">
-						<span className="font-bold text-xs text-gray-200">
+						<span className="font-bold text-sm text-gray-200">
 							{getAvatarInfo(post.displayName).username}
 						</span>
 						{isSelf && (
@@ -1321,7 +1321,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								虚偽申告
 							</span>
 						)}
-						<span className="text-gray-500 text-[10px] font-medium">
+						<span className="text-gray-500 text-xs font-medium">
 							{post.time}
 							{post.isEdited && (
 								<span className="ml-1 text-[9px] text-gray-500/70">
@@ -1331,7 +1331,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						</span>
 					</div>
 
-					<div className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
+					<div className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
 							const displayText = stripAnkaPrefixForSnsDisplay(
 								getDisplayContent(post.content),
@@ -1481,7 +1481,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 											>
 												{mmlMarker}
 											</a>
@@ -1516,7 +1516,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 									>
 										#コード進行
 									</a>
@@ -2149,7 +2149,7 @@ function ReplyTreeItem({
 				<div className="flex-1 min-w-0">
 					<div className="flex justify-between items-baseline mb-0.5">
 						<div className="flex items-baseline space-x-1.5">
-							<span className="font-bold text-xs text-gray-200">
+							<span className="font-bold text-sm text-gray-200">
 								{avatarInfo.username}
 							</span>
 							{isSelf && (
@@ -2174,7 +2174,7 @@ function ReplyTreeItem({
 									虚偽申告
 								</span>
 							)}
-							<span className="text-gray-500 text-[10px] font-medium">
+							<span className="text-gray-500 text-xs font-medium">
 								{localPost.time}
 								{localPost.isEdited && (
 									<span className="ml-1 text-[9px] text-gray-500/70">
@@ -2274,7 +2274,7 @@ function ReplyTreeItem({
 						</div>
 					</div>
 
-					<p className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
+					<p className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
 							const displayText = stripAnkaPrefixForSnsDisplay(
 								getDisplayContent(localPost.content),
@@ -2407,7 +2407,7 @@ function ReplyTreeItem({
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 											>
 												{mmlMarker}
 											</a>
@@ -2429,7 +2429,7 @@ function ReplyTreeItem({
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 									>
 										#コード進行
 									</a>

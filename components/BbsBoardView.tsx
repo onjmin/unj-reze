@@ -318,7 +318,7 @@ export default function BbsBoardView({
 
 								{/* Content */}
 								<div className="flex-1 min-w-0">
-									<p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
+									<p className="text-[15px] text-gray-100 leading-snug line-clamp-2 break-words">
 										{post.content.split("\n")[0]}
 									</p>
 									<div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">

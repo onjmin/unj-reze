@@ -1199,17 +1199,16 @@ export const pgStore: DataStore = {
 	async getTrends() {
 		try {
 			const { rows } = await q(`
-        SELECT m[1] AS keyword, COUNT(*) AS count FROM (
+        SELECT '#' || m[1] AS keyword, COUNT(*) AS count FROM (
           SELECT regexp_replace(content_text, 'https?://[^\\s]+|www\\.[^\\s]+', '', 'gi') AS cleaned
           FROM (
             SELECT content_text FROM threads WHERE board_id = 1 AND deleted_at IS NULL
             UNION ALL
             SELECT content_text FROM res
           ) c
-        ) p, LATERAL regexp_matches(p.cleaned, '#[^\\s#]+', 'g') AS m
-        WHERE m[1] != '#'
-          AND m[1] !~ '^#\\d+$'
-          AND m[1] !~ '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$'
+        ) p, LATERAL regexp_matches(p.cleaned, '(?:^|\\s)#([^\\s#]+)', 'g') AS m
+        WHERE m[1] !~ '^\\d+$'
+          AND m[1] !~ '^([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$'
         GROUP BY m[1] ORDER BY count DESC LIMIT 10
       `);
 			return rows.map(

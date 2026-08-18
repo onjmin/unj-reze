@@ -470,7 +470,7 @@ export default function BbsThreadView({
 					return (
 						<div key={p.id} id={`res-${num}`} className="px-3 py-3">
 							{/* Header line */}
-							<div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5 mb-1.5 text-[10px]">
+							<div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5 mb-1.5 text-xs">
 								<span className="text-gray-500 font-bold tabular-nums w-5 text-right shrink-0">
 									{num}
 								</span>
@@ -522,7 +522,7 @@ export default function BbsThreadView({
 									&gt;&gt;{num} に返信中
 								</div>
 							)}
-							<div className="pl-6 text-[13px] text-gray-200 leading-relaxed whitespace-pre-wrap break-words">
+							<div className="pl-6 text-[15px] text-gray-200 leading-relaxed whitespace-pre-wrap break-words">
 								{parseContent(p.content, indexMap)}
 							</div>
 
@@ -548,7 +548,7 @@ export default function BbsThreadView({
 																`/hashtag/${encodeURIComponent(tagClean)}`,
 															);
 														}}
-														className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+														className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 													>
 														{mmlMarker}
 													</a>
@@ -575,7 +575,7 @@ export default function BbsThreadView({
 														`/hashtag/${encodeURIComponent("コード進行")}`,
 													);
 												}}
-												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
 											>
 												#コード進行
 											</a>

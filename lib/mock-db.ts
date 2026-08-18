@@ -1111,12 +1111,13 @@ class MockDB {
 			.concat(this.posts.flatMap((p) => p.replies.map((r) => r.content)));
 		for (const content of allContent) {
 			const cleaned = cleanContentForTrends(content);
-			const hashtags = cleaned.match(/#[^\s#]+/g);
-			if (hashtags) {
-				for (const tag of hashtags) {
-					if (isValidTrendKeyword(tag)) {
-						freq.set(tag, (freq.get(tag) || 0) + 1);
-					}
+			// 先頭が空白/行頭でない「#」は和音進行(例: C#m)のシャープ記号なのでハッシュタグ扱いしない
+			const hashtags = [...cleaned.matchAll(/(?:^|\s)#([^\s#]+)/g)].map(
+				(m) => `#${m[1]}`,
+			);
+			for (const tag of hashtags) {
+				if (isValidTrendKeyword(tag)) {
+					freq.set(tag, (freq.get(tag) || 0) + 1);
 				}
 			}
 		}
