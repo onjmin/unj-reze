@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
 import PostPageClient from "@/components/PostPageClient";
@@ -45,6 +46,17 @@ export async function generateMetadata({
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
 	const url = `${SITE_URL}/post/${id}`;
+
+	// Next.js はクライアント側遷移（router.push/prefetch）のRSCフェッチにも
+	// generateMetadata を毎回実行する。このリクエストには "RSC" ヘッダーが付くので、
+	// ここで判定してDBを叩かずに返す。一覧から来た人は既にキャッシュ/クライアント
+	// フェッチで正しい情報を持っている（PostPageClient側）ので、ソフトナビゲーション
+	// でのmetadataは使われない。実際にDBを叩く必要があるのは直リンク・リロード・
+	// クローラー（OGP展開bot等）による「フルページ読み込み」のときだけ。
+	const isSoftNavigation = (await headers()).has("rsc");
+	if (isSoftNavigation) {
+		return { alternates: { canonical: url } };
+	}
 
 	const post = await withTimeout(
 		getMetadataPost(decodedId).catch(() => null),

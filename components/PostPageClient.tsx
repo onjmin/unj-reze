@@ -6,7 +6,7 @@ import PostDetail from "@/components/PostDetail";
 import { api } from "@/lib/api";
 import { getDisplayContent } from "@/lib/mml";
 import { cachePost, readCachedPost } from "@/lib/post-cache";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import type { Post } from "@/lib/types";
 
 interface PostPageClientProps {
@@ -51,6 +51,18 @@ export default function PostPageClient({ id }: PostPageClientProps) {
 			cancelled = true;
 		};
 	}, [id]);
+
+	useEffect(() => {
+		if (!post) return;
+		// ソフトナビゲーション時は generateMetadata がDBを叩かない（page.tsx参照）ので
+		// <title> はここで直す。document.title だけの更新でメタタグ(OGP等)には
+		// 影響しないが、それらはクローラー＝フルページ読み込み時にサーバーで
+		// 正しく解決されるのでここでは気にしなくてよい。
+		document.title =
+			post.hasGame && post.gameTitle
+				? `${post.gameTitle} | ${SITE_NAME}`
+				: `${post.displayName}の投稿 | ${SITE_NAME}`;
+	}, [post]);
 
 	useEffect(() => {
 		if (!post) return;

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import GameLandingView from "@/components/GameLandingView";
 import { api } from "@/lib/api";
 import { cacheGame, readCachedGame } from "@/lib/game-cache";
-import { SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import type { GameRankingEntry } from "@/lib/types";
 import type { OriginType } from "@/lib/types";
 
@@ -54,6 +54,13 @@ export default function GamePageClient({ id }: GamePageClientProps) {
 			cancelled = true;
 		};
 	}, [id]);
+
+	useEffect(() => {
+		if (!game) return;
+		// ソフトナビゲーション時は generateMetadata がDBを叩かない（page.tsx参照）ので
+		// <title> はここで直す。
+		document.title = `${game.title || "ゲーム"} | ${SITE_NAME}`;
+	}, [game]);
 
 	useEffect(() => {
 		if (!game) return;

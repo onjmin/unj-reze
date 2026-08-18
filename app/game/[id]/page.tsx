@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
 import GamePageClient from "@/components/GamePageClient";
@@ -47,6 +48,13 @@ export async function generateMetadata({
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
 	const url = `${SITE_URL}/game/${id}`;
+
+	// post/[id] と同じ理由（下記コメント参照）でクライアント側遷移はDBを叩かない。
+	// 実際にDBが必要なのは直リンク・リロード・クローラーによるフルページ読み込みだけ。
+	const isSoftNavigation = (await headers()).has("rsc");
+	if (isSoftNavigation) {
+		return { alternates: { canonical: url } };
+	}
 
 	const game = await withTimeout(
 		getCachedGame(decodedId).catch(() => null),
