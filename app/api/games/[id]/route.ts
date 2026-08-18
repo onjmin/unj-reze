@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { parseBgRef, parseManifestRef } from "@/lib/manifest-ref";
-import { decodeId, encodeGame } from "@/lib/sqids";
+import { decodeId, encodeGame, encodeId } from "@/lib/sqids";
 
 export async function GET(
 	_req: NextRequest,
@@ -15,7 +15,15 @@ export async function GET(
 	}
 	const game = await db.getGame(decodedId);
 	if (!game) return NextResponse.json({ error: "not found" }, { status: 404 });
-	return NextResponse.json(encodeGame(game));
+	// ゲーム単独ページ（/game/[id]）が1回のフェッチで完結できるよう、
+	// 紐づく投稿ID・権利表記（改造可否の判定に使う）もここで一緒に返す。
+	const postId = await db.getPostIdByGameId(decodedId);
+	const post = postId ? await db.getPost(postId) : null;
+	return NextResponse.json({
+		...encodeGame(game),
+		postId: postId ? encodeId(postId) : undefined,
+		originType: post?.originType,
+	});
 }
 
 export async function PATCH(

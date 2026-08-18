@@ -3,6 +3,7 @@
 import { Loader2, MessageCircle, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { cacheGame } from "@/lib/game-cache";
 import type { GameRankingEntry } from "@/lib/types";
 
 const RANK_COLORS = ["text-yellow-300", "text-gray-300", "text-amber-600"];
@@ -66,6 +67,7 @@ export default function GameRankingView() {
 						<div className="min-w-0 flex-1">
 							<Link
 								href={`/game/${game.id}`}
+								onClick={() => cacheGame(game)}
 								className="block text-sm font-bold text-gray-100 truncate hover:text-blue-400 transition-colors"
 							>
 								{game.title || "無題"}
@@ -101,6 +103,7 @@ export default function GameRankingView() {
 							)}
 							<Link
 								href={`/game/${game.id}`}
+								onClick={() => cacheGame(game)}
 								className="px-2.5 py-1 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-400 text-[11px] font-bold hover:bg-blue-600/30 transition-colors"
 							>
 								あそぶ

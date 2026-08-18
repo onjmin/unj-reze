@@ -16,6 +16,7 @@ import {
 import {
 	AnonymousUser,
 	FollowUser,
+	GameRankingEntry,
 	MediaSearchPost,
 	Notification,
 	OriginType,
@@ -23,6 +24,10 @@ import {
 	OshiItemKind,
 	Post,
 } from "./types";
+
+/** GET /api/games/[id] のレスポンス形。/game/[id] を1回のフェッチで完結させるため
+ *  postId・originType（改造可否判定用）も一緒に返す。 */
+type GameDetail = GameRankingEntry & { originType?: OriginType };
 
 const BASE = "/api";
 const useStaticMockData =
@@ -509,6 +514,9 @@ const staticApi = {
 		) => {
 			return { success: true };
 		},
+		get: async (_id: string): Promise<GameDetail> => {
+			throw new Error("Not available in static export mode");
+		},
 	},
 };
 
@@ -962,6 +970,7 @@ const liveApi = {
 			id: string,
 			params: { title: string; manifest: GameManifestDraft },
 		) => updateGame(id, params),
+		get: (id: string) => fetcher<GameDetail>(`/games/${id}`),
 	},
 };
 

@@ -1,23 +1,34 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cache } from "react";
-import PostDetail from "@/components/PostDetail";
+import PostPageClient from "@/components/PostPageClient";
 import { db } from "@/lib/db";
 import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml";
 import { db as mockDb } from "@/lib/mock-db";
-import { attachEmbedInfo } from "@/lib/post-embeds";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 
 const DEFAULT_USER_ID = "名無しvFZ";
 
-// generateMetadata と page 本体で同じ投稿を二重フェッチしないよう、リクエスト単位でメモ化する
-const getCachedPost = cache(async (decodedId: number) => {
-	const post = await db.getPost(decodedId, DEFAULT_USER_ID);
-	if (!post) return null;
-	await attachEmbedInfo(post);
-	return post;
+// generateMetadata が固まる/落ちてもナビゲーション全体を巻き添えにしないための上限。
+// 通常は数十msで終わる想定なので、これを超えたら汎用metadataにフォールバックする。
+// （本文の描画自体はこの待ちに依存しない。下の PostPage 本体を参照）
+const METADATA_TIMEOUT_MS = 800;
+
+// generateMetadata専用の軽量フェッチ。OGP用のテキスト/画像URLしか使わないので
+// attachEmbedInfo（埋め込み解決）は呼ばない。同一リクエスト内でのみメモ化。
+const getMetadataPost = cache(async (decodedId: number) => {
+	return db.getPost(decodedId, DEFAULT_USER_ID);
 });
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+	return Promise.race([
+		promise,
+		new Promise<null>((resolve) => {
+			setTimeout(() => resolve(null), ms);
+		}),
+	]);
+}
 
 export function generateStaticParams() {
 	if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== "true") return [];
@@ -33,8 +44,20 @@ export async function generateMetadata({
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
-	const post = await getCachedPost(decodedId);
-	if (!post) return {};
+	const url = `${SITE_URL}/post/${id}`;
+
+	const post = await withTimeout(
+		getMetadataPost(decodedId).catch(() => null),
+		METADATA_TIMEOUT_MS,
+	);
+	if (!post) {
+		// DB未応答・タイムアウト・該当なし。ナビゲーションをこれ以上待たせず、
+		// 汎用metadataだけ返す（本文はクライアント側で別途取得される）。
+		return {
+			title: "投稿",
+			alternates: { canonical: url },
+		};
+	}
 
 	const title =
 		post.hasGame && post.gameTitle
@@ -50,7 +73,6 @@ export async function generateMetadata({
 		: post.hasImage
 			? post.imageSrc
 			: undefined;
-	const url = `${SITE_URL}/post/${id}`;
 
 	return {
 		title,
@@ -91,55 +113,9 @@ export default async function PostPage({
 			</div>
 		);
 	}
-	const post = await getCachedPost(decodedId);
-	if (!post) {
-		return (
-			<div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
-				<p className="text-gray-500 text-sm">投稿が見つかりません</p>
-				<Link href="/" className="text-blue-400 text-xs hover:underline">
-					戻る
-				</Link>
-			</div>
-		);
-	}
 
-	const encoded = encodePost(post);
-	const jsonLd = {
-		"@context": "https://schema.org",
-		"@type": "DiscussionForumPosting",
-		headline:
-			post.hasGame && post.gameTitle
-				? post.gameTitle
-				: `${post.displayName}の投稿`,
-		text: getDisplayContent(post.content),
-		url: `${SITE_URL}/post/${id}`,
-		datePublished: post.createdAt,
-		dateModified: post.createdAt,
-		author: { "@type": "Person", name: post.displayName },
-		...(post.hasImage && post.imageSrc ? { image: post.imageSrc } : {}),
-		interactionStatistic: [
-			{
-				"@type": "InteractionCounter",
-				interactionType: "https://schema.org/LikeAction",
-				userInteractionCount: post.likes,
-			},
-			{
-				"@type": "InteractionCounter",
-				interactionType: "https://schema.org/ReplyAction",
-				userInteractionCount: post.repliesCount,
-			},
-		],
-	};
-
-	return (
-		<div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
-			<script
-				type="application/ld+json"
-				dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-			/>
-			<div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
-				<PostDetail post={encoded} />
-			</div>
-		</div>
-	);
+	// ここでは投稿データを待たない。一覧から遷移していればキャッシュから即描画され、
+	// そうでなければ PostPageClient がクライアント側で取得する。
+	// これにより /post/[id] への遷移（RSCペイロード取得）自体がDBに依存しなくなる。
+	return <PostPageClient id={id} />;
 }

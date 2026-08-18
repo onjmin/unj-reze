@@ -1,13 +1,26 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cache } from "react";
-import GameLandingView from "@/components/GameLandingView";
+import GamePageClient from "@/components/GamePageClient";
 import { db } from "@/lib/db";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { decodeId, encodeId } from "@/lib/sqids";
 
 // generateMetadata と本体で同じゲームを二重フェッチしないようリクエスト単位でメモ化する
 const getCachedGame = cache(async (id: number) => db.getGame(id));
+
+// generateMetadataが固まる/落ちてもナビゲーション全体を巻き添えにしないための上限。
+// 本文の描画自体はこの待ちに依存しない（下の GamePage 本体を参照）。
+const METADATA_TIMEOUT_MS = 800;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+	return Promise.race([
+		promise,
+		new Promise<null>((resolve) => {
+			setTimeout(() => resolve(null), ms);
+		}),
+	]);
+}
 
 /** タイトル画面の背景がURLで保存されていればOGP画像に使う（内蔵アセット参照はサーバーで解決できない） */
 /**
@@ -33,8 +46,20 @@ export async function generateMetadata({
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
-	const game = await getCachedGame(decodedId);
-	if (!game) return {};
+	const url = `${SITE_URL}/game/${id}`;
+
+	const game = await withTimeout(
+		getCachedGame(decodedId).catch(() => null),
+		METADATA_TIMEOUT_MS,
+	);
+	if (!game) {
+		// DB未応答・タイムアウト・該当なし。ナビゲーションをこれ以上待たせず、
+		// 汎用metadataだけ返す（本文はクライアント側で別途取得される）。
+		return {
+			title: "ゲーム",
+			alternates: { canonical: url },
+		};
+	}
 
 	const title = game.title || "ゲーム";
 	const plays = game.plays ?? 0;
@@ -42,7 +67,6 @@ export async function generateMetadata({
 		plays > 0
 			? `${plays}回あそばれています。登録なしでそのまま遊べます。`
 			: "ブラウザでそのまま遊べます。登録は要りません。";
-	const url = `${SITE_URL}/game/${id}`;
 	const image = thumbnailOf(game.bgRef);
 
 	return {
@@ -74,12 +98,10 @@ export default async function GamePage({
 }) {
 	const { id } = await params;
 	const decodedId = decodeId(id);
-	const game = decodedId === null ? null : await getCachedGame(decodedId);
-
-	if (!game) {
+	if (decodedId === null) {
 		return (
 			<div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
-				<p className="text-gray-500 text-sm">ゲームが見つかりません</p>
+				<p className="text-gray-500 text-sm">不正なIDです</p>
 				<Link href="/" className="text-blue-400 text-xs hover:underline">
 					戻る
 				</Link>
@@ -87,42 +109,8 @@ export default async function GamePage({
 		);
 	}
 
-	const postId = await db.getPostIdByGameId(game.id);
-	// 改造の可否は紐づくポストの権利表記で決まるので、ここだけは投稿本体も引く
-	const post = postId ? await db.getPost(postId) : null;
-
-	const jsonLd = {
-		"@context": "https://schema.org",
-		"@type": "VideoGame",
-		name: game.title,
-		url: `${SITE_URL}/game/${id}`,
-		datePublished: game.createdAt,
-		gamePlatform: "Web browser",
-		applicationCategory: "Game",
-		...(game.creatorSlug
-			? { author: { "@type": "Person", name: game.creatorSlug } }
-			: {}),
-	};
-
-	return (
-		<div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
-			<script
-				type="application/ld+json"
-				dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-			/>
-			<GameLandingView
-				gameId={encodeId(game.id)}
-				title={game.title}
-				manifestUrl={game.manifestUrl}
-				preset={game.preset}
-				creatorSlug={game.creatorSlug}
-				plays={game.plays ?? 0}
-				clears={game.clears ?? 0}
-				bestScore={game.bestScore ?? 0}
-				bestScoreBy={game.bestScoreBy}
-				postId={postId ? encodeId(postId) : undefined}
-				originType={post?.originType}
-			/>
-		</div>
-	);
+	// ここではゲームデータを待たない。ランキング等から遷移していればキャッシュから
+	// 即描画され、そうでなければ GamePageClient がクライアント側で取得する。
+	// これにより /game/[id] への遷移（RSCペイロード取得）自体がDBに依存しなくなる。
+	return <GamePageClient id={id} />;
 }
