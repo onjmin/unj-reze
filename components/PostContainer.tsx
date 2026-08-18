@@ -33,6 +33,7 @@ import {
 	stripAnkaPrefixForSnsDisplay,
 } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
+import { playPostSfx } from "@/lib/post-sfx";
 import { cacheProfileSeed } from "@/lib/profile-cache";
 import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
@@ -397,11 +398,17 @@ export default function PostContainer({
 
 	const threadTime = getThreadDisplayTime(post);
 
-	if (optimisticallyDeleted) return null;
-
 	// temp-idは自分がこの場で投稿した楽観的挿入分にしか付かない（他人の投稿には現れない）。
-	// kusa.open2ch.net のタイムライン挿入時ポップインアニメを自分の投稿にだけ再現する。
+	// kusa.open2ch.net のタイムライン挿入時ポップインアニメ＋効果音を自分の投稿にだけ再現する。
 	const isFreshOwnPost = post.id.startsWith("temp-");
+
+	useEffect(() => {
+		if (isFreshOwnPost) playPostSfx();
+		// マウント時（＝この楽観的投稿カードが挿入された瞬間）にだけ一度鳴らす
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	if (optimisticallyDeleted) return null;
 
 	return (
 		<div
