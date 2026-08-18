@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+/* 投稿直後のレスに一瞬だけ付くポップイン演出（kusa.open2ch.net の新着レス挿入アニメ再現） */
+@keyframes kusa-pop-in {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.4;
+  }
+
+  60% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.kusa-pop-in {
+  animation: kusa-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transform-origin: center top;
+}
+
 @keyframes introCardInRight {
   from {
     opacity: 0;
