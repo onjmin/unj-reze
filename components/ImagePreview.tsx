@@ -14,6 +14,13 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 	const [offset, setOffset] = useState({ x: 0, y: 0 });
 	const [closing, setClosing] = useState(false);
 	const [dragging, setDragging] = useState(false);
+	// ドット絵など小さい原寸画像はブラウザのimgデフォルトだと原寸ピクセルのまま表示され
+	// 極小になるため、ビューポートに収まる最大サイズまで拡大表示する。
+	// ついでに小さい画像はドット絵とみなしpixelated表示にする。
+	const [naturalSize, setNaturalSize] = useState<{
+		w: number;
+		h: number;
+	} | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const imgRef = useRef<HTMLImageElement>(null);
 	const dragRef = useRef({ startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
@@ -228,13 +235,24 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 					ref={imgRef}
 					src={src}
 					alt={alt || ""}
-					className="max-w-full max-h-full object-contain select-none"
+					className="max-w-full max-h-full w-auto h-auto object-contain select-none"
 					style={{
+						// 原寸が小さい画像(ドット絵など)でも画面いっぱいまで引き伸ばす
+						width: naturalSize ? "90vw" : undefined,
+						height: naturalSize ? "90vh" : undefined,
+						imageRendering:
+							naturalSize && naturalSize.w <= 256 && naturalSize.h <= 256
+								? "pixelated"
+								: undefined,
 						transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
 						opacity: closing ? 0 : 1,
 						transition: dragging
 							? "opacity 250ms ease-out"
 							: "transform 0.15s ease-out, opacity 250ms ease-out",
+					}}
+					onLoad={(e) => {
+						const img = e.currentTarget;
+						setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
 					}}
 					draggable={false}
 					onClick={(e) => e.stopPropagation()}

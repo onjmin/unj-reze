@@ -176,15 +176,6 @@ export default function BbsThreadView({
 	} | null>(null);
 	const heartQueue = useRef(0);
 	const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	/** 投稿直後のレスにだけ一瞬 kusa-pop-in を付けるためのハイライト対象ID。
-	 *  temp-id→本採番idへ差し替わってもハイライトは引き継ぐ（handleAddReply参照）。 */
-	const [highlightId, setHighlightId] = useState<string | null>(null);
-	const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const flashHighlight = useCallback((id: string) => {
-		setHighlightId(id);
-		if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
-		highlightTimerRef.current = setTimeout(() => setHighlightId(null), 1500);
-	}, []);
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
 		alt?: string;
@@ -259,7 +250,6 @@ export default function BbsThreadView({
 			replies: [...p.replies, optimisticReply],
 			repliesCount: p.repliesCount + 1,
 		}));
-		flashHighlight(tempId);
 		const capturedImage = replyImage;
 		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
@@ -326,7 +316,6 @@ export default function BbsThreadView({
 				...p,
 				replies: p.replies.map((r) => (r.id === tempId ? reply : r)),
 			}));
-			setHighlightId((h) => (h === tempId ? reply.id : h));
 			showToast("success", "送信完了！", { id: toastId });
 		} catch {
 			setPost((p) => ({
@@ -478,17 +467,8 @@ export default function BbsThreadView({
 			<div className="divide-y divide-gray-800/40">
 				{allPosts.map((p, idx) => {
 					const num = idx + 1;
-					const isHighlighted = p.id === highlightId;
 					return (
-						<div
-							key={p.id}
-							id={`res-${num}`}
-							className={`px-3 py-3 relative transition-shadow duration-700 ${
-								isHighlighted
-									? "rounded-lg ring-2 ring-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.6)] kusa-pop-in"
-									: ""
-							}`}
-						>
+						<div key={p.id} id={`res-${num}`} className="px-3 py-3">
 							{/* Header line */}
 							<div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5 mb-1.5 text-xs">
 								<span className="text-gray-500 font-bold tabular-nums w-5 text-right shrink-0">

@@ -399,9 +399,13 @@ export default function PostContainer({
 
 	if (optimisticallyDeleted) return null;
 
+	// temp-idは自分がこの場で投稿した楽観的挿入分にしか付かない（他人の投稿には現れない）。
+	// kusa.open2ch.net のタイムライン挿入時ポップインアニメを自分の投稿にだけ再現する。
+	const isFreshOwnPost = post.id.startsWith("temp-");
+
 	return (
 		<div
-			className={`flex relative transition-all ${isRankingMode ? "bg-gradient-to-r from-gray-900/10 via-transparent to-transparent" : ""}`}
+			className={`flex relative transition-all duration-700 ${isRankingMode ? "bg-gradient-to-r from-gray-900/10 via-transparent to-transparent" : ""} ${isFreshOwnPost ? "rounded-lg ring-2 ring-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.6)] kusa-pop-in" : ""}`}
 			onMouseEnter={prefetchPost}
 			onTouchStart={prefetchPost}
 		>
