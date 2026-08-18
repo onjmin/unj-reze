@@ -7922,13 +7922,13 @@ export default function MvMaker({
 							onChange={handleImport}
 						/>
 						{settingsOpen && (
-							<div className="absolute right-0 top-full z-[100] mt-1 w-52 space-y-1 border border-gray-700 bg-[#1a1a2e] p-2 shadow-2xl">
+							<div className="absolute right-0 top-full z-[100] mt-1 w-52 space-y-1 rounded-lg border border-gray-700 bg-[#1a1a2e] p-2 shadow-2xl">
 								<button
 									onClick={() => {
 										setShowHistory(true);
 										setSettingsOpen(false);
 									}}
-									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white rounded"
 								>
 									<History size={13} />
 									履歴・スナップショット
@@ -7939,7 +7939,7 @@ export default function MvMaker({
 										handleExport();
 										setSettingsOpen(false);
 									}}
-									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white rounded"
 								>
 									<Download size={13} />
 									データをエクスポート (.json)
@@ -7949,7 +7949,7 @@ export default function MvMaker({
 										handleExportMp4();
 										setSettingsOpen(false);
 									}}
-									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white rounded"
 								>
 									<Film size={13} />
 									MP4動画としてエクスポート (.mp4)
@@ -7959,7 +7959,7 @@ export default function MvMaker({
 										importFileRef.current?.click();
 										setSettingsOpen(false);
 									}}
-									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white rounded"
 								>
 									<Upload size={13} />
 									データをインポート (.json)
@@ -7970,10 +7970,10 @@ export default function MvMaker({
 										setSwitchOpen(true);
 										setSettingsOpen(false);
 									}}
-									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+									className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white rounded"
 								>
 									<Clapperboard size={13} />
-									MVを切り替え・まっさらをする
+									MVを切り替え・まっさらにする
 								</button>
 							</div>
 						)}

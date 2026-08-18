@@ -13857,7 +13857,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </button>
               <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
               {settingsOpen && (
-                <div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
+                <div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
                   {/* 無敵モード */}
                   <button
                     onClick={() => setDebugInvincible(v => !v)}
@@ -13944,29 +13944,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       >
                         <Gamepad2 size={13} />ゲーム切り替え・まっさらにする
                       </button>
-                    </>
-                  )}
-                  {/* SMC素材クレジット（マリオプリセット使用時） */}
-                  {gameData.id === 'mario' && (
-                    <>
-                      <div className="border-t border-gray-700 my-1" />
-                      <div className="px-3 py-2 text-[10px] text-gray-500 leading-relaxed">
-                        <div className="font-bold text-gray-400 mb-1 flex items-center gap-1"><Palette size={11} />素材クレジット</div>
-                        <div>キャラクタースプライト:</div>
-                        <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
-                        <div className="mt-1">
-                          <a
-                            href="https://github.com/Level-Share-Square/SMC-released-sprites"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-400 underline"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            SMC-released-sprites
-                          </a>
-                          {' '}(非商用)
-                        </div>
-                      </div>
                     </>
                   )}
                 </div>
@@ -18228,6 +18205,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       )}
                     </div>
+                    {gameData.id === 'mario' && (
+                      <div className="text-[10px] text-gray-500 leading-relaxed bg-gray-900/60 border border-gray-800 rounded-lg px-3 py-2">
+                        <div className="font-bold text-gray-400 mb-1 flex items-center gap-1"><Palette size={11} />キャラクタースプライトの素材クレジット</div>
+                        <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
+                        <div className="mt-1">
+                          <a
+                            href="https://github.com/Level-Share-Square/SMC-released-sprites"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 underline"
+                          >
+                            SMC-released-sprites
+                          </a>
+                          {' '}(非商用)
+                        </div>
+                      </div>
+                    )}
                     {gameData.engine === 'yume25d' && (
                       <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">

@@ -1840,6 +1840,18 @@ export default function DrawingEditor({
 						</button>
 						{settingsOpen && (
 							<div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#161622] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
+								{/* 履歴 */}
+								<button
+									onClick={() => {
+										setShowHistory(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<History size={13} />
+									<span>履歴・スナップショット</span>
+								</button>
+								<div className="border-t border-gray-800 my-1" />
 								{/* 出力・ダウンロード */}
 								<button
 									onClick={() => {
@@ -1855,7 +1867,6 @@ export default function DrawingEditor({
 											: "画像の出力"}
 									</span>
 								</button>
-								<div className="border-t border-gray-800 my-1" />
 								{/* 読込 */}
 								<button
 									onClick={() => {
@@ -1866,17 +1877,6 @@ export default function DrawingEditor({
 								>
 									<Upload size={13} />
 									<span>画像の読込 (インポート)</span>
-								</button>
-								{/* 履歴 */}
-								<button
-									onClick={() => {
-										setShowHistory(true);
-										setSettingsOpen(false);
-									}}
-									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
-								>
-									<History size={13} />
-									<span>履歴・スナップショット</span>
 								</button>
 							</div>
 						)}

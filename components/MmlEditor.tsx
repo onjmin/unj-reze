@@ -1,7 +1,15 @@
 "use client";
 
 import type { DawMode, ModeSwitchInstance } from "@onjmin/dtm";
-import { History, Loader2, Music, X } from "lucide-react";
+import {
+	Download,
+	History,
+	Loader2,
+	Music,
+	Settings,
+	Upload,
+	X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import HistoryModal from "@/components/HistoryModal";
 import VolumeControl from "@/components/VolumeControl";
@@ -69,6 +77,20 @@ export default function MmlEditor({
 	const [hasAutosave, setHasAutosave] = useState(false);
 	const [autosaveData, setAutosaveData] = useState<string | null>(null);
 	const storageKey = getStorageKey("mml");
+
+	// 設定メニュー（歯車）：履歴・スナップショット／エクスポート・インポート
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsRef = useRef<HTMLDivElement>(null);
+	const importFileRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		if (!settingsOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (settingsRef.current && !settingsRef.current.contains(e.target as Node))
+				setSettingsOpen(false);
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [settingsOpen]);
 
 	// サイトのマスター音量と、MML自身が持つマスター音量（#volume=）は別物として扱い、
 	// DAWへ渡す値は「MML側 × サイト側」の掛け算にする。
@@ -254,6 +276,46 @@ export default function MmlEditor({
 		}
 	};
 
+	const handleExport = () => {
+		const daw = modeSwitchRef.current?.getDaw();
+		if (!daw) return;
+		let mml: string | null = null;
+		try {
+			mml = daw.getMML()?.minified?.trim() || null;
+		} catch (e) {
+			mml = null;
+		}
+		if (!mml) return;
+		const savedMml = withMmlVolume(mml, syncAuthoredVolume());
+		const blob = new Blob([savedMml], { type: "text/plain" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = "mml.mml";
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = (ev) => {
+			const text = (ev.target?.result as string)?.trim();
+			if (!text) return;
+			const daw = modeSwitchRef.current?.getDaw();
+			if (!daw) return;
+			try {
+				daw.loadMML(text);
+			} catch (err) {
+				console.error("Failed to load imported MML", err);
+				alert("MMLの読み込みに失敗しました。ファイルの内容をご確認ください。");
+			}
+		};
+		reader.readAsText(file);
+		e.target.value = "";
+	};
+
 	const getCurrentMml = () => {
 		const daw = modeSwitchRef.current?.getDaw();
 		if (!daw) return null;
@@ -297,13 +359,63 @@ export default function MmlEditor({
 					<VolumeControl />
 				</div>
 
-				<button
-					onClick={() => setShowHistory(true)}
-					disabled={loading || !!error}
-					className="mr-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold py-1.5 px-3 rounded-lg text-[11px] disabled:opacity-50 flex items-center space-x-1 transition-colors"
-				>
-					<History size={13} /> <span>履歴</span>
-				</button>
+				{/* 設定ボタン & ドロップダウン */}
+				<div className="relative mr-2" ref={settingsRef}>
+					<button
+						onClick={() => setSettingsOpen((v) => !v)}
+						disabled={loading || !!error}
+						className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
+							settingsOpen
+								? "bg-gray-700 text-white"
+								: "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
+						}`}
+						title="設定"
+					>
+						<Settings size={14} />
+					</button>
+					<input
+						ref={importFileRef}
+						type="file"
+						accept=".mml,.txt"
+						className="hidden"
+						onChange={handleImport}
+					/>
+					{settingsOpen && (
+						<div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#161622] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
+							<button
+								onClick={() => {
+									setShowHistory(true);
+									setSettingsOpen(false);
+								}}
+								className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+							>
+								<History size={13} />
+								<span>履歴・スナップショット</span>
+							</button>
+							<div className="border-t border-gray-800 my-1" />
+							<button
+								onClick={() => {
+									handleExport();
+									setSettingsOpen(false);
+								}}
+								className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+							>
+								<Download size={13} />
+								<span>データをエクスポート (.mml)</span>
+							</button>
+							<button
+								onClick={() => {
+									importFileRef.current?.click();
+									setSettingsOpen(false);
+								}}
+								className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+							>
+								<Upload size={13} />
+								<span>データをインポート (.mml)</span>
+							</button>
+						</div>
+					)}
+				</div>
 
 				<button
 					onClick={handleSave}
