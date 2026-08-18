@@ -1,5 +1,5 @@
 "use client";
-import { Pencil, X } from "lucide-react";
+import { Gamepad2, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { loadGame } from "@/lib/game-mv-client";
@@ -7,6 +7,7 @@ import { startRemix } from "@/lib/remix";
 import { gameShareUrl } from "@/lib/share";
 import { buildGameShareText } from "@/lib/share-text";
 import { isCollabAllowed, type OriginType } from "@/lib/types";
+import EmbedCollabBar from "./EmbedCollabBar";
 import { GameManifestDraft } from "./GameMaker";
 import ShareButton from "./ShareButton";
 
@@ -125,15 +126,15 @@ export default function GamePreview({
 
 	return (
 		<div className={`${wrapClass} bg-[#07080b] flex flex-col`}>
-			<div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
-				<span className="text-xs font-bold text-white truncate">
-					{title || "ゲーム"}
-				</span>
-				<div className="flex items-center gap-1 shrink-0 text-gray-400">
-					{/* MvBox と同じく、遊んでいる最中はいつでも改造（コラボ）に入れるようにする */}
-					{remixAllowed && (
-						<button
-							onClick={() =>
+			{/* MvBox/画像/MML と同じヘッダーバー型に統一（components/EmbedCollabBar.tsx参照） */}
+			<EmbedCollabBar
+				icon={Gamepad2}
+				label={title || "ゲーム"}
+				buttonLabel="改造する"
+				colorClass="bg-red-600/80 hover:bg-red-500/90"
+				onClick={
+					remixAllowed
+						? () =>
 								startRemix({
 									manifest,
 									title: `${title || "ゲーム"}（改造）`,
@@ -141,26 +142,25 @@ export default function GamePreview({
 									sourceGameId: gameId,
 									sourceTitle: title,
 								})
-							}
-							className="flex items-center gap-1 rounded-full bg-red-600/80 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-red-500/90"
+						: undefined
+				}
+				extra={
+					<>
+						<ShareButton
+							url={gameShareUrl(gameId)}
+							text={buildGameShareText(title)}
+							size={14}
+							className="p-1.5 rounded hover:bg-gray-100/10"
+						/>
+						<button
+							onClick={onClose}
+							className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors"
 						>
-							<Pencil size={10} /> 改造する
+							<X size={16} />
 						</button>
-					)}
-					<ShareButton
-						url={gameShareUrl(gameId)}
-						text={buildGameShareText(title)}
-						size={14}
-						className="p-1.5 rounded hover:bg-gray-100/10"
-					/>
-					<button
-						onClick={onClose}
-						className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors"
-					>
-						<X size={16} />
-					</button>
-				</div>
-			</div>
+					</>
+				}
+			/>
 			<div className="flex-1 overflow-hidden">
 				<GameMaker
 					onClose={onClose}

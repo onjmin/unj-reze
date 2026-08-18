@@ -1,5 +1,5 @@
 "use client";
-import { Clapperboard, Loader2, Pencil } from "lucide-react";
+import { Clapperboard, Loader2 } from "lucide-react";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadMv } from "@/lib/game-mv-client";
@@ -12,6 +12,7 @@ import {
 } from "@/lib/mv-config";
 import { startMvRemix } from "@/lib/remix";
 import { isCollabAllowed, type OriginType } from "@/lib/types";
+import EmbedCollabBar from "./EmbedCollabBar";
 import MvPlayer from "./MvPlayer";
 
 const THUMBNAIL_HEIGHT = 120;
@@ -190,15 +191,16 @@ export default function MvBox({
 						transition: "opacity 200ms",
 					}}
 				>
-					{/* ヘッダーバー（動画の外側上部） */}
-					<div className="flex h-9 shrink-0 items-center justify-between border-b border-gray-800/80 bg-gray-950/90 px-3">
-						<span className="text-xs font-bold text-gray-200 truncate">
-							{mvTitle || "MV"}
-						</span>
-						<div className="flex items-center gap-1.5 shrink-0">
-							{manifest && isCollabAllowed(originType) && (
-								<button
-									onClick={() =>
+					{/* ヘッダーバー（動画の外側上部）。ゲーム/画像/MML と同じヘッダーバー型
+					    （components/EmbedCollabBar.tsx参照） */}
+					<EmbedCollabBar
+						icon={Clapperboard}
+						label={mvTitle || "MV"}
+						buttonLabel="改造する"
+						colorClass="bg-cyan-600/90 hover:bg-cyan-500"
+						onClick={
+							manifest && isCollabAllowed(originType)
+								? () =>
 										startMvRemix({
 											manifest,
 											title: `${mvTitle}（改造）`,
@@ -206,20 +208,17 @@ export default function MvBox({
 											sourceMvId: mvId,
 											sourceTitle: mvTitle,
 										})
-									}
-									className="flex items-center gap-1 rounded-full bg-cyan-600/90 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-cyan-500"
-								>
-									<Pencil size={10} /> 改造する
-								</button>
-							)}
+								: undefined
+						}
+						extra={
 							<button
 								onClick={handleClose}
 								className="rounded-full bg-gray-800 px-2.5 py-1 text-[10px] font-bold text-gray-200 transition-colors hover:bg-gray-700"
 							>
 								閉じる
 							</button>
-						</div>
-					</div>
+						}
+					/>
 
 					{manifest ? (
 						<MvPlayer manifest={manifest} autoPlay tapToToggle className="rounded-none" />

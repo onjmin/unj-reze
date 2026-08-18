@@ -19,7 +19,8 @@ import { walkPresetWays } from "@/lib/walk-cycle";
  * ＝拡大表示でも縮小表示でもアニメは常に動く。`animate={false}`を明示的に渡した
  * ときだけ止まる（多数並ぶ極小アイコン等、呼び出し側が意図して止めたい場合用）。
  *
- * `fit="natural"`では右上に切替ボタン(▦/▶)も出す。既定はクロップして再生する
+ * `fit="natural"`では左上に切替ボタン(▦/▶)も出す（右下は投稿の「コラボ」ボタンと
+ * 被るため避けている）。既定はクロップして再生する
  * "play"、押すと元のスプライトシート画像をそのまま(全コマ並び)静止表示する"sheet"に
  * 切り替わる。
  *
@@ -308,7 +309,7 @@ export default function SpriteImage({
 						e.stopPropagation();
 						setViewMode((v) => (v === "sheet" ? "play" : "sheet"));
 					}}
-					className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold bg-black/60 text-gray-300 hover:bg-black/80 transition-colors"
+					className="absolute top-1 left-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold bg-black/60 text-gray-300 hover:bg-black/80 transition-colors z-10"
 				>
 					{isSheet ? "▶" : "▦"}
 				</button>

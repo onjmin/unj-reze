@@ -4,12 +4,13 @@ import {
 	ArrowLeft,
 	Ban,
 	Copy,
-	Edit3,
 	Flag,
 	Heart,
+	Image as ImageIcon,
 	Mail,
 	MessageCircle,
 	MoreHorizontal,
+	Music,
 	Pencil,
 	Repeat,
 	ThumbsDown,
@@ -53,6 +54,7 @@ import {
 import { fetchText } from "@/lib/uploader";
 import BbsThreadView from "./BbsThreadView";
 import ChordPlayer from "./ChordPlayer";
+import EmbedCollabBar from "./EmbedCollabBar";
 import EmbedPart from "./EmbedPart";
 import GameBox from "./GameBox";
 import type { GameManifestDraft } from "./GameMaker";
@@ -1396,41 +1398,43 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					})()}
 
 					{post.hasImage && (
-						<div
-							onClick={() => {
-								if (post.imageSrc)
-									setPreviewImage({
-										src: post.imageSrc,
-										alt: post.imageAlt || "ユーザーアート",
-									});
-							}}
-							className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
-						>
-							<SpriteImage
-								src={post.imageSrc}
-								alt={post.imageAlt || "ユーザーアート"}
-								className="max-w-full h-auto max-h-[220px] block mx-auto"
-								animFrames={post.animFrames}
-								animFps={post.animFps}
-								walkPreset={post.walkPreset}
-								dotArt={!!post.dotW}
-								onError={(e) => {
-									const target = e.currentTarget;
-									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
-								}}
-							/>
+						<div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
 							{post.hasCollabButton && isCollabAllowed(post.originType) && (
-								<button
+								<EmbedCollabBar
+									icon={ImageIcon}
+									label={post.dotW ? "ドット絵" : "画像"}
+									buttonLabel="コラボ"
+									colorClass="bg-lime-600/80 hover:bg-lime-500/90"
 									onClick={(e) => {
 										e.stopPropagation();
 										handleOpenCollab(post);
 									}}
-									className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-								>
-									<Edit3 size={11} />
-									<span>コラボ</span>
-								</button>
+								/>
 							)}
+							<div
+								onClick={() => {
+									if (post.imageSrc)
+										setPreviewImage({
+											src: post.imageSrc,
+											alt: post.imageAlt || "ユーザーアート",
+										});
+								}}
+								className="cursor-pointer gimp-checkered-background-white"
+							>
+								<SpriteImage
+									src={post.imageSrc}
+									alt={post.imageAlt || "ユーザーアート"}
+									className="max-w-full h-auto max-h-[220px] block mx-auto"
+									animFrames={post.animFrames}
+									animFps={post.animFps}
+									walkPreset={post.walkPreset}
+									dotArt={!!post.dotW}
+									onError={(e) => {
+										const target = e.currentTarget;
+										target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
+									}}
+								/>
+							</div>
 						</div>
 					)}
 
@@ -1464,7 +1468,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					{(() => {
 						if (hasMmlContent) {
 							return (
-								<div className="relative">
+								<div>
 									{(() => {
 										const mmlMarker = findMmlMarker(post.content) ?? "#mml";
 										const tagClean = mmlMarker.replace(/^#/, "");
@@ -1483,18 +1487,21 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 											</a>
 										);
 									})()}
-									<MmlSource post={post}>
-										{(mml) => <MmlPlayer mml={mml} />}
-									</MmlSource>
-									{post.hasCollabButton && isCollabAllowed(post.originType) && (
-										<button
-											onClick={() => handleOpenCollab(post)}
-											className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-pink-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all z-10"
-										>
-											<Pencil size={11} />
-											<span>コラボ</span>
-										</button>
-									)}
+									<div className="rounded-xl overflow-hidden border border-gray-800 bg-[#1a1b26]">
+										{post.hasCollabButton &&
+											isCollabAllowed(post.originType) && (
+												<EmbedCollabBar
+													icon={Music}
+													label="MML"
+													buttonLabel="コラボ"
+													colorClass="bg-pink-600/80 hover:bg-pink-500/90"
+													onClick={() => handleOpenCollab(post)}
+												/>
+											)}
+										<MmlSource post={post}>
+											{(mml) => <MmlPlayer mml={mml} />}
+										</MmlSource>
+									</div>
 								</div>
 							);
 						}
@@ -2315,42 +2322,44 @@ function ReplyTreeItem({
 					</p>
 
 					{localPost.hasImage && (
-						<div
-							onClick={() => {
-								if (localPost.imageSrc)
-									onPreviewImage?.(
-										localPost.imageSrc,
-										localPost.imageAlt || "ユーザーアート",
-									);
-							}}
-							className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
-						>
-							<SpriteImage
-								src={localPost.imageSrc}
-								alt={localPost.imageAlt || "ユーザーアート"}
-								className="max-w-full h-auto max-h-[220px] block mx-auto"
-								animFrames={localPost.animFrames}
-								animFps={localPost.animFps}
-								walkPreset={localPost.walkPreset}
-								dotArt={!!localPost.dotW}
-								onError={(e) => {
-									const target = e.currentTarget;
-									target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
-								}}
-							/>
+						<div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
 							{localPost.hasCollabButton &&
 								isCollabAllowed(localPost.originType) && (
-									<button
+									<EmbedCollabBar
+										icon={ImageIcon}
+										label={localPost.dotW ? "ドット絵" : "画像"}
+										buttonLabel="コラボ"
+										colorClass="bg-lime-600/80 hover:bg-lime-500/90"
 										onClick={(e) => {
 											e.stopPropagation();
 											onOpenCollab?.(localPost);
 										}}
-										className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-									>
-										<Edit3 size={11} />
-										<span>コラボ</span>
-									</button>
+									/>
 								)}
+							<div
+								onClick={() => {
+									if (localPost.imageSrc)
+										onPreviewImage?.(
+											localPost.imageSrc,
+											localPost.imageAlt || "ユーザーアート",
+										);
+								}}
+								className="cursor-pointer gimp-checkered-background-white"
+							>
+								<SpriteImage
+									src={localPost.imageSrc}
+									alt={localPost.imageAlt || "ユーザーアート"}
+									className="max-w-full h-auto max-h-[220px] block mx-auto"
+									animFrames={localPost.animFrames}
+									animFps={localPost.animFps}
+									walkPreset={localPost.walkPreset}
+									dotArt={!!localPost.dotW}
+									onError={(e) => {
+										const target = e.currentTarget;
+										target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
+									}}
+								/>
+							</div>
 						</div>
 					)}
 

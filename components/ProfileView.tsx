@@ -4,7 +4,6 @@ import {
 	Ban,
 	Clapperboard,
 	Copy,
-	Edit3,
 	FileText,
 	Flag,
 	Heart,
@@ -57,6 +56,7 @@ import {
 import ChordPlayer from "./ChordPlayer";
 import DeletePostModal from "./DeletePostModal";
 import EditPostModal from "./EditPostModal";
+import EmbedCollabBar from "./EmbedCollabBar";
 import EmbedPart from "./EmbedPart";
 import FollowListSheet, { type FollowListTab } from "./FollowListSheet";
 import ImagePreview from "./ImagePreview";
@@ -1489,43 +1489,45 @@ export default function ProfileView({
 											</div>
 
 											{p.hasImage && (
-												<div
-													onClick={(e) => {
-														e.stopPropagation();
-														if (p.imageSrc)
-															setPreviewImage({
-																src: p.imageSrc,
-																alt: p.imageAlt || "ユーザーアート",
-															});
-													}}
-													className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
-												>
-													<SpriteImage
-														src={p.imageSrc}
-														alt={p.imageAlt || "ユーザーアート"}
-														className="max-w-full h-auto max-h-[220px] block mx-auto"
-														animFrames={p.animFrames}
-														animFps={p.animFps}
-														walkPreset={p.walkPreset}
-														dotArt={!!p.dotW}
-														onError={(e) => {
-															const target = e.currentTarget;
-															target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
-														}}
-													/>
+												<div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
 													{p.hasCollabButton &&
 														isCollabAllowed(p.originType) && (
-															<button
+															<EmbedCollabBar
+																icon={Image}
+																label={p.dotW ? "ドット絵" : "画像"}
+																buttonLabel="コラボ"
+																colorClass="bg-lime-600/80 hover:bg-lime-500/90"
 																onClick={(e) => {
 																	e.stopPropagation();
 																	openCollab?.(p);
 																}}
-																className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-															>
-																<Edit3 size={11} />
-																<span>コラボ</span>
-															</button>
+															/>
 														)}
+													<div
+														onClick={(e) => {
+															e.stopPropagation();
+															if (p.imageSrc)
+																setPreviewImage({
+																	src: p.imageSrc,
+																	alt: p.imageAlt || "ユーザーアート",
+																});
+														}}
+														className="cursor-pointer gimp-checkered-background-white"
+													>
+														<SpriteImage
+															src={p.imageSrc}
+															alt={p.imageAlt || "ユーザーアート"}
+															className="max-w-full h-auto max-h-[220px] block mx-auto"
+															animFrames={p.animFrames}
+															animFps={p.animFps}
+															walkPreset={p.walkPreset}
+															dotArt={!!p.dotW}
+															onError={(e) => {
+																const target = e.currentTarget;
+																target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
+															}}
+														/>
+													</div>
 												</div>
 											)}
 
