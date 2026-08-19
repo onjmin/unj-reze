@@ -239,9 +239,9 @@ function deriveDisplay(row: any): DisplayContent {
 	}
 	// reze にネイティブな表現が無い種別(Url/Gif/Video/Audio/Game/Sns/Oekaki/Encrypt等)。
 	// unj純正のBBS投稿も同じ board_id を共有するため、表示だけは保つ。
-	if (row.content_url) {
-		return { content: text ? `${text}\n${row.content_url}` : row.content_url };
-	}
+	// content_url を本文へ追記するとURLが二重表示になりがち（extractFirstEmbed が
+	// 本文中のURLからどのみち埋め込みを作るし、埋め込み非対応でも大抵は本文側に
+	// 同じURLが既に書かれている）ため、content_url は付け足さず本文のみ表示する。
 	return { content: text };
 }
 
@@ -627,6 +627,13 @@ export const pgStore: DataStore = {
 		let row: any = null;
 		for (let attempt = 0; attempt < 5 && !row; attempt++) {
 			try {
+				// title は空文字のまま保存する（threads.title は NOT NULL 制約）。
+				// unj純正スレは投稿フォームでスレタイ(title列)と本文が別入力だが、reze発の
+				// 投稿にはスレタイ入力欄が無い。以前は本文1行目を title に複製していたが、
+				// 見出しと本文で同じ文言が二重表示される原因だった（unj側 ThreadPage.svelte /
+				// HeadlinePage.svelte は thread.title をそのまま見出しとして描画するため）。
+				// title が空＝reze発、という前提で unj/reze 双方の表示側が振り分ける
+				// （reze側は lib/post-title.ts の getDistinctTitle 参照）。
 				const { rows } = await q(
 					`INSERT INTO threads (
              created_at, dat_key, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
@@ -641,19 +648,15 @@ export const pgStore: DataStore = {
                FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP))::BIGINT,
                (SELECT COALESCE(MAX(dat_key), 0) + 1 FROM threads)
              ),
-             '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
+             '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,'',1,${RES_LIMIT},
                      ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                     $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                     $2,$3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
            RETURNING *`,
 					[
 						(mmlResolved.content || "")
 							.split("\n")
 							.find((l) => l.trim())
 							?.slice(0, 64) || "",
-						(mmlResolved.content || "")
-							.split("\n")
-							.find((l) => l.trim())
-							?.slice(0, 64) || "無題",
 						// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
 						// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
 						// 入れると連番が丸見えになるため genBbsId でハッシュ化する。

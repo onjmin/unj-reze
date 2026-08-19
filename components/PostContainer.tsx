@@ -33,6 +33,7 @@ import {
 	stripAnkaPrefixForSnsDisplay,
 } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
+import { getDistinctTitle } from "@/lib/post-title";
 import { playPostSfx } from "@/lib/post-sfx";
 import { cacheProfileSeed } from "@/lib/profile-cache";
 import { postShareUrl } from "@/lib/share";
@@ -652,6 +653,17 @@ export default function PostContainer({
 						</div>
 					</div>
 
+					{(() => {
+						const distinctTitle = getDistinctTitle(post);
+						return distinctTitle ? (
+							<div
+								onClick={handlePostClick}
+								className="text-base font-bold text-gray-100 break-words leading-snug mb-1 cursor-pointer hover:text-white transition-colors"
+							>
+								{distinctTitle}
+							</div>
+						) : null;
+					})()}
 					<div
 						onClick={handlePostClick}
 						className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"

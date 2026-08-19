@@ -37,6 +37,7 @@ import {
 	stripMmlLine,
 } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
+import { getDistinctTitle } from "@/lib/post-title";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed } from "@/lib/profile-cache";
 import { startMvRemix } from "@/lib/remix";
@@ -1334,6 +1335,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						</span>
 					</div>
 
+					{(() => {
+						const distinctTitle = getDistinctTitle(post);
+						return distinctTitle ? (
+							<div className="text-base font-bold text-gray-100 break-words leading-snug mb-1">
+								{distinctTitle}
+							</div>
+						) : null;
+					})()}
 					<div className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
 							const displayText = stripAnkaPrefixForSnsDisplay(
@@ -2298,6 +2307,14 @@ function ReplyTreeItem({
 						</div>
 					</div>
 
+					{(() => {
+						const distinctTitle = getDistinctTitle(localPost);
+						return distinctTitle ? (
+							<div className="text-base font-bold text-gray-100 break-words leading-snug mb-1">
+								{distinctTitle}
+							</div>
+						) : null;
+					})()}
 					<p className="text-[15px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
 							const displayText = stripAnkaPrefixForSnsDisplay(
