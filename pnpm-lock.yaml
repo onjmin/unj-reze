@@ -27,11 +27,11 @@ importers:
         specifier: 1.0.4
         version: 1.0.4
       '@onjmin/dtm':
-        specifier: 0.1.83
-        version: 0.1.83
+        specifier: 0.1.84
+        version: 0.1.84
       '@onjmin/oekaki':
-        specifier: 1.0.63
-        version: 1.0.63
+        specifier: 1.0.64
+        version: 1.0.64
       '@rpgja/rpgen-map':
         specifier: 1.1.7
         version: 1.1.7
@@ -1249,15 +1249,15 @@ packages:
   '@onjmin/chord-parser@1.0.4':
     resolution: {integrity: sha512-ne/enObhLJgtgQttFk1WrclfWeDxUIpyQDp1GRqvp73AD+IuVgm67XJS10aIR9+lCuGRIW+CPrxZlUmLI3D6Eg==}
 
-  '@onjmin/dtm@0.1.83':
-    resolution: {integrity: sha512-xuCwKnMaWwIiAlV2O0baFqzY0wCLMkOTOcN94jSG0/PgFY6JbvPAjeJ1v3OpTaXfApeNUq4aNsBHxU4i5EZd8Q==}
+  '@onjmin/dtm@0.1.84':
+    resolution: {integrity: sha512-3HvQSqs27BkHiE6FgISWI+y1wcEzaoagY+2IuR1o6dyy1nbFgVydVpm6MLczQ8ADqaJ48Nx4A2mnp5w5h+XGeA==}
 
-  '@onjmin/koe@1.0.4':
-    resolution: {integrity: sha512-wMqD7iOz1VN76cc9ChKlDZD7vkhq2Aq+gQc81YU/7NjN+CoowxkRhyTVstUzSLuuDuPrRLDCklKY8JCcTqfdAg==}
+  '@onjmin/koe@1.0.5':
+    resolution: {integrity: sha512-LKC4OzZwXRkdVoW1PHrUysqjx0jxMUd+ZtsU/vvJ/d32OiFTaexA8WattxLLdMiuWXfZd3fB6vGsjXdoGG7aHQ==}
     hasBin: true
 
-  '@onjmin/oekaki@1.0.63':
-    resolution: {integrity: sha512-qf6Yx81NylOlPWpwVmNqtA/6qdqaLe47WWHQTqyUJK+AZb5yps1YcyQTJv2GWGAWFEFGNwdtzIo5pOguGzirHg==}
+  '@onjmin/oekaki@1.0.64':
+    resolution: {integrity: sha512-loxRFn/mwAsxMPwJaFxxIMcOSoxTZXoM93m0D+Rb36dOD18YVQuXsY2XQPQt79LE+NZZfn/3xk1YcEBaPIMoRg==}
 
   '@opennextjs/aws@4.1.0':
     resolution: {integrity: sha512-GuKkdUbnJhLvtwTiJlytNtWIcSYN3+Dzi+OusUlRgf+Ur7dGoXdzBopd+VFiSdTBduPOvr9lPFDg6BYNjEV3wQ==}
@@ -5123,15 +5123,17 @@ snapshots:
 
   '@onjmin/chord-parser@1.0.4': {}
 
-  '@onjmin/dtm@0.1.83':
+  '@onjmin/dtm@0.1.84':
     dependencies:
       '@onjmin/chord-parser': 1.0.4
-      '@onjmin/koe': 1.0.4
+      '@onjmin/koe': 1.0.5
       midi-json-parser: 8.1.74
 
-  '@onjmin/koe@1.0.4': {}
+  '@onjmin/koe@1.0.5':
+    dependencies:
+      fflate: 0.8.3
 
-  '@onjmin/oekaki@1.0.63': {}
+  '@onjmin/oekaki@1.0.64': {}
 
   '@opennextjs/aws@4.1.0(next@16.2.7(@babel/core@7.29.7)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))':
     dependencies:
