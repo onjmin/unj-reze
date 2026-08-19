@@ -15,6 +15,7 @@ import { getUserIdLabel } from "@/lib/avatar";
 import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import { getDistinctTitle } from "@/lib/post-title";
 import {
 	extractMmlFromContent,
 	findMmlMarker,
@@ -451,6 +452,16 @@ export default function BbsThreadView({
 					/>
 				</div>
 			</div>
+
+			{/* Thread title (unj純正スレのスレタイがある場合のみ。reze発は本文と重複するため出さない) */}
+			{(() => {
+				const distinctTitle = getDistinctTitle(post);
+				return distinctTitle ? (
+					<div className="px-3 pt-2 text-sm font-bold text-gray-100 break-words leading-snug shrink-0">
+						{distinctTitle}
+					</div>
+				) : null;
+			})()}
 
 			{/* Thread stats bar */}
 			<div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800/60 text-[10px] text-gray-500 shrink-0">

@@ -16,6 +16,7 @@ import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed, getEmbedThumbnail } from "@/lib/embed";
 import { extractMmlFromContent } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
+import { getDistinctTitle } from "@/lib/post-title";
 import { getThreadDisplayTime } from "@/lib/time";
 import { Post } from "@/lib/types";
 import SpriteImage from "./SpriteImage";
@@ -319,7 +320,7 @@ export default function BbsBoardView({
 								{/* Content */}
 								<div className="flex-1 min-w-0">
 									<p className="text-[15px] text-gray-100 leading-snug line-clamp-2 break-words">
-										{post.content.split("\n")[0]}
+										{getDistinctTitle(post) || post.content.split("\n")[0]}
 									</p>
 									<div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
 										<span>
