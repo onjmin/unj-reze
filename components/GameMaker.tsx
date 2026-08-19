@@ -11232,6 +11232,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       ctx.restore();
 
+      // ── こおりの森：画面全体に寒色グレーディングを掛ける（乗算合成の1回きりの矩形）──
+      // ワールド描画が終わった直後・HUD/オーバーレイより前。素材そのものは着色せず、
+      // 見た目だけ動画参照の冷たいティール/紫トーンへ寄せる。
+      if (gameData.id === 'snowForest') {
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = 'rgb(145,165,220)';
+        ctx.fillRect(0, 0, PLAY_W, PLAY_H);
+        ctx.restore();
+      }
+
       // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
       Object.values(overlayImagesRef.current).forEach(img => {
         if (img.hidden) return;
