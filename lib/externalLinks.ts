@@ -90,6 +90,12 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
 				description: "心に届く。美味しい歌声",
 				src: "https://harunerino.vercel.app/",
 			},
+			{
+				name: "蓄音キリコ",
+				description:
+					"2026年8月18日、おーぷん2ちゃんねる有志によって作成されたUTAU音源です。",
+				src: "https://chi9nekiriko.wixsite.com/home",
+			},
 		],
 	},
 	{
