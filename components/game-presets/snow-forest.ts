@@ -20,6 +20,9 @@ import {
 const PLAYER_SPRITE_URL = "https://i.imgur.com/4LCRj5M.png";
 const BASE_URL = "/assets/rpg-reze/Base.png"; // 16pxグリッドの同梱タイルシート
 
+// BGM: ユーザー指定のYouTube動画（着想元楽曲の「エリアBGM風アレンジ」）を直接参照。
+const BGM_YOUTUBE_URL = "https://www.youtube.com/watch?v=ugPZI3ldPhk";
+
 // ── rpgen-search 素材（歩行アニメのみ）───────────────────────────────────────
 const R = {
 	snowmanWalk: sa("UejLXD"), // 雪だるま（歩行、敵用）
@@ -387,18 +390,22 @@ export const snowForest: PresetData = {
 		textColor: "#eaf6ff",
 	},
 	bgm: {
-		ref: "mml:t108o5l8cdefgfedc<b>cd<b>cdefgfedc<b>c4",
-		src: "t108o5l8cdefgfedc<b>cd<b>cdefgfedc<b>c4",
-		type: "mml",
+		ref: BGM_YOUTUBE_URL,
+		src: BGM_YOUTUBE_URL,
+		type: "youtube",
 	},
 	sfx: {
-		jump: { ref: "mml:t150o6l16c", src: "t150o6l16c", type: "mml" },
+		// 軽く弾む2音の上昇（ジャンプの踏み切り）
+		jump: { ref: "mml:t150o6l32ce", src: "t150o6l32ce", type: "mml" },
+		// 長3和音を1オクターブ駆け上がる、氷が弾けるような達成チャイム
 		clear: {
-			ref: "mml:t160o6l8cdefg",
-			src: "t160o6l8cdefg",
+			ref: "mml:t160o6l8ceg>c",
+			src: "t160o6l8ceg>c",
 			type: "mml",
 		},
-		damage: { ref: "mml:t120o3l8c", src: "t120o3l8c", type: "mml" },
-		coin: { ref: "mml:t180o6l16b>e8", src: "t180o6l16b>e8", type: "mml" },
+		// 低く籠った短2度の衝突音
+		damage: { ref: "mml:t120o2l8c<b", src: "t120o2l8c<b", type: "mml" },
+		// 素早い長3和音の煌めき（雪の結晶を拾った音）
+		coin: { ref: "mml:t180o6l32ceg", src: "t180o6l32ceg", type: "mml" },
 	},
 };
