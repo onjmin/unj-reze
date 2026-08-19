@@ -3,6 +3,7 @@
 import {
 	ArrowLeft,
 	Image as ImageIcon,
+	Music,
 	Share2,
 	ThumbsUp,
 } from "lucide-react";
@@ -582,9 +583,23 @@ export default function BbsThreadView({
 													</a>
 												);
 											})()}
-											<MmlSource post={p}>
-												{(mml) => <MmlPlayer mml={mml} />}
-											</MmlSource>
+											<div className="rounded-xl overflow-hidden border border-gray-800 bg-[#1a1b26]">
+												{p.hasCollabButton && isCollabAllowed(p.originType) && (
+													<EmbedCollabBar
+														icon={Music}
+														label="MML"
+														buttonLabel="コラボ"
+														colorClass="bg-pink-600/80 hover:bg-pink-500/90"
+														onClick={(e) => {
+															e.stopPropagation();
+															openCollab(p);
+														}}
+													/>
+												)}
+												<MmlSource post={p}>
+													{(mml) => <MmlPlayer mml={mml} />}
+												</MmlSource>
+											</div>
 										</div>
 									);
 								}

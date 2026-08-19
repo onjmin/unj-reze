@@ -24,6 +24,16 @@ import TopTabs, { type FeedSubMode } from "@/components/TopTabs";
 import { api } from "@/lib/api";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import { pollInterval, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
+import {
+	buildFeedCacheKey,
+	readFeedCache,
+	writeFeedCache,
+	writeFeedCacheScrollTop,
+} from "@/lib/feed-cache";
+import {
+	getScrollContainer,
+	SCROLL_CONTAINER_ID,
+} from "@/lib/hooks/useScrollNav";
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { createGame, createMv } from "@/lib/game-mv-client";
@@ -422,9 +432,76 @@ export default function App() {
 		postsRef.current = posts;
 	}, [posts]);
 
+	const feedCacheKey = buildFeedCacheKey({
+		currentNav,
+		topTab,
+		feedSubMode,
+		rankCategory,
+		bbsMode,
+		viewerId,
+	});
+
+	// タイムラインからスレ詳細等へ遷移すると app/page.tsx は丸ごとアンマウントされるため、
+	// 戻ってきたときにキャッシュがあればそれを即描画してスクロール位置も復元する。
+	// タブ/モードを切り替えて戻ってきた場合はキーが変わるので通常どおり取得し直す。
 	useEffect(() => {
-		fetchPosts();
-	}, [fetchPosts]);
+		const cached = readFeedCache(feedCacheKey);
+		if (cached) {
+			// setState をエフェクト本体で直に呼ぶと連鎖レンダー扱いになるため、
+			// fetchPosts の非同期完了時と同様にマイクロタスクへ逃がす。
+			Promise.resolve().then(() => {
+				setPosts(cached.posts);
+				postsRef.current = cached.posts;
+				setHasMorePosts(cached.hasMorePosts);
+				setLoading(false);
+			});
+			const savedScrollTop = cached.scrollTop;
+			// #scrollable-content は overflow:visible で実体はドキュメントスクロールなので、
+			// 実際にスクロールしている要素（そちらが独自スクロールしていれば優先）を見て復元する。
+			requestAnimationFrame(() => {
+				const el = getScrollContainer();
+				if (
+					el instanceof HTMLElement &&
+					el.id === SCROLL_CONTAINER_ID &&
+					el.scrollHeight > el.clientHeight
+				) {
+					el.scrollTop = savedScrollTop;
+				} else {
+					window.scrollTo(0, savedScrollTop);
+				}
+			});
+		} else {
+			fetchPosts();
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [feedCacheKey]);
+
+	// posts/hasMorePosts が変わるたびキャッシュへ反映しておく（いいね等の操作も含む）。
+	useEffect(() => {
+		writeFeedCache(feedCacheKey, posts, hasMorePosts);
+	}, [feedCacheKey, posts, hasMorePosts]);
+
+	// スクロール位置は都度キャッシュへ書き戻す（離脱直前のイベントに頼らない）。
+	useEffect(() => {
+		let ticking = false;
+		const onScroll = () => {
+			if (ticking) return;
+			ticking = true;
+			requestAnimationFrame(() => {
+				ticking = false;
+				const el = getScrollContainer();
+				const scrollTop =
+					el instanceof HTMLElement &&
+					el.id === SCROLL_CONTAINER_ID &&
+					el.scrollHeight > el.clientHeight
+						? el.scrollTop
+						: window.scrollY || document.documentElement.scrollTop;
+				writeFeedCacheScrollTop(feedCacheKey, scrollTop);
+			});
+		};
+		document.addEventListener("scroll", onScroll, true);
+		return () => document.removeEventListener("scroll", onScroll, true);
+	}, [feedCacheKey]);
 
 	/** 新着候補を「まだ表示していないもの」だけ積む。push とポーリング双方から呼ぶ。 */
 	const pushNewPosts = useCallback((incoming: Post[]) => {

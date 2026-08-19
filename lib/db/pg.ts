@@ -672,7 +672,15 @@ export const pgStore: DataStore = {
 						// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
 						// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
 						// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
-						!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
+						// MML投稿（c.contentType===CT.Dtm）も同じ理由で足し忘れると、MML埋め込みに
+						// 「コラボ」ボタンが一度も出ないまま導線が死ぬ（表示側はhasCollabButtonを
+						// 見るだけなので、ここで立てなければ何も表示されない）。
+						!!(
+							data.gameId ||
+							data.mvId ||
+							(data.hasImage && data.imageSrc) ||
+							c.contentType === CT.Dtm
+						),
 						data.gameId ?? null,
 						data.mvId ?? null,
 						data.originType ?? null,
@@ -839,8 +847,13 @@ export const pgStore: DataStore = {
 						c.contentUrl,
 						c.contentType,
 						c.contentDataUrl,
-						// createPost と同じ理由でhasImageも起点にする
-						!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
+						// createPost と同じ理由でhasImage/MMLも起点にする
+						!!(
+							data.gameId ||
+							data.mvId ||
+							(data.hasImage && data.imageSrc) ||
+							c.contentType === CT.Dtm
+						),
 						data.gameId ?? null,
 						data.mvId ?? null,
 						parentNum,
@@ -961,7 +974,11 @@ export const pgStore: DataStore = {
 			push("content_url", c.contentUrl);
 			push("content_type", c.contentType);
 			push("content_data_url", c.contentDataUrl);
-			if (imageSrc) push("has_collab_button", true);
+			// MML編集（この分岐）も画像編集（下の分岐）と同じくコラボの起点にする。
+			// c.contentType===CT.Dtm を見落とすとMML埋め込みだけ「コラボ」ボタンが
+			// 一度も出ないまま導線が死ぬ（createPost/addReplyと同じ罠）。
+			if (imageSrc || c.contentType === CT.Dtm)
+				push("has_collab_button", true);
 		} else if (imageSrc !== undefined) {
 			const c = deriveInsertContent({
 				content,
