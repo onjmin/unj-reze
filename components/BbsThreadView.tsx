@@ -119,6 +119,20 @@ function parseContent(text: string, replyMap: Map<string, number>) {
 	});
 }
 
+/**
+ * 返信関係にある投稿は、本文に >>レス番 の安価が入っているテイでBBS表示する。
+ * ただしスレ1番目（OP）への返信は例外（BBSの慣習上、地の文への返信に逐一安価を付けないため）。
+ * 実データの content 自体は書き換えず、表示用に合成するだけ。
+ */
+function withSyntheticQuote(p: Post, indexMap: Map<string, number>): string {
+	if (!p.parentPostId) return p.content;
+	const parentNum = indexMap.get(p.parentPostId);
+	if (!parentNum || parentNum === 1) return p.content;
+	const quote = `>>${parentNum}`;
+	if (p.content.split("\n")[0].trim() === quote) return p.content;
+	return `${quote}\n${p.content}`;
+}
+
 export default function BbsThreadView({
 	post: initial,
 	openCollab,
@@ -537,7 +551,7 @@ export default function BbsThreadView({
 								</div>
 							)}
 							<div className="pl-6 text-[15px] text-gray-200 leading-relaxed whitespace-pre-wrap break-words">
-								{parseContent(p.content, indexMap)}
+								{parseContent(withSyntheticQuote(p, indexMap), indexMap)}
 							</div>
 
 							{/* Embeds (MML / Chord / URL埋め込み) */}

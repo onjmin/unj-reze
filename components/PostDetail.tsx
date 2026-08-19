@@ -2492,9 +2492,7 @@ function ReplyTreeItem({
 							className="flex items-center space-x-1 hover:text-green-400 transition-colors"
 						>
 							<MessageCircle size={14} />
-							<span className="text-[11px]">
-								{localPost.repliesCount || ""}
-							</span>
+							<span className="text-[11px]">{children.length || ""}</span>
 						</button>
 						<button
 							onClick={handleRepost}
