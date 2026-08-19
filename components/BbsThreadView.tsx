@@ -629,6 +629,7 @@ export default function BbsThreadView({
 											src={p.imageSrc}
 											alt={p.imageAlt || "ユーザーアート"}
 											className="max-w-full h-auto max-h-55 block mx-auto"
+											maxHeightPx={220}
 											animFrames={p.animFrames}
 											animFps={p.animFps}
 											walkPreset={p.walkPreset}

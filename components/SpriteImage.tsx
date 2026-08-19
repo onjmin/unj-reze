@@ -74,6 +74,15 @@ export interface SpriteImageProps {
 	 * w-5 h-5 アイコン等)いっぱいに詰めて表示する。
 	 */
 	fit?: "natural" | "cover";
+	/**
+	 * fit="natural"のときの表示上限高さ(px)。`<img>`はCSSの`max-height`だけで幅も
+	 * 連動して縮む（置換要素の縦横比維持サイジング）が、この背景画像divは非置換要素
+	 * のため`max-height`だけを効かせると幅はそのまま＝縦だけ潰れて縦横比が崩れる
+	 * （ドット絵アニメ/歩行グラの埋め込みプレビューが伸び縮みするバグの原因だった）。
+	 * ここでJS側で先に幅と高さを比率を保ったまま計算し、両方pxで固定することで
+	 * `<img>`と同じ見た目にする。
+	 */
+	maxHeightPx?: number;
 	draggable?: boolean;
 	onClick?: (e: ReactMouseEvent) => void;
 	/** 静止画(<img>)のときだけ発火する。アニメ/歩行グラのCSS背景描画では読み込み失敗を検知できない */
@@ -118,6 +127,7 @@ export default function SpriteImage({
 	dotArt = false,
 	animate = true,
 	fit = "natural",
+	maxHeightPx,
 	draggable,
 	onClick,
 	onError,
@@ -208,14 +218,30 @@ export default function SpriteImage({
 	const showSheetToggle = fit === "natural";
 	const isSheet = showSheetToggle && viewMode === "sheet";
 
+	const ratio = (isSheet ? cell?.sheetRatio : cell?.ratio) ?? 1;
+	let naturalBox: { width: number; height: number } | null = null;
+	if (fit === "natural" && cell) {
+		let width = Math.max(
+			isSheet ? cell.sheetWidthPx : cell.widthPx,
+			MIN_DISPLAY_PX,
+		);
+		let height = width / ratio;
+		// max-height は非置換要素(background-image div)には片側にしか効かない
+		// （<img>と違い幅が連動して縮まない）ため、先にJSで比率を保ったまま
+		// 縮小して両方pxで確定させる。
+		if (maxHeightPx && height > maxHeightPx) {
+			height = maxHeightPx;
+			width = height * ratio;
+		}
+		naturalBox = { width, height };
+	}
+
 	const sizingStyle: CSSProperties = {
-		aspectRatio: (isSheet ? cell?.sheetRatio : cell?.ratio) ?? 1,
-		...(fit === "natural" && cell
+		aspectRatio: ratio,
+		...(naturalBox
 			? {
-					width: Math.max(
-						isSheet ? cell.sheetWidthPx : cell.widthPx,
-						MIN_DISPLAY_PX,
-					),
+					width: naturalBox.width,
+					height: naturalBox.height,
 					maxWidth: "100%",
 				}
 			: {}),

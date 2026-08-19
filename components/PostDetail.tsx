@@ -1431,6 +1431,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									src={post.imageSrc}
 									alt={post.imageAlt || "ユーザーアート"}
 									className="max-w-full h-auto max-h-[220px] block mx-auto"
+									maxHeightPx={220}
 									animFrames={post.animFrames}
 									animFps={post.animFps}
 									walkPreset={post.walkPreset}
@@ -2376,6 +2377,7 @@ function ReplyTreeItem({
 									src={localPost.imageSrc}
 									alt={localPost.imageAlt || "ユーザーアート"}
 									className="max-w-full h-auto max-h-[220px] block mx-auto"
+									maxHeightPx={220}
 									animFrames={localPost.animFrames}
 									animFps={localPost.animFps}
 									walkPreset={localPost.walkPreset}

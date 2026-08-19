@@ -756,6 +756,7 @@ export default function PostContainer({
 									src={post.imageSrc}
 									alt={post.imageAlt || "ユーザーアート"}
 									className="max-w-full h-auto max-h-55 block mx-auto"
+									maxHeightPx={220}
 									animFrames={post.animFrames}
 									animFps={post.animFps}
 									walkPreset={post.walkPreset}
@@ -921,6 +922,7 @@ export default function PostContainer({
 											src={quotedPost.imageSrc}
 											alt={quotedPost.imageAlt || "ユーザーアート"}
 											className="mt-1.5 max-h-[120px] rounded-lg object-cover"
+											maxHeightPx={120}
 											animFrames={quotedPost.animFrames}
 											animFps={quotedPost.animFps}
 											walkPreset={quotedPost.walkPreset}

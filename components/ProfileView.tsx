@@ -1535,6 +1535,7 @@ export default function ProfileView({
 															src={p.imageSrc}
 															alt={p.imageAlt || "ユーザーアート"}
 															className="max-w-full h-auto max-h-[220px] block mx-auto"
+															maxHeightPx={220}
 															animFrames={p.animFrames}
 															animFps={p.animFps}
 															walkPreset={p.walkPreset}
