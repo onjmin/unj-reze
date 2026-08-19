@@ -1613,18 +1613,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					return (
 						<div className="border-t border-gray-800 px-3 py-3 space-y-2">
 							<span className="text-[11px] text-gray-500 font-bold">返信</span>
-							{roots.map((reply, i) => {
-								const prevAuthorKey =
-									i > 0
-										? roots[i - 1].slug || roots[i - 1].displayName
-										: undefined;
+							{roots.map((reply) => {
 								return (
 									<ReplyTreeItem
 										key={reply.id}
 										post={reply}
 										replies={post.replies}
 										depth={0}
-										prevAuthorKey={prevAuthorKey}
 										onReply={openComposer}
 										userId={userId}
 										userSlug={userSlug}
@@ -1874,7 +1869,6 @@ function ReplyTreeItem({
 	post,
 	replies,
 	depth,
-	prevAuthorKey,
 	onReply,
 	userId,
 	userSlug,
@@ -1889,7 +1883,6 @@ function ReplyTreeItem({
 	post: Post;
 	replies: Post[];
 	depth: number;
-	prevAuthorKey?: string;
 	onReply: (post: Post) => void;
 	userId: string;
 	userSlug?: string;
@@ -2131,21 +2124,14 @@ function ReplyTreeItem({
 	const isSelf =
 		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;
 
-	const currentAuthorKey = localPost.slug || localPost.displayName;
-	const isSameAuthorAsPrev =
-		!!prevAuthorKey && prevAuthorKey === currentAuthorKey;
-
 	return (
 		<div
 			style={{ marginLeft: depth * 12 }}
 			className={depth > 0 ? "pl-3 border-l-2 border-gray-800/40" : ""}
 		>
 			<div className="flex p-3 space-x-2.5">
-				{isSameAuthorAsPrev ? (
-					<div className="w-9 h-9 shrink-0" />
-				) : (
-					<div
-						onClick={(e) => {
+				<div
+					onClick={(e) => {
 							e.stopPropagation();
 							if (isSelf) {
 								router.push(`/user/${localPost.slug || localPost.displayName}`);
@@ -2178,7 +2164,6 @@ function ReplyTreeItem({
 							})()
 						)}
 					</div>
-				)}
 				<div className="flex-1 min-w-0">
 					<div className="flex justify-between items-baseline mb-0.5">
 						<div className="flex items-baseline space-x-1.5">
@@ -2567,18 +2552,13 @@ function ReplyTreeItem({
 					}`}
 				>
 					<div className="overflow-hidden">
-						{children.map((child, i) => {
-							const childPrevAuthorKey =
-								i > 0
-									? children[i - 1].slug || children[i - 1].displayName
-									: localPost.slug || localPost.displayName;
+						{children.map((child) => {
 							return (
 								<ReplyTreeItem
 									key={child.id}
 									post={child}
 									replies={replies}
 									depth={depth + 1}
-									prevAuthorKey={childPrevAuthorKey}
 									onReply={onReply}
 									userId={userId}
 									userSlug={userSlug}

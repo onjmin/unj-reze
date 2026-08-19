@@ -698,7 +698,9 @@ export const pgStore: DataStore = {
 	},
 
 	async likePost(id: number, userId: string) {
-		return voteOnPost(id, "good_count");
+		const post = await voteOnPost(id, "good_count");
+		await notifyPostAction(id, userId, "like");
+		return post;
 	},
 	async dislikePost(id: number, userId: string) {
 		return voteOnPost(id, "bad_count");
@@ -711,18 +713,24 @@ export const pgStore: DataStore = {
 			`UPDATE ${table} SET hearts_total = hearts_total + $1 WHERE id = $2`,
 			[count, rawId],
 		);
+		await notifyPostAction(id, userId, "heart");
 		return pgStore.getPost(id);
 	},
 
-	async repostPost(id: number) {
+	async repostPost(id: number, userId?: string) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
-		await q(
+		const { rows } = await q(
 			`UPDATE ${table} SET reposted = NOT reposted,
          reposts = CASE WHEN reposted THEN GREATEST(reposts - 1, 0) ELSE reposts + 1 END
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING reposted`,
 			[rawId],
 		);
+		// リポスト解除ではなく「リポストした」瞬間だけ通知する
+		if (userId && rows[0]?.reposted) {
+			await notifyPostAction(id, userId, "repost");
+		}
 		return pgStore.getPost(id);
 	},
 
@@ -1071,25 +1079,31 @@ export const pgStore: DataStore = {
 		return [];
 	},
 
+	// 既読になった通知は「もう見た」ので一覧には出さない（未読のみ返す）
 	async getNotifications(userId?: string) {
 		const uid = toUid(userId);
 		if (uid === null) return [];
 		const { rows } = await q(
-			`SELECT n.*, au.display_name AS actor_name, t.title AS thread_title
+			`SELECT n.*, au.display_name AS actor_name, t.title AS thread_title, r.id AS res_id
          FROM notifications n
          LEFT JOIN users au ON au.id = n.actor_user_id
          LEFT JOIN threads t ON t.id = n.thread_id
-        WHERE n.target_user_id = $1
+         LEFT JOIN res r ON r.thread_id = n.thread_id AND r.num = n.res_num
+        WHERE n.target_user_id = $1 AND n.read = FALSE
         ORDER BY n.id DESC LIMIT 50`,
 			[uid],
 		);
 		return rows.map((r): DbNotification => {
+			// res_num > 1 は返信そのものを指す（JOIN で拾った res.id からリンク先を作る）。
+			// 対応する res 行が見つからない（削除済み等）場合だけリンク無しにする。
 			const postId =
-				r.thread_id != null
-					? r.res_num != null && Number(r.res_num) > 1
-						? undefined
-						: threadToPostId(Number(r.thread_id))
-					: undefined;
+				r.thread_id == null
+					? undefined
+					: r.res_num != null && Number(r.res_num) > 1
+						? r.res_id != null
+							? resToPostId(Number(r.res_id))
+							: undefined
+						: threadToPostId(Number(r.thread_id));
 			return {
 				id: Number(r.id),
 				actorSlug:
@@ -1568,8 +1582,14 @@ export const pgStore: DataStore = {
 			`INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
 			[from, to],
 		);
+		// 未読の同一フォロー通知が既にあれば増やさない（フォロー解除→再フォロー連打での重複対策）
 		await q(
-			`INSERT INTO notifications (type, actor_user_id, target_user_id) VALUES ('follow',$1,$2)`,
+			`INSERT INTO notifications (type, actor_user_id, target_user_id)
+       SELECT 'follow', $1, $2
+       WHERE NOT EXISTS (
+         SELECT 1 FROM notifications
+          WHERE type = 'follow' AND actor_user_id = $1 AND target_user_id = $2 AND read = FALSE
+       )`,
 			[from, to],
 		);
 	},
@@ -1979,6 +1999,41 @@ async function voteOnPost(
 		rawId,
 	]);
 	return pgStore.getPost(id);
+}
+
+// like/heart/repost の相手に通知する。自分の投稿への自作自演と、未読の同一通知の
+// 重複（連打対策）は作らない。target が見つからない（削除済み等）場合も何もしない。
+async function notifyPostAction(
+	postId: number,
+	actorUserId: string,
+	type: "like" | "heart" | "repost",
+) {
+	const actorUid = toUid(actorUserId);
+	if (actorUid === null) return;
+	const isReply = isReplyPostId(postId);
+	const rawId = isReply ? postIdToResId(postId) : postIdToThreadId(postId);
+	const { rows } = await q(
+		isReply
+			? `SELECT user_id, thread_id, num FROM res WHERE id = $1`
+			: `SELECT user_id, id AS thread_id, 1::int AS num FROM threads WHERE id = $1`,
+		[rawId],
+	);
+	const row = rows[0];
+	if (!row || row.user_id == null) return;
+	const targetUid = Number(row.user_id);
+	if (targetUid === actorUid) return;
+	const threadId = Number(row.thread_id);
+	const resNum = isReply ? Number(row.num) : null;
+	await q(
+		`INSERT INTO notifications (type, actor_user_id, target_user_id, thread_id, res_num)
+     SELECT $1, $2, $3, $4, $5
+     WHERE NOT EXISTS (
+       SELECT 1 FROM notifications
+        WHERE type = $1 AND actor_user_id = $2 AND target_user_id = $3
+          AND thread_id = $4 AND res_num IS NOT DISTINCT FROM $5 AND read = FALSE
+     )`,
+		[type, actorUid, targetUid, threadId, resNum],
+	);
 }
 
 function userRowToAnonymousUser(row: any): AnonymousUser {

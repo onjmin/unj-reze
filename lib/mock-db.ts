@@ -720,11 +720,20 @@ class MockDB {
 		return this.getPost(id) ?? null;
 	}
 
-	repostPost(id: number): Post | null {
+	repostPost(id: number, userId?: string): Post | null {
 		const post = this.posts.find((p) => p.id === id);
 		if (!post) return null;
 		post.reposted = !post.reposted;
 		post.reposts = post.reposted ? post.reposts + 1 : post.reposts - 1;
+		// リポスト解除ではなく「リポストした」瞬間だけ通知する
+		if (post.reposted && userId) {
+			this.createNotification({
+				recipientId: post.displayName,
+				actor: userId,
+				type: "repost",
+				postId: id,
+			});
+		}
 		return post;
 	}
 
@@ -851,11 +860,12 @@ class MockDB {
 		);
 	}
 
+	// 既読になった通知は「もう見た」ので一覧には出さない（未読のみ返す）
 	getNotifications(userId?: string): Notification[] {
-		if (!userId) return this.notifications;
+		if (!userId) return this.notifications.filter((n) => !n.read);
 		const keys = this.notificationKeysFor(userId);
 		return this.notifications
-			.filter((n) => this.isNotificationFor(n, keys))
+			.filter((n) => this.isNotificationFor(n, keys) && !n.read)
 			.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 	}
 
@@ -867,6 +877,16 @@ class MockDB {
 		postId?: number;
 	}): void {
 		if (!data.recipientId || data.recipientId === data.actor) return;
+		// 未読の同一通知（同じ相手・種別・対象投稿）が既にあれば増やさない（連打対策）
+		const alreadyPending = this.notifications.some(
+			(n) =>
+				!n.read &&
+				n.recipientId === data.recipientId &&
+				n.actorSlug === data.actor &&
+				n.type === data.type &&
+				n.postId === data.postId,
+		);
+		if (alreadyPending) return;
 		const post = data.postId
 			? this.posts.find((p) => p.id === data.postId)
 			: undefined;

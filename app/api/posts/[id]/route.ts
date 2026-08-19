@@ -122,7 +122,7 @@ export async function PUT(
 					: await db.dislikePost(decodedId, actorId);
 			break;
 		case "repost":
-			result = await db.repostPost(decodedId);
+			result = await db.repostPost(decodedId, actorId);
 			break;
 		default:
 			return NextResponse.json(

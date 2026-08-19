@@ -54,8 +54,8 @@ export const mockStore: DataStore = {
 		return mockDb.heartPost(id, userId, count);
 	},
 
-	async repostPost(id: number) {
-		return mockDb.repostPost(id);
+	async repostPost(id: number, userId?: string) {
+		return mockDb.repostPost(id, userId);
 	},
 
 	async getReplies(postId: number, userId?: string) {

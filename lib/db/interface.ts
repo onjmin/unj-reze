@@ -195,7 +195,7 @@ export interface DataStore {
 	likePost(id: number, userId: string): Promise<DbPost | null>;
 	dislikePost(id: number, userId: string): Promise<DbPost | null>;
 	heartPost(id: number, userId: string, count?: number): Promise<DbPost | null>;
-	repostPost(id: number): Promise<DbPost | null>;
+	repostPost(id: number, userId?: string): Promise<DbPost | null>;
 	getReplies(postId: number, userId?: string): Promise<DbPost[]>;
 	addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
 	editPost(

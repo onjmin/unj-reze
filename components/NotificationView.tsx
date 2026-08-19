@@ -51,6 +51,29 @@ type Notif = {
 	read?: boolean;
 };
 
+type GroupedNotif = Notif & { extraCount: number };
+
+/**
+ * 同じ種別・同じ対象（投稿 or フォロー相手）の通知をひとまとめにする。
+ * 一覧は新着順で並んでいる前提で、先頭（最新）の1件を代表として残し、
+ * 残りの人数を extraCount にまとめる。
+ */
+function groupNotifs(list: Notif[]): GroupedNotif[] {
+	const groups: GroupedNotif[] = [];
+	const indexByKey = new Map<string, number>();
+	for (const n of list) {
+		const key = `${n.type || "like"}:${n.postId ?? n.targetUser ?? n.target}`;
+		const existingIndex = indexByKey.get(key);
+		if (existingIndex === undefined) {
+			indexByKey.set(key, groups.length);
+			groups.push({ ...n, extraCount: 0 });
+		} else {
+			groups[existingIndex].extraCount += 1;
+		}
+	}
+	return groups;
+}
+
 export default function NotificationView({ userId }: NotificationViewProps) {
 	const router = useRouter();
 	const [tab, setTab] = useState("すべて");
@@ -100,10 +123,11 @@ export default function NotificationView({ userId }: NotificationViewProps) {
 		emitNotificationsRead();
 	};
 
-	const filtered =
+	const filtered = groupNotifs(
 		tab === "メンション"
 			? notifs.filter((n) => (n.type || "like") === "mention")
-			: notifs;
+			: notifs,
+	);
 
 	return (
 		<div>
@@ -150,6 +174,7 @@ export default function NotificationView({ userId }: NotificationViewProps) {
 								<p className={n.read ? "text-gray-400" : "text-gray-200"}>
 									<span className="font-bold text-white mr-1">
 										{getAvatarInfo(n.user).username}
+										{n.extraCount > 0 && `他${n.extraCount}件`}
 									</span>
 									{n.action}
 									{n.target && (
