@@ -73,6 +73,17 @@ interface EditPostModalProps {
 	) => void;
 }
 
+/** 本文中に画像直リンクURLが単体で含まれていれば抽出する（拡張子で判定）。
+ * 画像添付フロー（アップロード/画像URL指定）を通さず本文にURLを貼っただけの投稿は
+ * imageSrc が付かず「添付画像」扱いにならない＝ドット絵素材化の対象外になるため、
+ * 編集モーダルからワンクリックで添付へ昇格できる導線として使う。 */
+const IMAGE_URL_RE =
+	/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|bmp)(?:\?\S*)?/i;
+function extractImageUrl(text: string): string | null {
+	const m = text.match(IMAGE_URL_RE);
+	return m ? m[0] : null;
+}
+
 /** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
 function splitMml(content: string): {
 	mmlLine: string | null;
@@ -111,6 +122,14 @@ export default function EditPostModal({
 	const [currentHasGame, setCurrentHasGame] = useState(post.hasGame);
 	const [expanded, setExpanded] = useState(false); // プレビュー展開
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+	// 本文にURLだけ貼った投稿を「添付画像」へ昇格させる候補（既に添付済みなら不要）
+	const detectedImageUrl = currentImageSrc ? null : extractImageUrl(text);
+	const handlePromoteImageUrl = () => {
+		if (!detectedImageUrl) return;
+		setText((t) => t.replace(detectedImageUrl, "").trim());
+		setCurrentImageSrc(detectedImageUrl);
+	};
 
 	// ドット絵素材メタ。dotW有無が「ドット絵素材扱いか」のフラグそのもの
 	// （lib/db/interface.ts DotMetaEdit 参照）。
@@ -237,6 +256,18 @@ export default function EditPostModal({
 					className="w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 md:px-5 md:py-4 focus:outline-none transition-all placeholder:text-gray-500 text-sm md:text-lg resize-none h-28 md:h-56 text-gray-100"
 					placeholder="ポストの内容"
 				/>
+
+				{/* 本文中の画像URLを添付画像へ昇格。アップロード/画像URL指定を通さず本文に
+				    URLを貼っただけの投稿はimageSrcが付かずドット絵素材化できないため。 */}
+				{detectedImageUrl && (
+					<button
+						type="button"
+						onClick={handlePromoteImageUrl}
+						className="self-start text-[11px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-700/40 rounded-full px-3 py-1 transition-colors active:scale-95"
+					>
+						このURLを添付画像にする（ドット絵設定が可能になります）
+					</button>
+				)}
 
 				{/* 添付画像 */}
 				{currentImageSrc && (

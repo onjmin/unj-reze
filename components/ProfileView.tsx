@@ -174,7 +174,17 @@ function ProfilePostMenu({
 	);
 
 	const handleSaveEdit = useCallback(
-		async (next: string, nextImageSrc?: string | null) => {
+		async (
+			next: string,
+			nextImageSrc?: string | null,
+			dotMeta?: {
+				dotW?: number | null;
+				dotH?: number | null;
+				animFrames?: number | null;
+				animFps?: number | null;
+				walkPreset?: string | null;
+			},
+		) => {
 			setShowEditModal(false);
 			if (!currentUserDisplayName) return;
 			try {
@@ -184,6 +194,7 @@ function ProfilePostMenu({
 					next,
 					post.originType,
 					nextImageSrc === null ? "" : nextImageSrc,
+					dotMeta,
 				);
 				onModerationChange?.();
 				router.refresh();
@@ -616,6 +627,9 @@ export default function ProfileView({
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
 		alt?: string;
+		animFrames?: number | null;
+		animFps?: number | null;
+		walkPreset?: string | null;
 	} | null>(null);
 	/** ポスト三点メニューからの楽観的削除 */
 	const [deletedPostIds, setDeletedPostIds] = useState<Set<string>>(new Set());
@@ -1510,6 +1524,9 @@ export default function ProfileView({
 																setPreviewImage({
 																	src: p.imageSrc,
 																	alt: p.imageAlt || "ユーザーアート",
+																	animFrames: p.animFrames,
+																	animFps: p.animFps,
+																	walkPreset: p.walkPreset,
 																});
 														}}
 														className="cursor-pointer gimp-checkered-background-white"
@@ -1874,6 +1891,9 @@ export default function ProfileView({
 				<ImagePreview
 					src={previewImage.src}
 					alt={previewImage.alt}
+					animFrames={previewImage.animFrames}
+					animFps={previewImage.animFps}
+					walkPreset={previewImage.walkPreset}
 					onClose={() => setPreviewImage(null)}
 				/>
 			)}

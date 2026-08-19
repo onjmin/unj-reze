@@ -2,14 +2,27 @@
 
 import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { walkPresetWays } from "@/lib/walk-cycle";
 
 interface ImagePreviewProps {
 	src: string;
 	alt?: string;
 	onClose: () => void;
+	/** アニメスプライトシート/歩行グラのとき渡す。渡ると拡大表示でもCSSアニメを再生する
+	 * （SpriteImageと同じくシート画像を静止のまま拡大するバグを防ぐため） */
+	animFrames?: number | null;
+	animFps?: number | null;
+	walkPreset?: string | null;
 }
 
-export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
+export default function ImagePreview({
+	src,
+	alt,
+	onClose,
+	animFrames,
+	animFps,
+	walkPreset,
+}: ImagePreviewProps) {
 	const [zoom, setZoom] = useState(1);
 	const [offset, setOffset] = useState({ x: 0, y: 0 });
 	const [closing, setClosing] = useState(false);
@@ -25,6 +38,48 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 	const imgRef = useRef<HTMLImageElement>(null);
 	const dragRef = useRef({ startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
 	const pinchRef = useRef({ pinching: false, startDist: 0, startZoom: 1 });
+
+	// アニメスプライトシート/歩行グラの場合: 単純な<img>だとシート全体が静止表示されて
+	// しまうため、SpriteImageと同じ background-position ステップアニメで1コマだけを
+	// クロップ再生する。frames/rowsからコマの縦横比とシート内位置を逆算する。
+	const frames = animFrames && animFrames > 1 ? animFrames : 1;
+	const ways = walkPreset ? walkPresetWays(walkPreset) : null;
+	const rows = ways?.length ?? 1;
+	const isAnimated = frames > 1;
+	const [cellRatio, setCellRatio] = useState<number | null>(null);
+
+	useEffect(() => {
+		if (!isAnimated) return;
+		let cancelled = false;
+		const img = new Image();
+		img.onload = () => {
+			if (!cancelled && img.naturalWidth && img.naturalHeight) {
+				const cellW = img.naturalWidth / frames;
+				const cellH = img.naturalHeight / rows;
+				setCellRatio(cellW / cellH);
+			}
+		};
+		img.src = src;
+		return () => {
+			cancelled = true;
+		};
+	}, [src, frames, rows, isAnimated]);
+
+	const fps = animFps && animFps > 0 ? animFps : 8;
+	const duration = frames / fps;
+	// N分割ステップの最後のコマにちょうど揃うbackground-position%の目標値
+	// （SpriteImageと同じ式。100%でもframes*100%でもない）
+	const xTarget = frames > 1 ? (100 * frames) / (frames - 1) : 0;
+	const activeWayKey =
+		ways?.find((w) => w.key === "s")?.key ?? ways?.[0]?.key ?? null;
+	const rowIndex = ways
+		? Math.max(
+				0,
+				ways.findIndex((w) => w.key === activeWayKey),
+			)
+		: 0;
+	const yPos = rows > 1 ? (100 * rowIndex) / (rows - 1) : 0;
+	const keyframesName = "sprite-preview-anim-steps";
 
 	const clampOffset = useCallback((ox: number, oy: number, z: number) => {
 		if (z <= 1) return { x: 0, y: 0 };
@@ -231,32 +286,67 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 				onTouchMove={handleTouchMove}
 				onTouchEnd={handleTouchEnd}
 			>
-				<img
-					ref={imgRef}
-					src={src}
-					alt={alt || ""}
-					className="max-w-full max-h-full w-auto h-auto object-contain select-none"
-					style={{
-						// 原寸が小さい画像(ドット絵など)でも画面いっぱいまで引き伸ばす
-						width: naturalSize ? "90vw" : undefined,
-						height: naturalSize ? "90vh" : undefined,
-						imageRendering:
-							naturalSize && naturalSize.w <= 256 && naturalSize.h <= 256
-								? "pixelated"
-								: undefined,
-						transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
-						opacity: closing ? 0 : 1,
-						transition: dragging
-							? "opacity 250ms ease-out"
-							: "transform 0.15s ease-out, opacity 250ms ease-out",
-					}}
-					onLoad={(e) => {
-						const img = e.currentTarget;
-						setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-					}}
-					draggable={false}
-					onClick={(e) => e.stopPropagation()}
-				/>
+				{isAnimated ? (
+					<div
+						role="img"
+						aria-label={alt || ""}
+						className="max-w-[90vw] max-h-[90vh] select-none"
+						style={{
+							aspectRatio: cellRatio ?? 1,
+							width: "90vw",
+							height: "90vh",
+							objectFit: "contain",
+							backgroundImage: `url(${src})`,
+							backgroundSize: `${frames * 100}% ${rows * 100}%`,
+							backgroundPosition: `0% ${yPos}%`,
+							backgroundRepeat: "no-repeat",
+							imageRendering: "pixelated",
+							animationName: keyframesName,
+							animationDuration: `${duration}s`,
+							animationTimingFunction: `steps(${frames})`,
+							animationIterationCount: "infinite",
+							transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
+							opacity: closing ? 0 : 1,
+							transition: dragging
+								? "opacity 250ms ease-out"
+								: "transform 0.15s ease-out, opacity 250ms ease-out",
+						}}
+						onClick={(e) => e.stopPropagation()}
+					>
+						<style
+							dangerouslySetInnerHTML={{
+								__html: `@keyframes ${keyframesName} { from { background-position: 0% ${yPos}%; } to { background-position: ${xTarget}% ${yPos}%; } }`,
+							}}
+						/>
+					</div>
+				) : (
+					<img
+						ref={imgRef}
+						src={src}
+						alt={alt || ""}
+						className="max-w-full max-h-full w-auto h-auto object-contain select-none"
+						style={{
+							// 原寸が小さい画像(ドット絵など)でも画面いっぱいまで引き伸ばす
+							width: naturalSize ? "90vw" : undefined,
+							height: naturalSize ? "90vh" : undefined,
+							imageRendering:
+								naturalSize && naturalSize.w <= 256 && naturalSize.h <= 256
+									? "pixelated"
+									: undefined,
+							transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
+							opacity: closing ? 0 : 1,
+							transition: dragging
+								? "opacity 250ms ease-out"
+								: "transform 0.15s ease-out, opacity 250ms ease-out",
+						}}
+						onLoad={(e) => {
+							const img = e.currentTarget;
+							setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+						}}
+						draggable={false}
+						onClick={(e) => e.stopPropagation()}
+					/>
+				)}
 			</div>
 		</div>
 	);

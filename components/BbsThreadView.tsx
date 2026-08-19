@@ -179,6 +179,9 @@ export default function BbsThreadView({
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
 		alt?: string;
+		animFrames?: number | null;
+		animFps?: number | null;
+		walkPreset?: string | null;
 	} | null>(null);
 
 	useEffect(() => {
@@ -615,6 +618,9 @@ export default function BbsThreadView({
 												setPreviewImage({
 													src: p.imageSrc,
 													alt: p.imageAlt || "ユーザーアート",
+													animFrames: p.animFrames,
+													animFps: p.animFps,
+													walkPreset: p.walkPreset,
 												});
 										}}
 										className="cursor-pointer gimp-checkered-background-white"
@@ -789,6 +795,9 @@ export default function BbsThreadView({
 				<ImagePreview
 					src={previewImage.src}
 					alt={previewImage.alt}
+					animFrames={previewImage.animFrames}
+					animFps={previewImage.animFps}
+					walkPreset={previewImage.walkPreset}
 					onClose={() => setPreviewImage(null)}
 				/>
 			)}

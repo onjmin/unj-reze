@@ -170,6 +170,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
 		alt?: string;
+		animFrames?: number | null;
+		animFps?: number | null;
+		walkPreset?: string | null;
 	} | null>(null);
 
 	const [showEditModal, setShowEditModal] = useState(false);
@@ -1417,6 +1420,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										setPreviewImage({
 											src: post.imageSrc,
 											alt: post.imageAlt || "ユーザーアート",
+											animFrames: post.animFrames,
+											animFps: post.animFps,
+											walkPreset: post.walkPreset,
 										});
 								}}
 								className="cursor-pointer gimp-checkered-background-white"
@@ -1615,7 +1621,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										onEdit={handleEditReply}
 										onDelete={handleDeleteReply}
 										onAvatarClick={handleAvatarClick}
-										onPreviewImage={(src, alt) => setPreviewImage({ src, alt })}
+										onPreviewImage={(src, alt, animFrames, animFps, walkPreset) =>
+											setPreviewImage({
+												src,
+												alt,
+												animFrames,
+												animFps,
+												walkPreset,
+											})
+										}
 										onOpenCollab={handleOpenCollab}
 										onEditMv={handleEditMvFor}
 										onEditMml={handleEditMusicFor}
@@ -1642,6 +1656,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				<ImagePreview
 					src={previewImage.src}
 					alt={previewImage.alt}
+					animFrames={previewImage.animFrames}
+					animFps={previewImage.animFps}
+					walkPreset={previewImage.walkPreset}
 					onClose={() => setPreviewImage(null)}
 				/>
 			)}
@@ -1884,7 +1901,13 @@ function ReplyTreeItem({
 		user: { displayName: string; slug?: string },
 		pos: { x: number; y: number },
 	) => void;
-	onPreviewImage?: (src: string, alt?: string) => void;
+	onPreviewImage?: (
+		src: string,
+		alt?: string,
+		animFrames?: number | null,
+		animFps?: number | null,
+		walkPreset?: string | null,
+	) => void;
 	onOpenCollab?: (post: Post) => void;
 	onEditMv?: (post: Post) => void;
 	onEditMml?: (post: Post, mml: string) => void;
@@ -2342,6 +2365,9 @@ function ReplyTreeItem({
 										onPreviewImage?.(
 											localPost.imageSrc,
 											localPost.imageAlt || "ユーザーアート",
+											localPost.animFrames,
+											localPost.animFps,
+											localPost.walkPreset,
 										);
 								}}
 								className="cursor-pointer gimp-checkered-background-white"

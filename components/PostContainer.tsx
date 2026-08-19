@@ -148,6 +148,9 @@ export default function PostContainer({
 	const [previewImage, setPreviewImage] = useState<{
 		src: string;
 		alt?: string;
+		animFrames?: number | null;
+		animFps?: number | null;
+		walkPreset?: string | null;
 	} | null>(null);
 	const [optimisticallyDeleted, setOptimisticallyDeleted] = useState(false);
 	const targetSlug = post.slug || post.displayName;
@@ -742,6 +745,9 @@ export default function PostContainer({
 										setPreviewImage({
 											src: post.imageSrc,
 											alt: post.imageAlt || "ユーザーアート",
+											animFrames: post.animFrames,
+											animFps: post.animFps,
+											walkPreset: post.walkPreset,
 										});
 								}}
 								className="cursor-pointer gimp-checkered-background-white"
@@ -1094,6 +1100,9 @@ export default function PostContainer({
 				<ImagePreview
 					src={previewImage.src}
 					alt={previewImage.alt}
+					animFrames={previewImage.animFrames}
+					animFps={previewImage.animFps}
+					walkPreset={previewImage.walkPreset}
 					onClose={() => setPreviewImage(null)}
 				/>
 			)}
