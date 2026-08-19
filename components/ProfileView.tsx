@@ -75,6 +75,7 @@ const MusicShareModal = dynamic(() => import("./MusicShareModal"), {
 
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cachePost } from "@/lib/post-cache";
+import { getDistinctTitle } from "@/lib/post-title";
 import { cacheProfileSeed, readProfileSeed } from "@/lib/profile-cache";
 
 interface ProfileViewProps {
@@ -1447,7 +1448,17 @@ export default function ProfileView({
 													onUndoDelete={handleUndoDelete}
 												/>
 											</div>
-
+											{(() => {
+												const distinctTitle = getDistinctTitle(p);
+												return distinctTitle ? (
+													<div
+														className="text-sm font-bold text-gray-100 break-words leading-snug mb-1 cursor-pointer hover:text-white transition-colors"
+														onClick={() => handlePostClick(p)}
+													>
+														{distinctTitle}
+													</div>
+												) : null;
+											})()}
 											{/* break-words が無いと長いURLが折り返せず、プロフィールが横に伸びて
                       中央寄せのレイアウトごと左へずれる（＝左端の要素が画面外に隠れる） */}
 											<div
