@@ -11,14 +11,6 @@ import {
 	tldrSfxUrl,
 } from "@/lib/deltarune-tldr-assets";
 import {
-	SM127_MUSIC,
-	SM127_SFX,
-	type SM127MusicKey,
-	type SM127SfxKey,
-	sm127MusicUrl,
-	sm127SfxUrl,
-} from "@/lib/mario-sm127-assets";
-import {
 	MEGAMAN_MUSIC,
 	MEGAMAN_SFX,
 	type MegamanMusicKey,
@@ -39,7 +31,7 @@ interface BuiltinGameSoundPanelProps {
 	onPlayPreview?: (stopFn: () => void) => void;
 }
 
-type Source = "undertale" | "deltarune" | "mario" | "megaman";
+type Source = "undertale" | "deltarune" | "megaman";
 
 interface Entry {
 	key: string;
@@ -50,12 +42,11 @@ interface Entry {
 const SOURCE_LABEL: Record<Source, string> = {
 	undertale: "💀 アンダーテール",
 	deltarune: "🖤 デルタルーン",
-	mario: "🍄 マリオ127",
 	megaman: "🔫 ロックマンJS",
 };
 
 // 各ゲームプロジェクトの音源一覧を { key, label, url } に正規化する。
-// undertale は効果音のみ（BGM収録なし）、mario/megaman はBGM・SEどちらも持つ。
+// undertale は効果音のみ（BGM収録なし）、megaman はBGM・SEどちらも持つ。
 function buildEntries(source: Source, kind: "bgm" | "sfx"): Entry[] {
 	if (source === "undertale") {
 		if (kind === "bgm") return [];
@@ -77,20 +68,6 @@ function buildEntries(source: Source, kind: "bgm" | "sfx"): Entry[] {
 			key: k,
 			label: k,
 			url: tldrSfxUrl(k),
-		}));
-	}
-	if (source === "mario") {
-		if (kind === "bgm") {
-			return (Object.keys(SM127_MUSIC) as SM127MusicKey[]).map((k) => ({
-				key: k,
-				label: k,
-				url: sm127MusicUrl(k),
-			}));
-		}
-		return (Object.keys(SM127_SFX) as SM127SfxKey[]).map((k) => ({
-			key: k,
-			label: k,
-			url: sm127SfxUrl(k),
 		}));
 	}
 	// megaman
@@ -115,7 +92,7 @@ function formatTime(sec: number) {
 	return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-const SOURCES: Source[] = ["undertale", "deltarune", "mario", "megaman"];
+const SOURCES: Source[] = ["undertale", "deltarune", "megaman"];
 
 /** 内蔵の他プロジェクト音源タブ（アンダーテール／デルタルーン／マリオ127／ロックマンJS）。
  *  いずれもGitHub raw CDNで直接配信されている音声を直リンク（type: 'direct'）として選択する。 */
@@ -127,7 +104,7 @@ export default function BuiltinGameSoundPanel({
 	const sourcesAvailable = SOURCES.filter(
 		(s) => buildEntries(s, kind).length > 0,
 	);
-	const [source, setSource] = useState<Source>(sourcesAvailable[0] ?? "mario");
+	const [source, setSource] = useState<Source>(sourcesAvailable[0] ?? "undertale");
 	const [previewKey, setPreviewKey] = useState<string | null>(null);
 	const [currentTime, setCurrentTime] = useState(0);
 	const [duration, setDuration] = useState(0);

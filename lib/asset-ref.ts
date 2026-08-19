@@ -415,7 +415,6 @@ const WALK_STD_IDS = new Set([
 	"rmvx",
 	"rmmv",
 	"smc",
-	"smc_json",
 	"row_anim",
 ]);
 
@@ -440,15 +439,6 @@ export function parseWalkRef(raw: string): WalkRef | null {
 		const maybeStd = rest.slice(0, colon);
 		if (WALK_STD_IDS.has(maybeStd)) {
 			const srcStr = rest.slice(colon + 1);
-			if (maybeStd === "smc_json") {
-				const parts = srcStr.split(":");
-				const spriteKey = parts[0];
-				const animName = parts[1] || "";
-				return {
-					stdId: "smc_json",
-					source: { kind: "url", url: `smc_json:${spriteKey}:${animName}` },
-				};
-			}
 			if (srcStr.startsWith("u:")) {
 				const rawUrl = srcStr.slice(2);
 				// クロップ指定 (#sx,sy,sw,sh) をURLフラグメントとして解析

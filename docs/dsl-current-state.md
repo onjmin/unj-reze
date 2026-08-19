@@ -11,7 +11,7 @@
 | ② 手続きスクリプト | 弾幕パターン等の挙動 | 独自テキストDSL「MiniScript」 | [components/MiniScriptVM.ts](../components/MiniScriptVM.ts) |
 | ③ アセット参照 | 画像/BGM/SEの出典 | `scheme:value` 形式の短い文字列リファレンス | [lib/asset-ref.ts](../lib/asset-ref.ts) |
 
-①は5プリセット（mario/rockman/dq/touhou/onjReze）共通のGUI（[GameMaker.tsx](../components/GameMaker.tsx)）が直接編集する構造化データであり、現状テキストDSLとしては存在しない（テキスト化はまだ未実装の検討事項）。
+①は複数プリセット（rockman/dq/touhou/onjReze等）共通のGUI（[GameMaker.tsx](../components/GameMaker.tsx)）が直接編集する構造化データであり、現状テキストDSLとしては存在しない（テキスト化はまだ未実装の検討事項）。
 ②③は既に実テキスト形式として運用されている。
 
 ---
@@ -64,8 +64,7 @@
 | `rmxp` | ツクールXP | 32×48 | 4 | 行順：前/左/右/後 |
 | `rmvx` | ツクールVX | 32×32 | 3 | 行順：前/左/右/後 |
 | `rmmv` | ツクールMV | 48×48 | 3 | 行順：前/左/右/後 |
-| `smc` | SMC（水平ストリップ） | 16×16 | 2 | 右向き1行のみ、左移動は水平反転(`flipH`) |
-| `smc_json` | SMCアニメーションJSON | — | — | 後述§5、`zynq-platform/super-mario-construct`のアニメ定義を参照 |
+| `smc` | SMC（水平ストリップ） | 16×16 | 2 | 右向き1行のみ、左移動は水平反転(`flipH`)。汎用の手動クロップ規格で特定CDNに依存しない |
 
 `source`は `u:<URL直リンク>` または `p:<投稿ID>` のいずれか。
 
@@ -80,30 +79,18 @@ walk:smc:u:https://cdn.../Boss.png#0,0,64,64,4        ← 末尾にコマ数(fra
 
 ---
 
-## 5. SMC（Super Mario Construct）アセット連携
-
-[lib/smc-helper.ts](../lib/smc-helper.ts) ・ [components/SMCAssetPanel.tsx](../components/SMCAssetPanel.tsx)
-
-- 外部リポジトリ `zynq-platform/super-mario-construct`（jsDelivr CDN経由）のスプライト・アニメーション定義を参照する専用連携。
-- `resolveSMCUrl()`：`.webp`拡張子は`.png`へ正規化してCDN URLを生成（リポジトリ実体がPNGのため）。
-- `extractSmcMetadata()`：SMCプロジェクトJSON内の入れ子配列構造をパースし、オブジェクトごとのアニメーション定義（フレーム・速度・ループ・反復回数等）を抽出。
-- 用途：マリオ風プリセットの土管・敵キャラ等の素材をエディタから直接検索・配置するため（[GameMaker.tsx](../components/GameMaker.tsx)のSMCAssetPanel統合）。
-
----
-
-## 6. サポートしている画像ファイル形式（実体ファイル）
+## 5. サポートしている画像ファイル形式（実体ファイル）
 
 「規格(stdId)」とは別に、画像ファイル自体のフォーマット制限は次の通り：
 
 - **アップロード時**（`POST /api/upload`、[app/api/upload/route.ts](../app/api/upload/route.ts)）：`data:image/` で始まるデータURLであれば**拡張子・MIMEサブタイプによる絞り込みは行っていない**（PNG/JPEG/GIF/WebP等を区別せず通す）。
 - **表示時**：`<img>`タグ／Canvas `drawImage()`で読み込むため、**ブラウザが標準でデコードできる形式なら何でも表示可能**（PNG・JPEG・GIF・WebP・BMP、対応ブラウザならAVIF等）。コード側での明示的なフォーマット制限はない。
-- **例外**：SMC連携は`.webp`を`.png`に正規化してCDN取得する（§5）ため、実質PNG前提。
 
 つまり「対応画像形式」はコード上のホワイトリストではなく、**ブラウザのネイティブデコード能力に委ねられている**のが現状。SVGのような特殊系・アニメーションGIFの逐次再生対応などは未検証。
 
 ---
 
-## 7. まとめ：DSL化検討との対応関係
+## 6. まとめ：DSL化検討との対応関係
 
 | 既存要素 | 将来DSL化したときの位置づけ |
 |---|---|

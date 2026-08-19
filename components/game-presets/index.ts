@@ -1,10 +1,10 @@
 import { deltarune } from "./deltarune";
 import { dq } from "./dq";
-import { mario } from "./mario";
 import { mmo3d } from "./mmo3d";
 import { onjReze } from "./onj-reze";
 import { rockman } from "./rockman";
 import { type PresetData, type PresetId } from "./shared";
+import { snowForest } from "./snow-forest";
 import { touhou } from "./touhou";
 import { undertale } from "./undertale";
 import { yume } from "./yume";
@@ -13,7 +13,7 @@ export * from "./shared";
 
 export const PRESETS: Record<PresetId, PresetData> = {
 	dq,
-	mario,
+	snowForest,
 	rockman,
 	touhou,
 	onjReze,
@@ -25,7 +25,7 @@ export const PRESETS: Record<PresetId, PresetData> = {
 export const PRESET_ORDER: PresetId[] = [
 	"onjReze",
 	"dq",
-	"mario",
+	"snowForest",
 	"touhou",
 	"rockman",
 	"undertale",
@@ -35,7 +35,7 @@ export const PRESET_ORDER: PresetId[] = [
 ];
 export const PRESET_EMOJI: Record<PresetId, string> = {
 	dq: "",
-	mario: "",
+	snowForest: "",
 	touhou: "",
 	rockman: "",
 	onjReze: "",
@@ -49,7 +49,7 @@ export const PRESET_EMOJI: Record<PresetId, string> = {
 export const PRESET_TAGLINE: Record<PresetId, string> = {
 	onjReze: "爆弾で暴れるアクション",
 	dq: "コマンド戦闘の王道RPG",
-	mario: "走って跳ぶ横スクロール",
+	snowForest: "氷の足場を跳び渡る横スクロール",
 	touhou: "弾幕をよけるシューティング",
 	rockman: "撃って進むアクション",
 	undertale: "ころさなくてもいいRPG",

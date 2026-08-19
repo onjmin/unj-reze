@@ -17,7 +17,7 @@ export const VIEW_H = VIEW_ROWS * TILE_SIZE; // 352 px
 
 export type PresetId =
 	| "dq"
-	| "mario"
+	| "snowForest"
 	| "rockman"
 	| "touhou"
 	| "onjReze"

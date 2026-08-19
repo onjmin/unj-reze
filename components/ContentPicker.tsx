@@ -30,7 +30,6 @@ import AssetThumb from "./AssetThumb";
 import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
 import LocalAssetPanel from "./LocalAssetPanel";
 import RpgenAssetPanel from "./RpgenAssetPanel";
-import SMCAssetPanel from "./SMCAssetPanel";
 import SpriteImage from "./SpriteImage";
 import SpriteSheetBrowser from "./SpriteSheetBrowser";
 import UserSheetPanel from "./UserSheetPanel";
@@ -72,7 +71,6 @@ type ImageTab =
 	| "urlDirect"
 	| "rpgenSprite"
 	| "rpgenWalk"
-	| "smc"
 	| "local"
 	| "mySheet"
 	| "color"
@@ -727,12 +725,6 @@ export default function ContentPicker({
 								外部歩行グラ
 							</button>
 							<button
-								className={tabBtn(imageTab === "smc")}
-								onClick={() => changeImageTab("smc")}
-							>
-								SMC素材
-							</button>
-							<button
 								className={tabBtn(imageTab === "mcSkin")}
 								onClick={() => changeImageTab("mcSkin")}
 							>
@@ -854,9 +846,6 @@ export default function ContentPicker({
 					)}
 					{mode === "image" && imageTab === "rpgenWalk" && (
 						<RpgenAssetPanel kind="walk" onPick={onPick} />
-					)}
-					{mode === "image" && imageTab === "smc" && (
-						<SMCAssetPanel onPick={onPick} />
 					)}
 					{mode === "image" && imageTab === "local" && (
 						<LocalAssetPanel onPick={onPick} />
