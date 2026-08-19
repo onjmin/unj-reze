@@ -88,7 +88,7 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
 			{
 				name: "春音リノ",
 				description: "心に届く。美味しい歌声",
-				src: "https://hatenakun1.github.io/halunelino/",
+				src: "https://harunerino.vercel.app/",
 			},
 		],
 	},
