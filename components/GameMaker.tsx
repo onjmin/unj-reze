@@ -779,6 +779,8 @@ const SWORD_SPRITE_URL = 'https://rpgen-search.pages.dev/data/images/sprites/BkI
 const ACTION_MAX_FALL = 20;
 /** ジャンプ力に対する踏みつけ跳ね返り比（敵を踏んだ瞬間の上昇速度）。 */
 const STOMP_BOUNCE_RATIO = 0.7;
+/** こおりの森：着地直後に専用コマ（2,3枚目）を出す長さ（フレーム数、前半/後半で折半）。 */
+const SNOWFOREST_LAND_FRAMES = 12;
 
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; color?: string; bounce?: boolean; }
 interface EnemyBullet {
@@ -2761,6 +2763,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const isWallSlidingRef = useRef(false);
   const wallSlideDirRef = useRef(0); // -1: 左壁, 1: 右壁, 0: なし
   const prevGroundedRef = useRef(false);
+  const snowForestLandFramesRef = useRef(0); // こおりの森：着地直後だけ専用の2,3コマ目を出す残りフレーム数
   const particlesRef = useRef<{
     x: number;
     y: number;
@@ -8127,8 +8130,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             scaleXRef.current = 1.3;
             scaleYRef.current = 0.7;
+            if (gameData.id === 'snowForest') snowForestLandFramesRef.current = SNOWFOREST_LAND_FRAMES;
           }
           prevGroundedRef.current = p.isGrounded;
+          if (snowForestLandFramesRef.current > 0) snowForestLandFramesRef.current--;
 
           if (p.isGrounded && Math.abs(p.vx) > 2.0) {
             if (sprintActive && frameCount % 6 === 0) {
@@ -10903,7 +10908,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // n（方向転換しない）：移動量からの向き更新を止めるため、今の向きをそのまま overrideDir に渡す
         const lockedFacing = playerFacingLockRef.current ? walkInst.get('player')?.dir : undefined;
         lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
-        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
+        // ── こおりの森：ジャンプ〜着地の専用3コマ（y=96〜128）へ差し替える ──
+        // 1枚目＝空中の構え（上昇・落下とも共通）、2/3枚目＝着地直後だけの着地コマ
+        // （snowForestLandFramesRef が着地の瞬間から前半/後半で2→3枚目の順に切り替わる）。
+        let snowForestJumpRef: string | undefined;
+        if (gameData.id === 'snowForest') {
+          if (!p.isGrounded) {
+            snowForestJumpRef = `walk:smc:u:${pData.spriteUrl}#0,96,24,32,1,0,2`;
+          } else if (snowForestLandFramesRef.current > 0) {
+            const jf = snowForestLandFramesRef.current > SNOWFOREST_LAND_FRAMES / 2 ? 1 : 2;
+            snowForestJumpRef = `walk:smc:u:${pData.spriteUrl}#${jf * 24},96,24,32,1,0,2`;
+          }
+        }
+        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: snowForestJumpRef ?? p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
           gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? lockedFacing ?? blockedOverride));
         // ── こおりの森：プレイヤーに寄り添う光の精霊（当たり判定なしの純粋な演出）──
         if (gameData.id === 'snowForest') {

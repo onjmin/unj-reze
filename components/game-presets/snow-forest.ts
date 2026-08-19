@@ -211,11 +211,13 @@ const midTrees = [
 	deco(CROP.greenBig, 72, 3, 175),
 ];
 
-// ── 前景の大きな松（動画のように画面手前で大きく描く） ────────────────────────
+// ── 前景の大きな松（動画のように画面手前で画面いっぱいに大きく描く） ────────────
+// プレイヤーがこのシートの2倍描画(renderScale=2)で高さ約64pxになるのに合わせ、
+// 前景木はその4〜5倍程度の存在感（動画の「手前の1本が画面を占める」構図に寄せる）。
 const fgTrees = [
-	deco(CROP.pineBig, 1, GROUND_TOP - 1, TILE_SIZE * 6),
-	deco(CROP.frostTree, 44, GROUND_TOP - 1, TILE_SIZE * 5),
-	deco(CROP.greenBig, 66, GROUND_TOP - 1, TILE_SIZE * 5.5),
+	deco(CROP.pineBig, 1, GROUND_TOP - 1, TILE_SIZE * 8),
+	deco(CROP.frostTree, 44, GROUND_TOP - 1, TILE_SIZE * 6.5),
+	deco(CROP.greenBig, 66, GROUND_TOP - 1, TILE_SIZE * 7),
 ];
 
 // ── 地面まわりの小物 ──────────────────────────────────────────────────────
@@ -346,12 +348,14 @@ export const snowForest: PresetData = {
 		h: 32,
 		start: { x: 64, y: 320 },
 		hearts: 3,
-		// 提供元シート(72x128, 24x32セル×4行)は「上/右/下/左」の4方向格子だが、
-		// きれいな横向き3コマ歩行が揃っているのは1行（y=32〜64）だけで、もう1行は
-		// 正面寄り＋腕を伸ばすポーズで左右ミラーの対になっていない。4方向格子として
-		// 読むと「向きが変わって見えない」原因になるため、その1行だけを横ストリップ
-		// として切り出し、左移動時は水平反転(smc規格のflipH)で表現する。
-		spriteRef: `walk:smc:u:${PLAYER_SPRITE_URL}#0,32,72,32,3`,
+		// 提供元シート(72x128, 24x32セル×4行)は「4方向の歩行グラ格子」ではなく、
+		// y=32〜64（横向き3コマ・歩行サイクル）と y=96〜128（ジャンプ用3コマ：1枚目＝空中の
+		// 構え、2/3枚目＝着地直後だけの着地モーション）の2種類のアニメーションが別の行に
+		// 入っている。歩行は y=32 の1行だけを横ストリップとして切り出し、左移動時は水平反転
+		// (smc規格のflipH)で表現する（GameMaker.tsx側で gameData.id==='snowForest' 限定で
+		// 空中/着地直後は y=96 の行の該当コマへ差し替え表示する）。
+		// renderScale で見た目だけ2倍に拡大（当たり判定(w/h)は変えない＝1タイル級のまま）。
+		spriteRef: `walk:smc:u:${PLAYER_SPRITE_URL}#0,32,72,32,3,0,2`,
 		spriteUrl: PLAYER_SPRITE_URL,
 	},
 	tiles,
