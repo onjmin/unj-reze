@@ -145,6 +145,10 @@ export default function SpriteImage({
 	} | null>(null);
 	const [selectedWay, setSelectedWay] = useState<string | null>(null);
 	const [staticWidthPx, setStaticWidthPx] = useState<number | null>(null);
+	const [staticSize, setStaticSize] = useState<{
+		w: number;
+		h: number;
+	} | null>(null);
 	// "play"(既定)=クロップして選択中のコマ/向きを再生。"sheet"=元のスプライトシート
 	// 画像をそのまま(全コマ並び)静止表示する。fit="natural"のときだけ切替ボタンを出す。
 	const [viewMode, setViewMode] = useState<"play" | "sheet">("play");
@@ -172,42 +176,58 @@ export default function SpriteImage({
 	}, [src, frames, rows]);
 
 	// 静止画のドット絵: <img>の内在サイズはブラウザが自然に処理してくれるが、
-	// MIN_DISPLAY_PX未満かどうかの判定にはnaturalWidthの計測が要る。
+	// MIN_DISPLAY_PX未満かどうかの判定・アスペクト比を保った拡大幅の計算には
+	// naturalWidth/Heightの計測が要る。fit="cover"（メディアタブ/一覧サムネ等）でも
+	// object-fitでCSS側が拡大するため、pixelated指定のためにここで計測する
+	// （拡大幅そのものを強制するのはfit="natural"のときだけ。cover側はCSSに任せる）。
 	useEffect(() => {
-		if (frames > 1 || !src || fit !== "natural" || !dotArt) return;
+		if (frames > 1 || !src || !dotArt) return;
 		let cancelled = false;
 		const img = new Image();
 		img.onload = () => {
-			if (!cancelled && img.naturalWidth) setStaticWidthPx(img.naturalWidth);
+			if (!cancelled && img.naturalWidth && img.naturalHeight) {
+				setStaticWidthPx(img.naturalWidth);
+				setStaticSize({ w: img.naturalWidth, h: img.naturalHeight });
+			}
 		};
 		img.src = src;
 		return () => {
 			cancelled = true;
 		};
-	}, [src, frames, fit, dotArt]);
+	}, [src, frames, dotArt]);
 
 	if (frames <= 1 || !src) {
-		const enlarge =
-			dotArt &&
-			fit === "natural" &&
-			staticWidthPx !== null &&
-			staticWidthPx < MIN_DISPLAY_PX;
+		const small = staticWidthPx !== null && staticWidthPx < MIN_DISPLAY_PX;
+		const enlarge = dotArt && fit === "natural" && small;
+		let enlargedBox: { width: number; height: number } | null = null;
+		if (enlarge && staticSize) {
+			let width = Math.max(staticSize.w, MIN_DISPLAY_PX);
+			let height = width * (staticSize.h / staticSize.w);
+			// natural表示のmaxHeightPx（例: フィードの投稿カード）を尊重して
+			// 比率を保ったまま縮める。widthだけ固定してheight:"auto"にすると
+			// max-heightのCSSクランプで縦だけ潰れる（歩行グラ等と同じ罠）。
+			if (maxHeightPx && height > maxHeightPx) {
+				height = maxHeightPx;
+				width = height * (staticSize.w / staticSize.h);
+			}
+			enlargedBox = { width, height };
+		}
 		return (
 			<img
 				src={src}
 				alt={alt || ""}
 				className={className}
-				style={
-					enlarge
+				style={{
+					...style,
+					...(enlargedBox
 						? {
-								...style,
-								width: MIN_DISPLAY_PX,
+								width: enlargedBox.width,
+								height: enlargedBox.height,
 								maxWidth: "100%",
-								height: "auto",
-								imageRendering: "pixelated",
 							}
-						: style
-				}
+						: undefined),
+					...(dotArt ? { imageRendering: "pixelated" } : undefined),
+				}}
 				draggable={draggable}
 				onClick={onClick}
 				onError={onError}
