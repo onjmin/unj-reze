@@ -26,14 +26,6 @@ interface FeedCacheEntry {
 const MAX_AGE_MS = 5 * 60_000;
 
 let cache: FeedCacheEntry | null = null;
-if (typeof window !== "undefined") {
-	// biome-ignore lint: temp debug
-	(window as any).__feedCacheDebug = () => cache;
-	// biome-ignore lint: temp debug
-	(window as any).__feedCacheSetScrollTop = (v: number) => {
-		if (cache) cache.scrollTop = v;
-	};
-}
 
 export function buildFeedCacheKey(parts: {
 	currentNav: string;

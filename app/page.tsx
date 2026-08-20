@@ -441,12 +441,49 @@ export default function App() {
 		viewerId,
 	});
 
+	// #scrollable-content は overflow:visible で実体はドキュメントスクロールなので、
+	// 実際にスクロールしている要素（そちらが独自スクロールしていれば優先）を見て高さ/位置を扱う。
+	const readScrollTop = useCallback(() => {
+		const el = getScrollContainer();
+		if (
+			el instanceof HTMLElement &&
+			el.id === SCROLL_CONTAINER_ID &&
+			el.scrollHeight > el.clientHeight
+		) {
+			return el.scrollTop;
+		}
+		return window.scrollY || document.documentElement.scrollTop;
+	}, []);
+	const writeScrollTop = useCallback((top: number) => {
+		const el = getScrollContainer();
+		if (
+			el instanceof HTMLElement &&
+			el.id === SCROLL_CONTAINER_ID &&
+			el.scrollHeight > el.clientHeight
+		) {
+			el.scrollTop = top;
+		} else {
+			window.scrollTo(0, top);
+		}
+	}, []);
+
+	// 復元待ちのスクロール位置。posts が実際にキャッシュ内容へ差し替わった（＝DOMが
+	// 復元済み一覧を描画した）タイミングで消費する。rAF 任せだとタブが非フォーカスの
+	// 間は発火しないことがあるため、posts の反映そのものをトリガーにする。
+	const pendingRestoreRef = useRef<{ key: string; scrollTop: number } | null>(
+		null,
+	);
+
 	// タイムラインからスレ詳細等へ遷移すると app/page.tsx は丸ごとアンマウントされるため、
 	// 戻ってきたときにキャッシュがあればそれを即描画してスクロール位置も復元する。
 	// タブ/モードを切り替えて戻ってきた場合はキーが変わるので通常どおり取得し直す。
 	useEffect(() => {
 		const cached = readFeedCache(feedCacheKey);
 		if (cached) {
+			pendingRestoreRef.current = {
+				key: feedCacheKey,
+				scrollTop: cached.scrollTop,
+			};
 			// setState をエフェクト本体で直に呼ぶと連鎖レンダー扱いになるため、
 			// fetchPosts の非同期完了時と同様にマイクロタスクへ逃がす。
 			Promise.resolve().then(() => {
@@ -455,21 +492,6 @@ export default function App() {
 				setHasMorePosts(cached.hasMorePosts);
 				setLoading(false);
 			});
-			const savedScrollTop = cached.scrollTop;
-			// #scrollable-content は overflow:visible で実体はドキュメントスクロールなので、
-			// 実際にスクロールしている要素（そちらが独自スクロールしていれば優先）を見て復元する。
-			requestAnimationFrame(() => {
-				const el = getScrollContainer();
-				if (
-					el instanceof HTMLElement &&
-					el.id === SCROLL_CONTAINER_ID &&
-					el.scrollHeight > el.clientHeight
-				) {
-					el.scrollTop = savedScrollTop;
-				} else {
-					window.scrollTo(0, savedScrollTop);
-				}
-			});
 		} else {
 			fetchPosts();
 		}
@@ -477,9 +499,20 @@ export default function App() {
 	}, [feedCacheKey]);
 
 	// posts/hasMorePosts が変わるたびキャッシュへ反映しておく（いいね等の操作も含む）。
+	// 復元待ちがあれば、このタイミング（＝復元済み一覧が実際に state に載った直後）で
+	// スクロール位置を書き戻す。DOM は直前の commit で確定しているので rAF は不要。
+	// mount 直後の初期コミットは posts=[] のまま（キャッシュ復元/fetchPosts が終わる前）で
+	// 走ってしまうため、loading が片付くまでは書き込まない
+	// （でないと単一スロットのキャッシュを空配列で即座に潰してしまう）。
 	useEffect(() => {
+		if (loading) return;
 		writeFeedCache(feedCacheKey, posts, hasMorePosts);
-	}, [feedCacheKey, posts, hasMorePosts]);
+		const pending = pendingRestoreRef.current;
+		if (pending && pending.key === feedCacheKey) {
+			pendingRestoreRef.current = null;
+			writeScrollTop(pending.scrollTop);
+		}
+	}, [feedCacheKey, posts, hasMorePosts, writeScrollTop, loading]);
 
 	// スクロール位置は都度キャッシュへ書き戻す（離脱直前のイベントに頼らない）。
 	useEffect(() => {
@@ -487,21 +520,17 @@ export default function App() {
 		const onScroll = () => {
 			if (ticking) return;
 			ticking = true;
-			requestAnimationFrame(() => {
+			const commit = () => {
 				ticking = false;
-				const el = getScrollContainer();
-				const scrollTop =
-					el instanceof HTMLElement &&
-					el.id === SCROLL_CONTAINER_ID &&
-					el.scrollHeight > el.clientHeight
-						? el.scrollTop
-						: window.scrollY || document.documentElement.scrollTop;
-				writeFeedCacheScrollTop(feedCacheKey, scrollTop);
-			});
+				writeFeedCacheScrollTop(feedCacheKey, readScrollTop());
+			};
+			// タブが非表示の間は rAF が発火しないため、その場合は同期的に書き戻す。
+			if (document.hidden) commit();
+			else requestAnimationFrame(commit);
 		};
 		document.addEventListener("scroll", onScroll, true);
 		return () => document.removeEventListener("scroll", onScroll, true);
-	}, [feedCacheKey]);
+	}, [feedCacheKey, readScrollTop]);
 
 	/** 新着候補を「まだ表示していないもの」だけ積む。push とポーリング双方から呼ぶ。 */
 	const pushNewPosts = useCallback((incoming: Post[]) => {
