@@ -3,7 +3,7 @@
 import { ArrowLeft, Mail } from "lucide-react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
-import MessageView from "@/components/MessageView";
+import DmInboxList from "@/components/DmInboxList";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export default function MessagesPage() {
@@ -25,7 +25,7 @@ export default function MessagesPage() {
 			</div>
 			<div className="flex-1">
 				{/* DM API も users.id 前提。slug/displayName にフォールバックしない。 */}
-				<MessageView userId={currentUser?.id} />
+				<DmInboxList userId={currentUser?.id} />
 			</div>
 		</AppShell>
 	);

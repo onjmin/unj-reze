@@ -48,7 +48,7 @@ const RELATION_LABEL: Record<Relation, string> = {
 
 /**
  * 1対1のDMスレッド。プロフィールの「メッセージ」から直接ここへ来る。
- * 受信箱（MessageView）と違い、この相手との往復だけを取得する。
+ * 受信箱（DmInboxList）と違い、この相手との往復だけを取得する。
  */
 export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 	const router = useRouter();

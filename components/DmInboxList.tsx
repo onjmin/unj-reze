@@ -10,7 +10,7 @@ import { markMessagesSeen } from "@/lib/read-state";
 import { chUser } from "@/lib/realtime/channels";
 import { getRealtimeClient } from "@/lib/realtime/client";
 
-interface MessageViewProps {
+interface DmInboxListProps {
 	userId?: string;
 }
 
@@ -27,7 +27,7 @@ type MsgItem = {
  * タップしたら /messages/[slug]（DmThreadView）へ遷移する。
  * スレッド表示そのものはここでは持たない（DmThreadViewと二重実装しない）。
  */
-export default function MessageView({ userId }: MessageViewProps) {
+export default function DmInboxList({ userId }: DmInboxListProps) {
 	const router = useRouter();
 	const me = useCurrentUser();
 	const [messages, setMessages] = useState<MsgItem[]>([]);
