@@ -602,6 +602,8 @@ class MockDB {
 		hasImage?: boolean;
 		imageSrc?: string;
 		imageAlt?: string;
+		/** DrawingEditor/DotDrawingEditor経由か。falseなら生ファイルアップロード＝コラボ対象外 */
+		imageIsDrawn?: boolean;
 		avatarColor?: string;
 		slug?: string;
 		gameId?: number;
@@ -615,6 +617,7 @@ class MockDB {
 	}): Post {
 		const createdAt = this.now();
 		const name = data.displayName || "名無し";
+		const hasMml = extractMmlFromContent(data.content) !== null;
 		const post: Post = {
 			id: this.genId(),
 			datKey: this.nextDatKey(),
@@ -634,13 +637,19 @@ class MockDB {
 			imageSrc: data.imageSrc,
 			imageAlt: data.imageAlt,
 			avatarColor: data.avatarColor || "from-blue-500 to-indigo-600",
-			hasCollabButton: true,
+			// pg.ts createPost と同じ判定基準（画像はimageIsDrawnのときだけコラボ対象）
+			hasCollabButton: !!(
+				data.gameId ||
+				data.mvId ||
+				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
+				hasMml
+			),
 			heartsTotal: 0,
 			hasGame: !!data.gameId,
 			gameId: data.gameId,
 			hasMv: !!data.mvId,
 			mvId: data.mvId,
-			hasMml: extractMmlFromContent(data.content) !== null,
+			hasMml,
 			dotW: data.dotW,
 			dotH: data.dotH,
 			animFrames: data.animFrames,
@@ -746,6 +755,8 @@ class MockDB {
 			hasImage?: boolean;
 			imageSrc?: string;
 			imageAlt?: string;
+			/** DrawingEditor/DotDrawingEditor経由か。falseなら生ファイルアップロード＝コラボ対象外 */
+			imageIsDrawn?: boolean;
 			avatarColor?: string;
 			gameId?: number;
 			mvId?: number;
@@ -761,6 +772,7 @@ class MockDB {
 		if (!post) return null;
 		const id = Math.max(0, ...this.posts.map((p) => p.id)) + 1;
 		const name = data.displayName || "名無し";
+		const replyHasMml = extractMmlFromContent(data.content) !== null;
 		const reply: Post = {
 			id,
 			displayName: name,
@@ -787,7 +799,14 @@ class MockDB {
 			hasGame: !!data.gameId,
 			mvId: data.mvId,
 			hasMv: !!data.mvId,
-			hasMml: extractMmlFromContent(data.content) !== null,
+			hasMml: replyHasMml,
+			// createPost と同じ判定基準（画像はimageIsDrawnのときだけコラボ対象）
+			hasCollabButton: !!(
+				data.gameId ||
+				data.mvId ||
+				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
+				replyHasMml
+			),
 			dotW: data.dotW,
 			dotH: data.dotH,
 			animFrames: data.animFrames,

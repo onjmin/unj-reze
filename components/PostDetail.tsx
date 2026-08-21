@@ -120,6 +120,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 	const [composerOpen, setComposerOpen] = useState(false);
 	const [replyImage, setReplyImage] = useState<string | null>(null);
+	/** replyImage が DrawingEditor/DotDrawingEditor 経由か（app/page.tsx の attachedImageIsDrawn と同じ役割） */
+	const [replyImageIsDrawn, setReplyImageIsDrawn] = useState(false);
+	/** PostComposer の setImage に渡す直接setter。プレーンなファイル選択のときはここを通るので必ず false に倒す */
+	const setReplyImageDirect = useCallback((v: string | null) => {
+		setReplyImage(v);
+		setReplyImageIsDrawn(false);
+	}, []);
 	const [replyMml, setReplyMml] = useState<string | null>(null);
 	const [replyGameDraft, setReplyGameDraft] = useState<{
 		manifest: GameManifestDraft;
@@ -448,6 +455,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		const content = parts.join("\n");
 
 		const capturedImage = replyImage;
+		const capturedImageIsDrawn = replyImageIsDrawn;
 		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
@@ -494,6 +502,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 		setReplyText("");
 		setReplyImage(null);
+		setReplyImageIsDrawn(false);
 		setReplyDotSize(null);
 		setReplyAnim(null);
 		setReplyMml(null);
@@ -538,6 +547,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				parentPostId: targetParent.id,
 				hasImage: !!capturedImage,
 				imageSrc,
+				imageIsDrawn: capturedImageIsDrawn,
 				gameId,
 				mvId,
 				dotW: capturedDotSize?.w,
@@ -741,6 +751,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		animMeta?: { animFrames: number; animFps: number },
 	) => {
 		setReplyImage(canvasData);
+		setReplyImageIsDrawn(true);
 		if (animMeta) {
 			setReplyAnim(animMeta);
 		} else {
@@ -758,6 +769,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		animMeta?: { animFrames: number; animFps: number; walkPreset?: string },
 	) => {
 		setReplyImage(canvasData);
+		setReplyImageIsDrawn(true);
 		if (gridW && gridH) {
 			setReplyDotSize({ w: gridW, h: gridH });
 		} else {
@@ -1675,7 +1687,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					text={replyText}
 					setText={setReplyText}
 					image={replyImage}
-					setImage={setReplyImage}
+					setImage={setReplyImageDirect}
 					mml={replyMml}
 					setMml={setReplyMml}
 					gameDraft={replyGameDraft}

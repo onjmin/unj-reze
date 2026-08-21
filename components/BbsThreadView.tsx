@@ -142,6 +142,8 @@ export default function BbsThreadView({
 	const [post, setPost] = useState<Post>(initial);
 	const [replyText, setReplyText] = useState("");
 	const [replyImage, setReplyImage] = useState<string | null>(null);
+	/** replyImage が DrawingEditor/DotDrawingEditor 経由か（app/page.tsx の attachedImageIsDrawn と同じ役割） */
+	const [replyImageIsDrawn, setReplyImageIsDrawn] = useState(false);
 	const [replyMml, setReplyMml] = useState<string | null>(null);
 	const [replyGameDraft, setReplyGameDraft] = useState<ReplyGameDraft | null>(
 		null,
@@ -169,6 +171,7 @@ export default function BbsThreadView({
 	 */
 	const setReplyImageDirect = useCallback((v: string | null) => {
 		setReplyImage(v);
+		setReplyImageIsDrawn(false);
 		setReplyDotSize(null);
 		setReplyAnim(null);
 	}, []);
@@ -270,6 +273,7 @@ export default function BbsThreadView({
 			repliesCount: p.repliesCount + 1,
 		}));
 		const capturedImage = replyImage;
+		const capturedImageIsDrawn = replyImageIsDrawn;
 		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
@@ -278,6 +282,7 @@ export default function BbsThreadView({
 		const capturedAnim = replyAnim;
 		setReplyText("");
 		setReplyImage(null);
+		setReplyImageIsDrawn(false);
 		setReplyDotSize(null);
 		setReplyAnim(null);
 		setReplyMml(null);
@@ -322,6 +327,7 @@ export default function BbsThreadView({
 				parentPostId: post.id,
 				hasImage: !!capturedImage,
 				imageSrc,
+				imageIsDrawn: capturedImageIsDrawn,
 				gameId,
 				mvId,
 				dotW: capturedDotSize?.w,
@@ -353,6 +359,7 @@ export default function BbsThreadView({
 		animMeta?: { animFrames: number; animFps: number },
 	) => {
 		setReplyImage(canvasData);
+		setReplyImageIsDrawn(true);
 		if (animMeta) {
 			setReplyAnim(animMeta);
 		} else {
@@ -370,6 +377,7 @@ export default function BbsThreadView({
 		gridH?: number,
 	) => {
 		setReplyImage(canvasData);
+		setReplyImageIsDrawn(true);
 		if (gridW && gridH) {
 			setReplyDotSize({ w: gridW, h: gridH });
 		} else {

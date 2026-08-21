@@ -158,6 +158,7 @@ const staticApi = {
 			hasImage?: boolean;
 			imageSrc?: string;
 			imageAlt?: string;
+			imageIsDrawn?: boolean;
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
@@ -255,6 +256,7 @@ const staticApi = {
 					hasImage?: boolean;
 					imageSrc?: string;
 					imageAlt?: string;
+					imageIsDrawn?: boolean;
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;
@@ -616,6 +618,7 @@ const liveApi = {
 			hasImage?: boolean;
 			imageSrc?: string;
 			imageAlt?: string;
+			imageIsDrawn?: boolean;
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
@@ -705,6 +708,7 @@ const liveApi = {
 					hasImage?: boolean;
 					imageSrc?: string;
 					imageAlt?: string;
+					imageIsDrawn?: boolean;
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;

@@ -675,10 +675,13 @@ export const pgStore: DataStore = {
 						// MML投稿（c.contentType===CT.Dtm）も同じ理由で足し忘れると、MML埋め込みに
 						// 「コラボ」ボタンが一度も出ないまま導線が死ぬ（表示側はhasCollabButtonを
 						// 見るだけなので、ここで立てなければ何も表示されない）。
+						// 画像は imageIsDrawn（DrawingEditor/DotDrawingEditor経由）のときだけ対象。
+						// スマホ撮影写真等のプレーンアップロードには「コラボ」を出さない
+						// （編集可能なソースを持たず、コラボという行為自体が成立しないため）。
 						!!(
 							data.gameId ||
 							data.mvId ||
-							(data.hasImage && data.imageSrc) ||
+							(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 							c.contentType === CT.Dtm
 						),
 						data.gameId ?? null,
@@ -847,11 +850,12 @@ export const pgStore: DataStore = {
 						c.contentUrl,
 						c.contentType,
 						c.contentDataUrl,
-						// createPost と同じ理由でhasImage/MMLも起点にする
+						// createPost と同じ理由でhasImage/MMLも起点にする。
+						// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
 						!!(
 							data.gameId ||
 							data.mvId ||
-							(data.hasImage && data.imageSrc) ||
+							(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 							c.contentType === CT.Dtm
 						),
 						data.gameId ?? null,

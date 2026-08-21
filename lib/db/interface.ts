@@ -91,6 +91,13 @@ export interface CreatePostParams extends MmlRef {
 	hasImage?: boolean;
 	imageSrc?: string;
 	imageAlt?: string;
+	/**
+	 * imageSrc が DrawingEditor/DotDrawingEditor 経由(お絵かき/ドット絵)の保存結果か。
+	 * PostComposer のプレーンなファイル選択(input type=file)由来の画像は false/undefined になる。
+	 * hasCollabButton は「編集可能なソースを持つ画像か」で判定するため、これが立っていない
+	 * 画像は撮影写真等とみなしコラボ導線を出さない。
+	 */
+	imageIsDrawn?: boolean;
 	avatarColor?: string;
 	slug?: string;
 	gameId?: number;
@@ -138,6 +145,8 @@ export interface ReplyParams extends MmlRef {
 	hasImage?: boolean;
 	imageSrc?: string;
 	imageAlt?: string;
+	/** CreatePostParams.imageIsDrawn と同義（お絵かき/ドット絵編集由来か） */
+	imageIsDrawn?: boolean;
 	avatarColor?: string;
 	gameId?: number;
 	mvId?: number;

@@ -167,6 +167,12 @@ export default function App() {
 	const [messageCount, setMessageCount] = useState(0);
 	const [inputText, setInputText] = useState("");
 	const [attachedImage, setAttachedImage] = useState<string | null>(null);
+	/**
+	 * attachedImage が DrawingEditor/DotDrawingEditor の保存結果か（handleSaveDrawing/
+	 * handleSaveDotDrawing だけが true にする）。PostComposer のプレーンなファイル選択
+	 * (setAttachedImageDirect経由)は false のまま＝投稿時にコラボ導線を出さない対象になる。
+	 */
+	const [attachedImageIsDrawn, setAttachedImageIsDrawn] = useState(false);
 	const [attachedDotSize, setAttachedDotSize] = useState<
 		{ w: number; h: number } | null
 	>(null);
@@ -183,9 +189,12 @@ export default function App() {
 	 * ここで一律クリアしても後段の setAttachedAnim(meta) が上書きして正しく残る。
 	 * これを挟まないと、アニメを添付→PostComposerの×で消す→別の1枚絵を添付、の
 	 * 順で古い animFrames/fps/walkPreset が新しい投稿に紛れ込む。
+	 * ファイル選択(生アップロード)専用の経路でもあるので、ここで必ず attachedImageIsDrawn
+	 * を false に倒す。
 	 */
 	const setAttachedImageDirect = useCallback((v: string | null) => {
 		setAttachedImage(v);
+		setAttachedImageIsDrawn(false);
 		setAttachedDotSize(null);
 		setAttachedAnim(null);
 	}, []);
@@ -772,6 +781,7 @@ export default function App() {
 
 		setInputText("");
 		setAttachedImage(null);
+		setAttachedImageIsDrawn(false);
 		setAttachedDotSize(null);
 		setAttachedAnim(null);
 		setAttachedMml(null);
@@ -812,6 +822,7 @@ export default function App() {
 				parentPostId: postId,
 				hasImage: !!attachedImage,
 				imageSrc,
+				imageIsDrawn: attachedImageIsDrawn,
 				dotW: attachedDotSize?.w,
 				dotH: attachedDotSize?.h,
 				animFrames: attachedAnim?.animFrames,
@@ -940,6 +951,7 @@ export default function App() {
 		});
 		setInputText("");
 		setAttachedImage(null);
+		setAttachedImageIsDrawn(false);
 		setAttachedMml(null);
 		setGameDraft(null);
 		setMvDraft(null);
@@ -978,6 +990,7 @@ export default function App() {
 				content,
 				hasImage: !!attachedImage,
 				imageSrc,
+				imageIsDrawn: attachedImageIsDrawn,
 				avatarColor: "from-blue-500 to-indigo-600",
 				gameId,
 				mvId,
@@ -1151,6 +1164,7 @@ export default function App() {
 			return;
 		}
 		setAttachedImage(canvasData);
+		setAttachedImageIsDrawn(true);
 		setAttachedAnim(animMeta ? { ...animMeta } : null);
 		closeScreen();
 		setCollabImageUrl(undefined);
@@ -1190,6 +1204,7 @@ export default function App() {
 			return;
 		}
 		setAttachedImage(canvasData);
+		setAttachedImageIsDrawn(true);
 		setAttachedAnim(animMeta ? { ...animMeta } : null);
 		closeScreen();
 		setCollabImageUrl(undefined);
@@ -1508,6 +1523,7 @@ export default function App() {
 
 		if (discardType === "image") {
 			setAttachedImage(null);
+			setAttachedImageIsDrawn(false);
 			setAttachedDotSize(null);
 			setAttachedAnim(null);
 		}

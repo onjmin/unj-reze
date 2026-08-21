@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
 			hasImage,
 			imageSrc,
 			imageAlt,
+			imageIsDrawn,
 			avatarColor,
 			gameId,
 			mvId,
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
 			hasImage?: boolean;
 			imageSrc?: string;
 			imageAlt?: string;
+			imageIsDrawn?: boolean;
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
@@ -183,6 +185,7 @@ export async function POST(request: NextRequest) {
 			hasImage,
 			imageSrc,
 			imageAlt,
+			imageIsDrawn,
 			avatarColor,
 			slug: authorSlug,
 			gameId: decodedGameId === null ? undefined : decodedGameId,
