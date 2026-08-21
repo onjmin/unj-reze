@@ -532,8 +532,26 @@ export const pgStore: DataStore = {
 		const where: string[] = ["t.deleted_at IS NULL", "t.board_id = 1"];
 		const params: any[] = [];
 		if (cursorThreadId != null) {
-			params.push(cursorThreadId);
-			where.push(`t.id < $${params.length}`);
+			// age(上げ)順ページネーション: t.id ではなく「最終レス時刻」がソート基準なので、
+			// カーソルも同じ基準(latest_res_at, id)のkeysetで組む。カーソル自身が既に
+			// 削除済み等で見えない場合は id ベースにフォールバックする。
+			const { rows: cursorRows } = await q<{ latest_res_at: string }>(
+				`SELECT latest_res_at FROM threads WHERE id = $1`,
+				[cursorThreadId],
+			);
+			const cursorLatestResAt = cursorRows[0]?.latest_res_at;
+			if (cursorLatestResAt != null) {
+				params.push(cursorLatestResAt);
+				const latestParam = params.length;
+				params.push(cursorThreadId);
+				const idParam = params.length;
+				where.push(
+					`(t.latest_res_at < $${latestParam} OR (t.latest_res_at = $${latestParam} AND t.id < $${idParam}))`,
+				);
+			} else {
+				params.push(cursorThreadId);
+				where.push(`t.id < $${params.length}`);
+			}
 		}
 		if (options.hasMml !== undefined)
 			where.push(`t.content_type ${options.hasMml ? "=" : "<>"} ${CT.Dtm}`);
@@ -545,11 +563,14 @@ export const pgStore: DataStore = {
 			where.push(`t.mv_id IS ${options.hasMv ? "NOT NULL" : "NULL"}`);
 		params.push(limit);
 
+		// 2ch的な「age(上げ)」順: スレ作成時刻ではなく最終レス時刻で並べる。
+		// レス投稿のたびに threads.latest_res_at を更新している(addReply参照)ので、
+		// 古いスレでも新着レスが付けば正しく浮上する。
 		const { rows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t
        LEFT JOIN users u ON u.id = t.user_id
        WHERE ${where.join(" AND ")}
-       ORDER BY t.id DESC LIMIT $${params.length}`,
+       ORDER BY t.latest_res_at DESC, t.id DESC LIMIT $${params.length}`,
 			params,
 		);
 		const filtered = rows.filter((r) => !hidden.has(Number(r.user_id)));

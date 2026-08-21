@@ -444,11 +444,28 @@ class MockDB {
 			typeof limitOrOptions === "number" ? limitOrOptions : options.limit;
 		const before = beforeId ?? options.beforeId;
 
+		// age(上げ)順: スレ作成時刻ではなく「スレ内の最終レス時刻」で並べる(pg.tsのlatest_res_at相当)。
+		// レス無しスレは自身の作成時刻が最終活動時刻になる。
+		const lastActivityMs = (p: Post) =>
+			(p.replies || []).reduce(
+				(latest, r) => Math.max(latest, new Date(r.createdAt).getTime()),
+				new Date(p.createdAt).getTime(),
+			);
+		const cursorPost = before
+			? this.posts.find((p) => p.id === before)
+			: undefined;
+		const cursorActivity = cursorPost ? lastActivityMs(cursorPost) : null;
+
 		const hidden = this.getHiddenSlugs(userId);
 		const result = this.posts
 			.filter((p) => p.id === p.threadId)
-			// キーセットページング: カーソルより古いスレッドだけ返す
-			.filter((p) => !before || p.id < before)
+			// キーセットページング: (最終活動時刻, id) がカーソルより後ろのスレッドだけ返す
+			.filter((p) => {
+				if (!before) return true;
+				if (cursorActivity == null) return p.id < before; // カーソルが見つからない(削除済み等)ときのフォールバック
+				const activity = lastActivityMs(p);
+				return activity < cursorActivity || (activity === cursorActivity && p.id < before);
+			})
 			.filter((p) => {
 				const threadPosts = [p, ...(p.replies || [])];
 				if (
@@ -475,7 +492,10 @@ class MockDB {
 			})
 			.filter((p) => !hidden.has(p.slug ?? ""))
 			.filter((p) => this.canViewAuthor(p.slug ?? "", p.displayName, userId))
-			.sort((a, b) => b.id - a.id)
+			.sort((a, b) => {
+				const diff = lastActivityMs(b) - lastActivityMs(a);
+				return diff !== 0 ? diff : b.id - a.id;
+			})
 			.map((p) =>
 				this.applyUserState(
 					{
