@@ -29,6 +29,7 @@ import { getAvatarInfo } from "@/lib/avatar";
 import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import { usePostActions } from "@/lib/hooks/usePostActions";
 import {
 	extractMmlFromContent,
 	findMmlMarker,
@@ -82,7 +83,6 @@ const OriginTypeModal = dynamic(() => import("./OriginTypeModal"), {
 	ssr: false,
 });
 
-import { mergePostCounters } from "@/lib/post-merge";
 import CollabSelector from "./CollabSelector";
 import UserActionMenu from "./UserActionMenu";
 
@@ -117,6 +117,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [userId, setUserId] = useState("名無しvFZ");
 	const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
+	const [showReportModal, setShowReportModal] = useState(false);
+	const [reportReason, setReportReason] = useState("");
+	const [reportToast, setReportToast] = useState(false);
 
 	const [composerOpen, setComposerOpen] = useState(false);
 	const [replyImage, setReplyImage] = useState<string | null>(null);
@@ -299,12 +302,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setReplyTo(null);
 		setReplyText((prev) => prev.replace(/^>>\d+\n/, ""));
 	};
-	const heartQueue = useRef(0);
-	const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const likeParity = useRef(0);
-	const likeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const dislikeParity = useRef(0);
-	const dislikeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// いいね／低評価／リポスト／ハートは usePostActions に集約（フィード/検索と同じ実装を共有）。
+	// 以前はここに専用のデバウンス・楽観的更新ロジックを再実装しており、
+	// API失敗時のロールバック/トーストが欠けたまま放置されていた。
+	const { handleLike, handleDislike, handleRepost, handleHeart } =
+		usePostActions(userId, (_postId, updater) => setPost(updater));
 	const [bodyExpanded, setBodyExpanded] = useState(false);
 
 	const toggleMenu = (e: React.MouseEvent) => {
@@ -356,7 +358,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 	const handleMenuReport = () => {
 		setMenuOpen(false);
+		setShowReportModal(true);
 	};
+
+	const submitReport = useCallback(async () => {
+		try {
+			await api.report.create({
+				reporterSlug: userSlug || "名無し",
+				targetType: "post",
+				targetId: String(post.id),
+				reason: reportReason,
+			});
+			setShowReportModal(false);
+			setReportReason("");
+			setReportToast(true);
+			setTimeout(() => setReportToast(false), 3000);
+		} catch {
+			/* noop */
+		}
+	}, [userSlug, post.id, reportReason]);
 
 	useEffect(() => {
 		if (!menuOpen) return;
@@ -368,81 +388,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		document.addEventListener("mousedown", handler);
 		return () => document.removeEventListener("mousedown", handler);
 	}, [menuOpen]);
-
-	const handleLike = useCallback(() => {
-		const postId = post.id;
-		setPost((p) => ({
-			...p,
-			liked: !p.liked,
-			likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
-			disliked: p.liked ? p.disliked : false,
-			dislikes: p.liked
-				? p.dislikes
-				: p.disliked
-					? Math.max(0, p.dislikes - 1)
-					: p.dislikes,
-		}));
-		likeParity.current += 1;
-		if (likeTimer.current) clearTimeout(likeTimer.current);
-		likeTimer.current = setTimeout(async () => {
-			if (likeParity.current % 2 === 0) {
-				likeParity.current = 0;
-				return;
-			}
-			likeParity.current = 0;
-			const updated = await api.posts.like(postId, userId);
-			setPost((prev) => mergePostCounters(prev, updated));
-		}, 2000);
-	}, [post.id, userId]);
-
-	const handleDislike = useCallback(() => {
-		const postId = post.id;
-		setPost((p) => ({
-			...p,
-			disliked: !p.disliked,
-			dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
-			liked: p.disliked ? p.liked : false,
-			likes: p.disliked
-				? p.likes
-				: p.liked
-					? Math.max(0, p.likes - 1)
-					: p.likes,
-		}));
-		dislikeParity.current += 1;
-		if (dislikeTimer.current) clearTimeout(dislikeTimer.current);
-		dislikeTimer.current = setTimeout(async () => {
-			if (dislikeParity.current % 2 === 0) {
-				dislikeParity.current = 0;
-				return;
-			}
-			dislikeParity.current = 0;
-			const updated = await api.posts.dislike(postId, userId);
-			setPost((prev) => mergePostCounters(prev, updated));
-		}, 2000);
-	}, [post.id, userId]);
-
-	const handleRepost = useCallback(async () => {
-		setPost((p) => ({
-			...p,
-			reposted: !p.reposted,
-			reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
-		}));
-		const updated = await api.posts.repost(post.id);
-		setPost((prev) => mergePostCounters(prev, updated));
-	}, [post.id]);
-
-	const handleHeart = useCallback(() => {
-		const postId = post.id;
-		setPost((p) => ({ ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
-		heartQueue.current += 1;
-		if (heartTimer.current) clearTimeout(heartTimer.current);
-		heartTimer.current = setTimeout(async () => {
-			const count = heartQueue.current;
-			heartQueue.current = 0;
-			const updated = await api.posts.heart(postId, userId, count);
-			setPost((prev) => mergePostCounters(prev, updated));
-		}, 2000);
-	}, [post.id, userId]);
 
 	const handleCreateReplyFromComposer = async () => {
 		if (replySubmittingRef.current) return;
@@ -1558,14 +1503,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 					<div className="flex justify-between items-center text-gray-500 mt-2 max-w-[320px]">
 						<button
-							onClick={handleLike}
+							onClick={() => handleLike(post.id)}
 							className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? "text-blue-400 font-bold" : ""}`}
 						>
 							<ThumbsUp size={14} />
 							<span className="text-[11px]">{post.likes || ""}</span>
 						</button>
 						<button
-							onClick={handleDislike}
+							onClick={() => handleDislike(post.id)}
 							className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? "text-red-500 font-bold" : ""}`}
 						>
 							<ThumbsDown size={14} />
@@ -1579,7 +1524,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							<span className="text-[11px]">{post.repliesCount || ""}</span>
 						</button>
 						<button
-							onClick={handleRepost}
+							onClick={() => handleRepost(post.id)}
 							className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? "text-purple-400" : ""}`}
 						>
 							<Repeat size={14} />
@@ -1599,7 +1544,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							<Mail size={14} />
 						</button>
 						<button
-							onClick={handleHeart}
+							onClick={() => handleHeart(post.id)}
 							className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
 						>
 							<Heart size={12} className="fill-current text-pink-600/65" />
@@ -1873,6 +1818,52 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					position={avatarMenuPos}
 				/>
 			)}
+			{/* ── 通報入力モーダル ── */}
+			{showReportModal && (
+				<div
+					className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn"
+					onClick={(e) => e.stopPropagation()}
+				>
+					<div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 font-sans text-gray-200 shadow-2xl">
+						<h4 className="text-sm font-bold text-gray-100 flex items-center gap-1.5">
+							投稿の通報
+						</h4>
+						<p className="text-xs text-gray-400">
+							通報理由を入力してください（任意）
+						</p>
+						<textarea
+							value={reportReason}
+							onChange={(e) => setReportReason(e.target.value)}
+							placeholder="理由の詳細…"
+							rows={3}
+							className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
+						/>
+						<div className="flex justify-end gap-2 pt-1">
+							<button
+								onClick={() => {
+									setShowReportModal(false);
+									setReportReason("");
+								}}
+								className="px-3.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-lg transition"
+							>
+								キャンセル
+							</button>
+							<button
+								onClick={submitReport}
+								className="px-3.5 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg transition"
+							>
+								送信
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+			{/* ── 通報完了トースト ── */}
+			{reportToast && (
+				<div className="fixed bottom-6 right-6 z-[130] bg-gray-900 border border-emerald-500/50 text-emerald-400 text-xs font-bold px-4 py-2.5 rounded-lg shadow-xl animate-bounce">
+					✓ 通報を受け付けました。
+				</div>
+			)}
 		</>
 	);
 }
@@ -2072,62 +2063,10 @@ function ReplyTreeItem({
 		return () => document.removeEventListener("mousedown", handler);
 	}, [menuOpen]);
 
-	const handleLike = useCallback(() => {
-		const id = localPost.id;
-		setLocalPost((p) => ({
-			...p,
-			liked: !p.liked,
-			likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
-			disliked: p.liked ? p.disliked : false,
-			dislikes: p.liked
-				? p.dislikes
-				: p.disliked
-					? Math.max(0, p.dislikes - 1)
-					: p.dislikes,
-		}));
-		api.posts
-			.like(id, userId)
-			.then((u) => setLocalPost((prev) => mergePostCounters(prev, u)));
-	}, [localPost.id, userId]);
-
-	const handleDislike = useCallback(() => {
-		const id = localPost.id;
-		setLocalPost((p) => ({
-			...p,
-			disliked: !p.disliked,
-			dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
-			liked: p.disliked ? p.liked : false,
-			likes: p.disliked
-				? p.likes
-				: p.liked
-					? Math.max(0, p.likes - 1)
-					: p.likes,
-		}));
-		api.posts
-			.dislike(id, userId)
-			.then((u) => setLocalPost((prev) => mergePostCounters(prev, u)));
-	}, [localPost.id, userId]);
-
-	const handleRepost = useCallback(async () => {
-		setLocalPost((p) => ({
-			...p,
-			reposted: !p.reposted,
-			reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
-		}));
-		const updated = await api.posts.repost(localPost.id);
-		setLocalPost((prev) => mergePostCounters(prev, updated));
-	}, [localPost.id]);
-
-	const handleHeart = useCallback(() => {
-		const id = localPost.id;
-		setLocalPost((p) => ({
-			...p,
-			heartsTotal: (Number(p.heartsTotal) || 0) + 1,
-		}));
-		api.posts
-			.heart(id, userId, 1)
-			.then((u) => setLocalPost((prev) => mergePostCounters(prev, u)));
-	}, [localPost.id, userId]);
+	// トップレベル投稿と同じく usePostActions に集約（デバウンス無しの連打API直撃と
+	// 失敗時ロールバック漏れを解消）。
+	const { handleLike, handleDislike, handleRepost, handleHeart } =
+		usePostActions(userId, (_id, updater) => setLocalPost(updater));
 
 	const hasMmlContent =
 		localPost.hasMml || !!extractMmlFromContent(localPost.content);
@@ -2486,14 +2425,14 @@ function ReplyTreeItem({
 
 					<div className="flex justify-between items-center text-gray-500 mt-2 max-w-[280px]">
 						<button
-							onClick={handleLike}
+							onClick={() => handleLike(localPost.id)}
 							className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${localPost.liked ? "text-blue-400 font-bold" : ""}`}
 						>
 							<ThumbsUp size={14} />
 							<span className="text-[11px]">{localPost.likes || ""}</span>
 						</button>
 						<button
-							onClick={handleDislike}
+							onClick={() => handleDislike(localPost.id)}
 							className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? "text-red-500 font-bold" : ""}`}
 						>
 							<ThumbsDown size={14} />
@@ -2507,7 +2446,7 @@ function ReplyTreeItem({
 							<span className="text-[11px]">{children.length || ""}</span>
 						</button>
 						<button
-							onClick={handleRepost}
+							onClick={() => handleRepost(localPost.id)}
 							className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? "text-purple-400" : ""}`}
 						>
 							<Repeat size={14} />
@@ -2527,7 +2466,7 @@ function ReplyTreeItem({
 							<Mail size={14} />
 						</button>
 						<button
-							onClick={handleHeart}
+							onClick={() => handleHeart(localPost.id)}
 							className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
 						>
 							<Heart size={12} className="fill-current text-pink-600/65" />
