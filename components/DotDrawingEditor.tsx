@@ -1222,6 +1222,7 @@ export default function DotDrawingEditor({
 							l.locked = locked;
 							l.opacity = opacity;
 							l.data = new Uint8ClampedArray(data);
+							l.trace();
 						}
 					} else {
 						new oekaki.LayeredCanvas("レイヤー #1");
@@ -1291,6 +1292,7 @@ export default function DotDrawingEditor({
 						l.locked = locked;
 						l.opacity = opacity;
 						l.data = new Uint8ClampedArray(data);
+						l.trace();
 					}
 					setAnimMode(false);
 					frameInstancesRef.current = [];
@@ -1317,6 +1319,7 @@ export default function DotDrawingEditor({
 							l.locked = locked;
 							l.opacity = opacity;
 							l.data = new Uint8ClampedArray(data);
+							l.trace();
 						}
 					} else {
 						new oekaki.LayeredCanvas("レイヤー #1");
@@ -1739,6 +1742,7 @@ export default function DotDrawingEditor({
 				l.locked = locked;
 				l.opacity = opacity;
 				l.data = new Uint8ClampedArray(data);
+				l.trace();
 			}
 		} else {
 			new oekaki.LayeredCanvas("レイヤー #1");

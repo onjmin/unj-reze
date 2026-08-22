@@ -725,6 +725,7 @@ export default function DrawingEditor({
 						l.locked = locked;
 						l.opacity = opacity;
 						l.data = new Uint8ClampedArray(data);
+						l.trace();
 					}
 					setAnimMode(false);
 					frameInstancesRef.current = [];
