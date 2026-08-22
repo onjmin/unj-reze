@@ -29,6 +29,7 @@
     "encoding-japanese": "2.2.0",
     "gifenc": "1.0.3",
     "jszip": "3.10.1",
+    "localforage": "1.10.0",
     "lucide-react": "1.27.0",
     "lz-string": "1.5.0",
     "next": "16.2.7",

@@ -1,3 +1,4 @@
+import localforage from "localforage";
 import type { WalkPreset } from "./walk-cycle";
 
 export interface SavedLayer {
@@ -215,7 +216,7 @@ export const getStorageKey = (
 		case "mv":
 			return `unj-mvmaker-history-${idSuffix || "new"}`;
 		case "mml":
-			return "dtm-work-history"; // reference key
+			return `dtm-work-history-${idSuffix || "new"}`;
 		case "drawing":
 			return "unj-drawing-history";
 		case "dotdrawing":
@@ -227,11 +228,38 @@ export const getStorageKey = (
 	}
 };
 
-export const getHistory = <T = unknown>(key: string): HistoryItem<T>[] => {
-	if (typeof window === "undefined") return [];
+// --- 永続化バックエンド --------------------------------------------------
+// localStorage(5〜10MB/オリジン)はPNG dataURLを積む用途にはすぐ枯渇するため、
+// IndexedDB(桁違いに大きい・非同期)を localforage 経由で使う。
+// 呼び出し側から見た関数シグネチャ(引数)は従来のlocalStorage版から変えず、
+// 戻り値だけ非同期(Promise)化してある。
+let _store: LocalForage | null = null;
+const getStore = (): LocalForage | null => {
+	if (typeof window === "undefined" || typeof indexedDB === "undefined") {
+		return null;
+	}
+	if (!_store) {
+		_store = localforage.createInstance({
+			name: "unj-reze",
+			storeName: "history",
+		});
+	}
+	return _store;
+};
+
+const isQuotaExceededError = (e: unknown): boolean =>
+	e instanceof DOMException &&
+	(e.name === "QuotaExceededError" ||
+		// Firefox の旧名
+		e.name === "NS_ERROR_DOM_QUOTA_REACHED");
+
+export const getHistory = async <T = unknown>(
+	key: string,
+): Promise<HistoryItem<T>[]> => {
+	const store = getStore();
+	if (!store) return [];
 	try {
-		const raw = localStorage.getItem(key);
-		return raw ? JSON.parse(raw) : [];
+		return (await store.getItem<HistoryItem<T>[]>(key)) ?? [];
 	} catch (e) {
 		console.error("Failed to get history", e);
 		return [];
@@ -252,13 +280,21 @@ interface MvPreviewData {
 	preset?: string;
 }
 
-export const saveHistory = <T = unknown>(
+export type SaveHistoryResult =
+	| "saved"
+	| "duplicate"
+	| "too_large"
+	| "quota_exceeded"
+	| "error";
+
+export const saveHistory = async <T = unknown>(
 	key: string,
 	data: T,
 	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv",
 	maxItems = 50,
-): boolean => {
-	if (typeof window === "undefined") return false;
+): Promise<SaveHistoryResult> => {
+	const store = getStore();
+	if (!store) return "error";
 	try {
 		const serializedData = JSON.stringify(data);
 		if (serializedData.length > 1500000) {
@@ -266,10 +302,10 @@ export const saveHistory = <T = unknown>(
 				"Skipping snapshot: data is excessively large",
 				serializedData.length,
 			);
-			return false;
+			return "too_large";
 		}
 
-		const history = getHistory<T>(key);
+		const history = await getHistory<T>(key);
 		const lastItem = history[0]?.data;
 
 		// Check similarity/duplicates
@@ -280,15 +316,15 @@ export const saveHistory = <T = unknown>(
 				typeof lastItem === "string"
 			) {
 				if (isSimilarMml(data, lastItem)) {
-					return false;
+					return "duplicate";
 				}
 			} else if (type === "drawing" || type === "dotdrawing") {
 				if (serializedData === JSON.stringify(lastItem)) {
-					return false;
+					return "duplicate";
 				}
 			} else {
 				if (serializedData === JSON.stringify(lastItem)) {
-					return false;
+					return "duplicate";
 				}
 			}
 		}
@@ -337,28 +373,64 @@ export const saveHistory = <T = unknown>(
 		};
 
 		history.unshift(newItem);
-		const sliced = history.slice(0, maxItems);
-		localStorage.setItem(key, JSON.stringify(sliced));
-		return true;
+		let sliced = history.slice(0, maxItems);
+		try {
+			await store.setItem(key, sliced);
+			return "saved";
+		} catch (e) {
+			if (!isQuotaExceededError(e)) throw e;
+			// 容量オーバー: 古いスナップショットを間引きながらリトライする。
+			// 新規追加分(先頭)は残し、末尾から半分ずつ捨てる。
+			while (sliced.length > 1) {
+				sliced = sliced.slice(0, Math.ceil(sliced.length / 2));
+				try {
+					await store.setItem(key, sliced);
+					return "saved";
+				} catch (e2) {
+					if (!isQuotaExceededError(e2)) throw e2;
+				}
+			}
+			// 新規分1件だけでも容量が足りない
+			console.error("Failed to save history: storage quota exceeded", e);
+			return "quota_exceeded";
+		}
 	} catch (e) {
 		console.error("Failed to save history", e);
-		return false;
+		return "error";
 	}
 };
 
-export const deleteHistoryItem = (key: string, id: string): void => {
-	if (typeof window === "undefined") return;
+export const deleteHistoryItem = async (
+	key: string,
+	id: string,
+): Promise<void> => {
+	const store = getStore();
+	if (!store) return;
 	try {
-		const history = getHistory(key);
+		const history = await getHistory(key);
 		const filtered = history.filter((item) => item.id !== id);
-		localStorage.setItem(key, JSON.stringify(filtered));
+		await store.setItem(key, filtered);
 	} catch (e) {
 		console.error("Failed to delete history item", e);
 	}
 };
 
-export const saveAutosave = <T = unknown>(key: string, data: T): void => {
-	if (typeof window === "undefined") return;
+export const clearHistory = async (key: string): Promise<void> => {
+	const store = getStore();
+	if (!store) return;
+	try {
+		await store.removeItem(key);
+	} catch (e) {
+		console.error("Failed to clear history", e);
+	}
+};
+
+export const saveAutosave = async <T = unknown>(
+	key: string,
+	data: T,
+): Promise<void> => {
+	const store = getStore();
+	if (!store) return;
 	try {
 		const serializedData = JSON.stringify(data);
 		if (serializedData.length > 1500000) {
@@ -368,35 +440,37 @@ export const saveAutosave = <T = unknown>(key: string, data: T): void => {
 			);
 			return;
 		}
-		localStorage.setItem(
-			key + "-autosave",
-			JSON.stringify({
-				timestamp: Date.now(),
-				data,
-			}),
-		);
+		await store.setItem(key + "-autosave", {
+			timestamp: Date.now(),
+			data,
+		});
 	} catch (e) {
 		console.error("Failed to save autosave", e);
 	}
 };
 
-export const getAutosave = <T = unknown>(
+export const getAutosave = async <T = unknown>(
 	key: string,
-): { timestamp: number; data: T } | null => {
-	if (typeof window === "undefined") return null;
+): Promise<{ timestamp: number; data: T } | null> => {
+	const store = getStore();
+	if (!store) return null;
 	try {
-		const raw = localStorage.getItem(key + "-autosave");
-		return raw ? JSON.parse(raw) : null;
+		return (
+			(await store.getItem<{ timestamp: number; data: T }>(
+				key + "-autosave",
+			)) ?? null
+		);
 	} catch (e) {
 		console.error("Failed to get autosave", e);
 		return null;
 	}
 };
 
-export const clearAutosave = (key: string): void => {
-	if (typeof window === "undefined") return;
+export const clearAutosave = async (key: string): Promise<void> => {
+	const store = getStore();
+	if (!store) return;
 	try {
-		localStorage.removeItem(key + "-autosave");
+		await store.removeItem(key + "-autosave");
 	} catch (e) {
 		console.error("Failed to clear autosave", e);
 	}

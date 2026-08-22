@@ -947,15 +947,16 @@ export default function App() {
 			} catch (err) {
 				console.error("投稿直前のスナップショット生成に失敗", err);
 			}
-			const saved =
-				!!snapshotState &&
-				saveHistory(
-					storageKey,
-					snapshotState,
-					isDot ? "dotdrawing" : "drawing",
-					50,
-				);
-			if (!saved) {
+			const result = snapshotState
+				? await saveHistory(
+						storageKey,
+						snapshotState,
+						isDot ? "dotdrawing" : "drawing",
+						50,
+					)
+				: null;
+			// "duplicate"(直前のスナップショットと同一)は保存自体は正常なので投稿を止めない。
+			if (result !== "saved" && result !== "duplicate") {
 				showToast(
 					"error",
 					"スナップショットの保存に失敗したため、投稿を中断しました",
@@ -1639,6 +1640,7 @@ export default function App() {
 					}
 					initialManifest={playingMv?.manifest || mvDraft?.manifest}
 					isEditing={!!playingMv || !!mvDraft}
+					mvId={playingMv?.mvId}
 				/>
 			)}
 			{activeScreen === "postgame" && playingGame && (
@@ -1700,6 +1702,7 @@ export default function App() {
 					onSave={handleSaveMml}
 					initialMml={(editingPost ? editingMmlText : attachedMml) || undefined}
 					isEditing={!!editingPost}
+					postId={editingPost?.id}
 				/>
 			)}
 

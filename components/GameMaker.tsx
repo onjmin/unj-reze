@@ -2352,22 +2352,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // Check autosave on mount (Edit mode)
   useEffect(() => {
     if (playOnly) return;
-    const autosave = getAutosave<GameManifestDraft>(editStorageKey);
-    if (autosave && autosave.data) {
+    let cancelled = false;
+    getAutosave<GameManifestDraft>(editStorageKey).then((autosave) => {
+      if (cancelled || !autosave?.data) return;
       setAutosaveEditData(autosave.data);
       setHasAutosaveEdit(true);
-    }
+    });
+    return () => { cancelled = true; };
   }, [editStorageKey, playOnly]);
 
   // Check autosave when entering play mode
   useEffect(() => {
-    if (isPlaying || playOnly) {
-      const autosave = getAutosave<SavedGameplayState>(playStorageKey);
-      if (autosave && autosave.data) {
-        setAutosavePlayData(autosave.data);
-        setHasAutosavePlay(true);
-      }
-    }
+    if (!isPlaying && !playOnly) return;
+    let cancelled = false;
+    getAutosave<SavedGameplayState>(playStorageKey).then((autosave) => {
+      if (cancelled || !autosave?.data) return;
+      setAutosavePlayData(autosave.data);
+      setHasAutosavePlay(true);
+    });
+    return () => { cancelled = true; };
   }, [playStorageKey, isPlaying, playOnly]);
 
   // Periodic autosave (every 10s) and history snapshot (every 30m)

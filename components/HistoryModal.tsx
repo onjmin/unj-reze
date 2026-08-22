@@ -3,6 +3,7 @@
 import { Calendar, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
+	clearHistory,
 	deleteHistoryItem,
 	getHistory,
 	HistoryItem,
@@ -33,8 +34,8 @@ export default function HistoryModal<T = unknown>({
 		color: string;
 	} | null>(null);
 
-	const loadHistory = () => {
-		setHistoryItems(getHistory(storageKey));
+	const loadHistory = async () => {
+		setHistoryItems(await getHistory<T>(storageKey));
 	};
 
 	const [confirmingClear, setConfirmingClear] = useState(false);
@@ -46,6 +47,7 @@ export default function HistoryModal<T = unknown>({
 				setMessage(null);
 			});
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen, storageKey]);
 
 	if (!isOpen) return null;
@@ -58,18 +60,18 @@ export default function HistoryModal<T = unknown>({
 		}, 1000);
 	};
 
-	const handleDelete = (id: string) => {
-		deleteHistoryItem(storageKey, id);
-		loadHistory();
+	const handleDelete = async (id: string) => {
+		await deleteHistoryItem(storageKey, id);
+		await loadHistory();
 		setMessage({
 			text: "スナップショットを削除しました。",
 			color: "text-red-400",
 		});
 	};
 
-	const handleClearAll = () => {
-		localStorage.removeItem(storageKey);
-		loadHistory();
+	const handleClearAll = async () => {
+		await clearHistory(storageKey);
+		await loadHistory();
 		setMessage({
 			text: "履歴をすべて消去しました。",
 			color: "text-yellow-400",
@@ -77,7 +79,7 @@ export default function HistoryModal<T = unknown>({
 		setConfirmingClear(false);
 	};
 
-	const handleManualSave = () => {
+	const handleManualSave = async () => {
 		if (!getCurrentData) return;
 		const currentData = getCurrentData();
 		if (!currentData) {
@@ -88,18 +90,38 @@ export default function HistoryModal<T = unknown>({
 			return;
 		}
 
-		const saved = saveHistory(storageKey, currentData, type, 50);
-		if (saved) {
-			loadHistory();
-			setMessage({
-				text: "現在の状態をスナップショットとして保存しました。",
-				color: "text-green-400",
-			});
-		} else {
-			setMessage({
-				text: "変更がないため保存をスキップしました。",
-				color: "text-yellow-400",
-			});
+		const result = await saveHistory(storageKey, currentData, type, 50);
+		switch (result) {
+			case "saved":
+				await loadHistory();
+				setMessage({
+					text: "現在の状態をスナップショットとして保存しました。",
+					color: "text-green-400",
+				});
+				break;
+			case "duplicate":
+				setMessage({
+					text: "変更がないため保存をスキップしました。",
+					color: "text-yellow-400",
+				});
+				break;
+			case "too_large":
+				setMessage({
+					text: "データが大きすぎるため保存できませんでした。",
+					color: "text-red-400",
+				});
+				break;
+			case "quota_exceeded":
+				setMessage({
+					text: "ストレージの空き容量が足りず保存できませんでした。古い履歴を削除してから再度お試しください。",
+					color: "text-red-400",
+				});
+				break;
+			default:
+				setMessage({
+					text: "保存に失敗しました。",
+					color: "text-red-400",
+				});
 		}
 	};
 

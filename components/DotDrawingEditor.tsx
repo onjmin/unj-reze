@@ -987,13 +987,15 @@ export default function DotDrawingEditor({
 
 	// Check autosave on mount
 	useEffect(() => {
-		const autosave = getAutosave<DrawingEditorState>(storageKey);
-		if (autosave && autosave.data) {
-			Promise.resolve().then(() => {
-				setAutosaveData(autosave.data);
-				setHasAutosave(true);
-			});
-		}
+		let cancelled = false;
+		getAutosave<DrawingEditorState>(storageKey).then((autosave) => {
+			if (cancelled || !autosave?.data) return;
+			setAutosaveData(autosave.data);
+			setHasAutosave(true);
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [storageKey]);
 
 	const handleRestoreAutosave = () => {

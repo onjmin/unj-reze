@@ -1594,6 +1594,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onSave={handleSaveEditedMusic}
 					initialMml={editMmlText}
 					isEditing
+					postId={(editMmlTarget ?? post).id}
 				/>
 			)}
 			{activeScreen === "edit-mv" && editMvDraft && (
@@ -1603,6 +1604,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onSave={handleSaveEditedMv}
 					initialManifest={editMvDraft.manifest}
 					isEditing={true}
+					mvId={editMvDraft.mvId}
 				/>
 			)}
 			{activeScreen === "edit-game" && editGameDraft && (

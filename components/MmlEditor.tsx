@@ -27,6 +27,10 @@ interface MmlEditorProps {
 	onSave: (mml: string) => void;
 	initialMml?: string;
 	isEditing?: boolean;
+	/** 既存の投稿に添付されたMMLを編集している場合の投稿ID。
+	 *  作業履歴(履歴・スナップショット)のスコープに使う — 未指定(新規作成/リプライ下書き)は
+	 *  共有の"new"バケットに入る。 */
+	postId?: string;
 }
 
 // 再編集時: アドバンスモードで作られたMMLを開いたら自動的にアドバンスモードへ切り替える。
@@ -59,6 +63,7 @@ export default function MmlEditor({
 	onSave,
 	initialMml,
 	isEditing,
+	postId,
 }: MmlEditorProps) {
 	const mountRef = useRef<HTMLDivElement>(null);
 	const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
@@ -69,7 +74,7 @@ export default function MmlEditor({
 	const [showHistory, setShowHistory] = useState(false);
 	const [hasAutosave, setHasAutosave] = useState(false);
 	const [autosaveData, setAutosaveData] = useState<string | null>(null);
-	const storageKey = getStorageKey("mml");
+	const storageKey = getStorageKey("mml", postId);
 
 	// 設定メニュー（歯車）：履歴・スナップショット／エクスポート・インポート
 	const [settingsOpen, setSettingsOpen] = useState(false);
@@ -122,14 +127,15 @@ export default function MmlEditor({
 
 	// Check autosave on mount
 	useEffect(() => {
-		const autosave = getAutosave<string>(storageKey);
-		if (autosave && autosave.data && autosave.data !== initialMml) {
-			const data = autosave.data;
-			Promise.resolve().then(() => {
-				setAutosaveData(data);
-				setHasAutosave(true);
-			});
-		}
+		let cancelled = false;
+		getAutosave<string>(storageKey).then((autosave) => {
+			if (cancelled || !autosave?.data || autosave.data === initialMml) return;
+			setAutosaveData(autosave.data);
+			setHasAutosave(true);
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [initialMml, storageKey]);
 
 	// Periodic autosave (every 10s) and history snapshot (every 30m)

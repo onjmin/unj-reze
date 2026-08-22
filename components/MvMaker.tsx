@@ -245,6 +245,11 @@ interface MvMakerProps {
 	userId: string;
 	initialManifest?: MvManifest;
 	isEditing?: boolean;
+	/** 既存のMV投稿を編集している場合のMV ID(post.idではなくmvs.id、mvIdは
+	 *  返信のMVも同じ画面で編集するためpost.id固定にできない — PostDetail.tsxのeditMvDraft参照)。
+	 *  作業履歴(履歴・スナップショット)のスコープに使う — 未指定(新規作成/リプライ下書き)は
+	 *  共有の"new"バケットに入る。 */
+	mvId?: string;
 }
 
 // ───────────────── 共通の小物 ─────────────────
@@ -2160,6 +2165,7 @@ export default function MvMaker({
 	userId,
 	initialManifest,
 	isEditing,
+	mvId,
 }: MvMakerProps) {
 	const [manifest, setManifest] = useState<MvManifest>(
 		() => initialManifest ?? buildMvPreset("pianoRoll"),
@@ -2317,7 +2323,7 @@ export default function MvMaker({
 	const [hasAutosave, setHasAutosave] = useState(false);
 	const autosaveDataRef = useRef<MvManifest | null>(null);
 
-	const storageKey = getStorageKey("mv");
+	const storageKey = getStorageKey("mv", mvId);
 	const manifestRef = useRef(manifest);
 	useEffect(() => {
 		manifestRef.current = manifest;
@@ -2483,11 +2489,15 @@ export default function MvMaker({
 
 	// ── オートセーブ / 履歴 ────────────────────────────────
 	useEffect(() => {
-		const saved = getAutosave<MvManifest>(storageKey);
-		if (saved?.data && !initialManifest) {
+		let cancelled = false;
+		getAutosave<MvManifest>(storageKey).then((saved) => {
+			if (cancelled || !saved?.data || initialManifest) return;
 			autosaveDataRef.current = saved.data;
-			Promise.resolve().then(() => setHasAutosave(true));
-		}
+			setHasAutosave(true);
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [storageKey, initialManifest]);
 
 	useEffect(() => {
