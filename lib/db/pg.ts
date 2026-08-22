@@ -147,6 +147,36 @@ async function q<T = any>(
 	return res as { rows: T[]; rowCount?: number };
 }
 
+// INSERT文のカラム名・プレースホルダ($N)・params配列を1箇所（entries）だけから生成する
+// ビルダー。カラム名の並び・VALUES句の$N・params配列を3箇所バラバラに手で数えて揃える
+// 書き方は、後からカラムを追加するときに一部だけ更新漏れがあると「個数は合うが対応が
+// ズレる」バグを生み、型チェックにもlintにも引っかからない
+// （実例: addReply/createPost に mml_delete_id/mml_delete_hash を足した際、
+//  params配列側だけ末尾に追加してしまい has_collab_button 等がズレて
+//  NOT NULL違反になった）。このビルダーならカラムと値が同じ行に書かれるので、
+// 挿入・削除・並べ替えでズレようがない。新しいINSERTを書くときはこちらを使うこと。
+const raw = (sql: string): { raw: string } => ({ raw: sql });
+const val = (v: SqlParam): { param: SqlParam } => ({ param: v });
+type InsertEntry = [column: string, value: { raw: string } | { param: SqlParam }];
+function buildInsert(table: string, entries: InsertEntry[]) {
+	const cols: string[] = [];
+	const placeholders: string[] = [];
+	const params: SqlParam[] = [];
+	for (const [col, v] of entries) {
+		cols.push(col);
+		if ("raw" in v) {
+			placeholders.push(v.raw);
+		} else {
+			params.push(v.param);
+			placeholders.push(`$${params.length}`);
+		}
+	}
+	return {
+		text: `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`,
+		params,
+	};
+}
+
 function toIso(v: unknown): string {
 	if (v instanceof Date) return v.toISOString();
 	if (typeof v === "string") return v;
@@ -764,69 +794,78 @@ export const pgStore: DataStore = {
 				// HeadlinePage.svelte は thread.title をそのまま見出しとして描画するため）。
 				// title が空＝reze発、という前提で unj/reze 双方の表示側が振り分ける
 				// （reze側は lib/post-title.ts の getDistinctTitle 参照）。
-				const { rows } = await q(
-					`INSERT INTO threads (
-             created_at, dat_key, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
-             cc_bitmask, content_types_bitmask,
-             user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
-             content_text, content_url, content_type, content_data_url,
-             mml_delete_id, mml_delete_hash,
-             has_collab_button, game_id, mv_id, origin_type, dot_w, dot_h,
-             anim_frames, anim_fps, walk_preset
-           ) VALUES (
-             CURRENT_TIMESTAMP,
-             GREATEST(
+				// title は空文字のまま保存する（threads.title は NOT NULL 制約）。
+				// board_id は固定で 1。cc_user_avatar も reze発は常に0（既存踏襲）。
+				const { text: insertSql, params: insertParams } = buildInsert("threads", [
+					["created_at", raw("CURRENT_TIMESTAMP")],
+					[
+						"dat_key",
+						raw(`GREATEST(
                FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP))::BIGINT,
                (SELECT COALESCE(MAX(dat_key), 0) + 1 FROM threads)
-             ),
-             '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,'',1,${RES_LIMIT},
-                     ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                     $2,$3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-           RETURNING *`,
-					[
-						(mmlResolved.content || "")
-							.split("\n")
-							.find((l) => l.trim())
-							?.slice(0, 64) || "",
-						// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
-						// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
-						// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
-						// board_id は上のVALUES句と同じく固定で 1。
-						authorId,
-						genBbsId(authorId, 1),
-						data.displayName || "名無し",
-						data.avatarColor ?? null,
-						c.contentText,
-						c.contentUrl,
-						c.contentType,
-						c.contentDataUrl,
-						// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
-						// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
-						// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
-						// MML投稿（c.contentType===CT.Dtm）も同じ理由で足し忘れると、MML埋め込みに
-						// 「コラボ」ボタンが一度も出ないまま導線が死ぬ（表示側はhasCollabButtonを
-						// 見るだけなので、ここで立てなければ何も表示されない）。
-						// 画像は imageIsDrawn（DrawingEditor/DotDrawingEditor経由）のときだけ対象。
-						// スマホ撮影写真等のプレーンアップロードには「コラボ」を出さない
-						// （編集可能なソースを持たず、コラボという行為自体が成立しないため）。
-						!!(
-							data.gameId ||
-							data.mvId ||
-							(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
-							c.contentType === CT.Dtm
-						),
-						data.gameId ?? null,
-						data.mvId ?? null,
-						data.originType ?? null,
-						data.dotW ?? null,
-						data.dotH ?? null,
-						data.animFrames ?? null,
-						data.animFps ?? null,
-						data.walkPreset ?? null,
-						c.mmlDeleteId,
-						c.mmlDeleteHash,
+             )`),
 					],
-				);
+					["ip", raw("'0.0.0.0'::inet")],
+					["res_count", val(1)],
+					[
+						"latest_res",
+						val(
+							(mmlResolved.content || "")
+								.split("\n")
+								.find((l) => l.trim())
+								?.slice(0, 64) || "",
+						),
+					],
+					["latest_res_at", raw("CURRENT_TIMESTAMP")],
+					["title", val("")],
+					["board_id", val(1)],
+					["res_limit", val(RES_LIMIT)],
+					["cc_bitmask", val(DEFAULT_CC_BITMASK)],
+					["content_types_bitmask", val(DEFAULT_CONTENT_TYPES_BITMASK)],
+					["user_id", val(authorId)],
+					// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
+					// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
+					// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
+					["cc_user_id", val(genBbsId(authorId, 1))],
+					["cc_user_name", val(data.displayName || "名無し")],
+					["cc_user_avatar", val(0)],
+					["avatar_color", val(data.avatarColor ?? null)],
+					["content_text", val(c.contentText)],
+					["content_url", val(c.contentUrl)],
+					["content_type", val(c.contentType)],
+					["content_data_url", val(c.contentDataUrl)],
+					["mml_delete_id", val(c.mmlDeleteId)],
+					["mml_delete_hash", val(c.mmlDeleteHash)],
+					// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
+					// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
+					// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
+					// MML投稿（c.contentType===CT.Dtm）も同じ理由で足し忘れると、MML埋め込みに
+					// 「コラボ」ボタンが一度も出ないまま導線が死ぬ（表示側はhasCollabButtonを
+					// 見るだけなので、ここで立てなければ何も表示されない）。
+					// 画像は imageIsDrawn（DrawingEditor/DotDrawingEditor経由）のときだけ対象。
+					// スマホ撮影写真等のプレーンアップロードには「コラボ」を出さない
+					// （編集可能なソースを持たず、コラボという行為自体が成立しないため）。
+					[
+						"has_collab_button",
+						val(
+							!!(
+								data.gameId ||
+								data.mvId ||
+								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
+								c.contentType === CT.Dtm
+							),
+						),
+					],
+					["game_id", val(data.gameId ?? null)],
+					["mv_id", val(data.mvId ?? null)],
+					["origin_type", val(data.originType ?? null)],
+					["dot_w", val(data.dotW ?? null)],
+					["dot_h", val(data.dotH ?? null)],
+					["anim_frames", val(data.animFrames ?? null)],
+					["anim_fps", val(data.animFps ?? null)],
+					["walk_preset", val(data.walkPreset ?? null)],
+				]);
+				const { rows } = await q(`${insertSql} RETURNING *`, insertParams);
 				row = rows[0];
 			} catch (e: any) {
 				if (e?.code !== "23505" || attempt === 4) throw e;
@@ -960,51 +999,58 @@ export const pgStore: DataStore = {
 		let inserted: any = null;
 		for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
 			try {
-				const { rows } = await q(
-					`INSERT INTO res (
-             thread_id, num, created_at, ip, is_owner, sage,
-             user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
-             content_text, content_url, content_type, content_data_url,
-             mml_delete_id, mml_delete_hash,
-             has_collab_button, game_id, mv_id, parent_num, origin_type, dot_w, dot_h,
-             anim_frames, anim_fps, walk_preset
-           ) VALUES ($1, (SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1),
-                     CURRENT_TIMESTAMP,'0.0.0.0'::inet,$2,FALSE,$3,$4,$5,0,$6,
-                     $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
-           RETURNING *`,
+				// thread_id は必ず先頭のentry = $1 にする（"num"の相関サブクエリが
+				// thread_id=$1 を直接参照しているため）。
+				const threadIdEntry: InsertEntry = ["thread_id", val(threadId)];
+				const { text: insertSql, params: insertParams } = buildInsert("res", [
+					threadIdEntry,
+					["num", raw("(SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1)")],
+					["created_at", raw("CURRENT_TIMESTAMP")],
+					["ip", raw("'0.0.0.0'::inet")],
+					["is_owner", val(authorId === Number(thread.user_id))],
+					["sage", raw("FALSE")],
+					["user_id", val(authorId)],
+					// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
+					["cc_user_id", val(genBbsId(authorId, 1))],
+					["cc_user_name", val(data.displayName || "名無し")],
+					["cc_user_avatar", val(0)],
+					["avatar_color", val(data.avatarColor ?? null)],
+					["content_text", val(c.contentText)],
+					["content_url", val(c.contentUrl)],
+					["content_type", val(c.contentType)],
+					["content_data_url", val(c.contentDataUrl)],
+					["mml_delete_id", val(c.mmlDeleteId)],
+					["mml_delete_hash", val(c.mmlDeleteHash)],
+					// createPost と同じ理由でhasImage/MMLも起点にする。
+					// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
 					[
-						// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
-						threadId,
-						authorId === Number(thread.user_id),
-						authorId,
-						genBbsId(authorId, 1),
-						data.displayName || "名無し",
-						data.avatarColor ?? null,
-						c.contentText,
-						c.contentUrl,
-						c.contentType,
-						c.contentDataUrl,
-						// createPost と同じ理由でhasImage/MMLも起点にする。
-						// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
-						!!(
-							data.gameId ||
-							data.mvId ||
-							(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
-							c.contentType === CT.Dtm
+						"has_collab_button",
+						val(
+							!!(
+								data.gameId ||
+								data.mvId ||
+								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
+								c.contentType === CT.Dtm
+							),
 						),
-						data.gameId ?? null,
-						data.mvId ?? null,
-						parentNum,
-						data.originType ?? null,
-						data.dotW ?? null,
-						data.dotH ?? null,
-						data.animFrames ?? null,
-						data.animFps ?? null,
-						data.walkPreset ?? null,
-						c.mmlDeleteId,
-						c.mmlDeleteHash,
 					],
-				);
+					["game_id", val(data.gameId ?? null)],
+					["mv_id", val(data.mvId ?? null)],
+					["parent_num", val(parentNum)],
+					["origin_type", val(data.originType ?? null)],
+					["dot_w", val(data.dotW ?? null)],
+					["dot_h", val(data.dotH ?? null)],
+					["anim_frames", val(data.animFrames ?? null)],
+					["anim_fps", val(data.animFps ?? null)],
+					["walk_preset", val(data.walkPreset ?? null)],
+				]);
+				// 上のコメント通り thread_id が $1 になっていることを保証する
+				if (insertParams[0] !== threadId) {
+					throw new Error(
+						"addReply: thread_id が $1 ではありません（num の相関サブクエリが壊れます）",
+					);
+				}
+				const { rows } = await q(`${insertSql} RETURNING *`, insertParams);
 				inserted = rows[0];
 			} catch (e: any) {
 				if (e?.code !== "23505" || attempt === 4) throw e;

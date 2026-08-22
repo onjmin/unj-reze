@@ -165,7 +165,13 @@ CREATE TABLE threads (
     reposted BOOLEAN NOT NULL DEFAULT FALSE,
     reze_origin_post_id INTEGER, -- 移送の追跡と冪等性。reze の posts.id を控える（新規投稿では使わない）
     game_id BIGINT REFERENCES games(id) ON DELETE SET NULL,
-    mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL
+    mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL,
+    dot_w SMALLINT, -- ドット絵コラボ用のグリッド横解像度（例: 16, 24, 32, 48, 64）
+    dot_h SMALLINT, -- ドット絵コラボ用のグリッド縦解像度
+    -- 別カラムで持つ。歩行グラの方向数/コマ順はwalk_presetのラベルから
+    anim_frames SMALLINT, -- スプライトシートのコマ数（横の列数。歩行グラは方向あたりのコマ数）
+    anim_fps SMALLINT, -- 再生fps
+    walk_preset TEXT -- 歩行グラのとき lib/walk-cycle.ts の WalkPreset.label。アニメ絵ならNULL
 );
 
 CREATE INDEX idx_threads_board_deleted ON threads (board_id, deleted_at);
@@ -213,6 +219,11 @@ CREATE TABLE res (
     reze_origin_post_id INTEGER,
     game_id BIGINT REFERENCES games(id) ON DELETE SET NULL,
     mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL,
+    dot_w SMALLINT,
+    dot_h SMALLINT,
+    anim_frames SMALLINT,
+    anim_fps SMALLINT,
+    walk_preset TEXT,
     UNIQUE (thread_id, num) -- スレッド内でのレス番号の一意性を保証
 );
 
