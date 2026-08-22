@@ -34,6 +34,11 @@ import {
 	getScrollContainer,
 	SCROLL_CONTAINER_ID,
 } from "@/lib/hooks/useScrollNav";
+import {
+	type DrawingEditorState,
+	getStorageKey,
+	saveHistory,
+} from "@/lib/history";
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { createGame, createMv, updateGame, updateMv } from "@/lib/game-mv-client";
@@ -904,6 +909,61 @@ export default function App() {
 			!mvDraft
 		)
 			return;
+
+		// 投稿直前に「今から送る絵」のスナップショットを撮る。ここで失敗したら、
+		// 送信APIが失敗した際に復元できるデータが残らない（投稿失敗→絵が消える）
+		// ことになるため、後続の投稿処理には進まず中断して通知する。
+		if (attachedImageIsDrawn && attachedImage) {
+			const isDot = !!attachedDotSize;
+			const storageKey = getStorageKey(isDot ? "dotdrawing" : "drawing");
+			let snapshotState: DrawingEditorState | null = null;
+			try {
+				const { width, height } = await new Promise<{
+					width: number;
+					height: number;
+				}>((resolve, reject) => {
+					const img = new Image();
+					img.onload = () => resolve({ width: img.width, height: img.height });
+					img.onerror = () => reject(new Error("failed to load attached image"));
+					img.src = attachedImage;
+				});
+				snapshotState = {
+					mode: "standard",
+					width,
+					height,
+					gridW: attachedDotSize?.w ?? 32,
+					gridH: attachedDotSize?.h ?? 32,
+					zoom: 1,
+					layers: [
+						{
+							name: "layer1",
+							visible: true,
+							locked: false,
+							opacity: 100,
+							dataUrl: attachedImage,
+						},
+					],
+				};
+			} catch (err) {
+				console.error("投稿直前のスナップショット生成に失敗", err);
+			}
+			const saved =
+				!!snapshotState &&
+				saveHistory(
+					storageKey,
+					snapshotState,
+					isDot ? "dotdrawing" : "drawing",
+					50,
+				);
+			if (!saved) {
+				showToast(
+					"error",
+					"スナップショットの保存に失敗したため、投稿を中断しました",
+				);
+				return;
+			}
+		}
+
 		// #MML作曲行は1行目、自由コメントはその下の行として保存する
 		// （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
 		const parts: string[] = [];
