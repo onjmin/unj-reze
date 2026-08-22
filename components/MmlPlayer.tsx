@@ -4,7 +4,6 @@ import type { MmlPlayerInstance } from "@onjmin/dtm";
 import { useEffect, useId, useRef } from "react";
 import { useAudioFocus } from "@/lib/audio-focus-context";
 import { getStudio } from "@/lib/dtm";
-import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
 
 interface MmlPlayerProps {
 	mml: string;
@@ -13,24 +12,19 @@ interface MmlPlayerProps {
 // 再生UIは共有スタジオ経由の mountPlayer で実装する。
 // 楽器プリセット・ドラム・歌声がすべて鳴り、編集UIと音色が一致する。
 // フィードに多数並んでも getStudio() はシングルトンなので AudioContext は1つだけ。
+//
+// サイト全体の音量（読者の好み）は getStudio() 内で studio.setMasterVolume() に
+// 一本化済みなので、ここでは曲側の #volume= に一切触れない（options.volume /
+// masterVolume は指定しない＝MMLに書かれた作曲者の意図のまま鳴らす）。
 export default function MmlPlayer({ mml }: MmlPlayerProps) {
 	const id = useId();
 	const { requestFocus, releaseFocus } = useAudioFocus();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const claimedRef = useRef(false);
-	const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
 	const focusRef = useRef({ requestFocus, releaseFocus });
 	useEffect(() => {
 		focusRef.current = { requestFocus, releaseFocus };
 	}, [requestFocus, releaseFocus]);
-
-	useEffect(
-		() =>
-			subscribeMasterVolume(() =>
-				instRef.current?.setVolume(applyMasterVolume(100)),
-			),
-		[],
-	);
 
 	useEffect(() => {
 		const el = containerRef.current;
@@ -44,18 +38,11 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
 		getStudio().then((studio) => {
 			if (disposed || !el) return;
 			inst = studio.mountPlayer(el, mml, {
-				// volume(trackVolume) はマウント時に固定される値なので常に100(無加工)を渡し、
-				// マスター音量はライブ更新可能な masterVolume 経路に一本化する。
-				// これを volume 側にだけ焼き込むと、その後 setVolume() で masterVolume を
-				// 変更しても trackVolume が古いまま残り、二重スケーリング/音量ズレが起きる。
-				volume: 100,
-				masterVolume: applyMasterVolume(100),
 				onStop: () => {
 					claimedRef.current = false;
 					focusRef.current.releaseFocus(id);
 				},
 			});
-			instRef.current = inst;
 
 			const onClick = () => {
 				requestAnimationFrame(() => {
@@ -73,7 +60,6 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
 			disposed = true;
 			cleanup?.();
 			inst?.destroy();
-			instRef.current = null;
 			focusRef.current.releaseFocus(id);
 			claimedRef.current = false;
 			inst = null;

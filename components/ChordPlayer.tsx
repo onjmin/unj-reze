@@ -4,7 +4,6 @@ import type { ChordPlayerInstance } from "@onjmin/dtm";
 import { useEffect, useId, useRef } from "react";
 import { useAudioFocus } from "@/lib/audio-focus-context";
 import { getStudio } from "@/lib/dtm";
-import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
 
 interface ChordPlayerProps {
 	chords: string;
@@ -12,24 +11,18 @@ interface ChordPlayerProps {
 
 // 再生UIは共有スタジオ経由の mountChordPlayer で実装する。
 // コード進行のパース・ハイライト・再生はすべて @onjmin/dtm 側が担い、自前実装は不要。
+//
+// サイト全体の音量（読者の好み）は getStudio() 内で studio.setMasterVolume() に
+// 一本化済みなので、ここでは volume を指定しない。
 export default function ChordPlayer({ chords }: ChordPlayerProps) {
 	const id = useId();
 	const { requestFocus, releaseFocus } = useAudioFocus();
 	const containerRef = useRef<HTMLDivElement>(null);
 	const claimedRef = useRef(false);
-	const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
 	const focusRef = useRef({ requestFocus, releaseFocus });
 	useEffect(() => {
 		focusRef.current = { requestFocus, releaseFocus };
 	}, [requestFocus, releaseFocus]);
-
-	useEffect(
-		() =>
-			subscribeMasterVolume(() =>
-				instRef.current?.setVolume(applyMasterVolume(100)),
-			),
-		[],
-	);
 
 	useEffect(() => {
 		const el = containerRef.current;
@@ -43,13 +36,11 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
 		getStudio().then((studio) => {
 			if (disposed || !el) return;
 			inst = studio.mountChordPlayer(el, chords, {
-				volume: applyMasterVolume(100),
 				onStop: () => {
 					claimedRef.current = false;
 					focusRef.current.releaseFocus(id);
 				},
 			});
-			instRef.current = inst;
 
 			// クリック起点のonClick+rAF一発判定だと、AudioContext.resume()等で再生開始が
 			// 1フレームより遅れた場合にisPlaying()がまだfalseで取りこぼす（＝フォーカスを
@@ -72,7 +63,6 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
 			disposed = true;
 			cleanup?.();
 			inst?.destroy();
-			instRef.current = null;
 			focusRef.current.releaseFocus(id);
 			claimedRef.current = false;
 			inst = null;

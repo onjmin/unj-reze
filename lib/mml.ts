@@ -149,15 +149,17 @@ function countToMmlDiv(count: number): string {
 // ───────────────── 音量の合成 ─────────────────
 //
 // MMLの `#volume=`（作った人が決めた曲の音量）と、サイトのマスター音量（聴く人が決めた音量）は
-// 別物で、実効音量は「MML音量 × サイト音量」に揃える。
+// 別物。getStudio() 経由（mountEditor/mountPlayer/mountChordPlayer/studio.play/
+// playSingingMML）で鳴らす場合は、サイト音量は studio.setMasterVolume()（`studio.masterGain`、
+// 全インスタンス共有の出力段）に一本化済みなので、MML の `#volume=` には一切触れなくてよい
+// （lib/dtm.ts 参照）。
 //
-// 注意: @onjmin/dtm は再生経路ごとに音量の扱いが違う。
-//   playMML / playPlacements / studio.play … `metaVolume ?? options.volume ?? 100`
-//       → MMLに `#volume=` があると options.volume が**完全に無視される**（サイト音量が効かない）
-//   playSingingMML                         … `metaVolume/100 * (options.volume ?? 100)`（掛け算）
-//   mountMmlPlayer                         … trackVolume と masterVolume が別引数
-// そのため「options に渡すだけ」では経路によって効いたり効かなかったりする。
-// 前者に渡すときは MML の `#volume=` 自体を実効音量へ書き換えるのが確実。
+// ここの effectiveMmlVolume/withMmlVolume は、getStudio() を経由しない独立した
+// AudioContext で `playMML`/`playPlacements` を直接呼ぶ場合（例: ContentPicker の試聴）
+// にのみ必要になる。この経路には studio.masterGain のようなサイト音量の一元適用先が
+// 存在せず、また `playMML`/`playPlacements` は `metaVolume ?? options.volume ?? 100`
+// という規約（MMLに `#volume=` があると options.volume が**完全に無視される**）のため、
+// MML の `#volume=` 自体を実効音量（MML音量 × サイト音量）へ書き換えて渡す必要がある。
 
 /** MMLの `#volume=` を読む（無ければ100）。 */
 export function readMmlVolume(mml: string): number {

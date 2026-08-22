@@ -21,7 +21,6 @@ import {
 	saveAutosave,
 	saveHistory,
 } from "@/lib/history";
-import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
 
 interface MmlEditorProps {
 	onClose: () => void;
@@ -46,20 +45,15 @@ function detectMode(dtm: typeof import("@onjmin/dtm"), mml?: string): DawMode {
 	}
 }
 
-/** @onjmin/dtm のDAWマスター音量の既定値。 */
-const DAW_DEFAULT_VOLUME = 50;
-
-/** MMLメタ（#volume=）を書き換える。メタが無ければそのまま返す。 */
-function withMmlVolume(mml: string, volume: number): string {
-	return mml.replace(/#volume=\d+/, `#volume=${Math.round(volume)}`);
-}
-
-const clampVolume = (v: number) => Math.min(100, Math.max(0, Math.round(v)));
-
 // 編集UIは @onjmin/dtm の createDtmStudio().mountModeSwitch() に差し替え。
 // mountModeSwitch はシンプル/アドバンスのモード切替UIを差し込み、編集UI（mountEditor）の
 // マウント・再マウント（MML引き継ぎ）まで面倒を見る。ピアノロール・楽器プリセット・ドラム・
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
+//
+// 音量まわり: DAWの masterVolume（#volume=）は曲自体が持つ音量として一切加工せず、
+// MMLの内容そのままDAWへ渡す・そのまま保存する。サイト全体の音量（読者の好み）は
+// getStudio() 内で studio.setMasterVolume() に一本化済みなので、ここでは一切関与しない
+// （2つの音量軸を別々に保つことで、loadMML() のたびに片方が失われる事故を避けている）。
 export default function MmlEditor({
 	onClose,
 	onSave,
@@ -68,7 +62,6 @@ export default function MmlEditor({
 }: MmlEditorProps) {
 	const mountRef = useRef<HTMLDivElement>(null);
 	const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
-	const dtmModRef = useRef<typeof import("@onjmin/dtm") | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -92,65 +85,12 @@ export default function MmlEditor({
 		return () => document.removeEventListener("mousedown", onDown);
 	}, [settingsOpen]);
 
-	// サイトのマスター音量と、MML自身が持つマスター音量（#volume=）は別物として扱い、
-	// DAWへ渡す値は「MML側 × サイト側」の掛け算にする。
-	// DAWの getMML() は現在のマスター音量をそのまま #volume= として書き出すため、
-	// 掛け算後の値がMMLに焼き付かないよう、保存時は authoredVolumeRef の値へ戻す。
-	// @onjmin/dtm は動的インポート必須（静的インポートは Edge/サーバー評価時にクラッシュする）ため、
-	// レンダー時点ではまだ実際の値を計算できない。モジュール読み込み後（下の useEffect）に補正する。
-	const authoredVolumeRef = useRef<number>(DAW_DEFAULT_VOLUME);
-	/** 直近でDAWへ渡した掛け算後の値。ユーザーがDAW側スライダーを動かしたかの判定に使う。 */
-	const pushedVolumeRef = useRef<number | null>(null);
-	/** 直近の掛け算係数（サイト音量/100、ミュート時0）。 */
-	const factorRef = useRef<number>(1);
-
-	/** DAWの現在値からMML自身の音量を復元する（ユーザーがDAWのスライダーを触った場合に追従）。 */
-	const syncAuthoredVolume = useCallback(() => {
-		const daw = modeSwitchRef.current?.getDaw();
-		if (!daw) return authoredVolumeRef.current;
-		let current: number | undefined;
-		try {
-			current = dtmModRef.current?.parseMmlMeta(
-				daw.getMML()?.minified ?? "",
-			).volume;
-		} catch {
-			current = undefined;
-		}
-		if (current === undefined) return authoredVolumeRef.current;
-		// こちらが入れた値のままならユーザー変更なし
-		if (
-			pushedVolumeRef.current !== null &&
-			Math.round(current) === Math.round(pushedVolumeRef.current)
-		) {
-			return authoredVolumeRef.current;
-		}
-		// ユーザーが動かした値は掛け算後の空間なので、係数で割ってMML側の値へ戻す
-		authoredVolumeRef.current =
-			factorRef.current > 0
-				? clampVolume(current / factorRef.current)
-				: clampVolume(current);
-		return authoredVolumeRef.current;
-	}, []);
-
-	/** サイト音量 × MML音量 をDAWへ反映する。 */
-	const applyVolumeToDaw = useCallback(() => {
-		const authored = syncAuthoredVolume();
-		const factor = applyMasterVolume(100) / 100;
-		const next = clampVolume(authored * factor);
-		factorRef.current = factor;
-		pushedVolumeRef.current = next;
-		modeSwitchRef.current?.getDaw()?.setMasterVolume(next);
-	}, [syncAuthoredVolume]);
-
 	useEffect(() => {
 		let disposed = false;
 
 		Promise.all([getStudio(), import("@onjmin/dtm")])
 			.then(([studio, dtm]) => {
 				if (disposed) return;
-				dtmModRef.current = dtm;
-				authoredVolumeRef.current =
-					dtm.parseMmlMeta(initialMml ?? "").volume ?? DAW_DEFAULT_VOLUME;
 				if (mountRef.current) {
 					modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
 						editorTarget: mountRef.current,
@@ -158,13 +98,6 @@ export default function MmlEditor({
 						position: "prepend",
 						editorOptions: {
 							...(initialMml ? { initialMML: initialMml } : undefined),
-							masterVolume: (() => {
-								const factor = applyMasterVolume(100) / 100;
-								const next = clampVolume(authoredVolumeRef.current * factor);
-								factorRef.current = factor;
-								pushedVolumeRef.current = next;
-								return next;
-							})(),
 						},
 					});
 				}
@@ -187,11 +120,6 @@ export default function MmlEditor({
 		};
 	}, []);
 
-	useEffect(
-		() => subscribeMasterVolume(() => applyVolumeToDaw()),
-		[applyVolumeToDaw],
-	);
-
 	// Check autosave on mount
 	useEffect(() => {
 		const autosave = getAutosave<string>(storageKey);
@@ -212,10 +140,7 @@ export default function MmlEditor({
 			try {
 				const currentMml = daw.getMML()?.minified?.trim();
 				if (currentMml) {
-					saveAutosave(
-						storageKey,
-						withMmlVolume(currentMml, syncAuthoredVolume()),
-					);
+					saveAutosave(storageKey, currentMml);
 				}
 			} catch (e) {
 				// ignore if getMML fails during mode switch
@@ -228,12 +153,7 @@ export default function MmlEditor({
 			try {
 				const currentMml = daw.getMML()?.minified?.trim();
 				if (currentMml) {
-					saveHistory(
-						storageKey,
-						withMmlVolume(currentMml, syncAuthoredVolume()),
-						"mml",
-						50,
-					);
+					saveHistory(storageKey, currentMml, "mml", 50);
 				}
 			} catch (e) {
 				// ignore
@@ -244,7 +164,7 @@ export default function MmlEditor({
 			clearInterval(autosaveInterval);
 			clearInterval(historyInterval);
 		};
-	}, [storageKey, syncAuthoredVolume]);
+	}, [storageKey]);
 
 	const handleRestoreAutosave = () => {
 		if (!autosaveData) return;
@@ -286,8 +206,7 @@ export default function MmlEditor({
 			mml = null;
 		}
 		if (!mml) return;
-		const savedMml = withMmlVolume(mml, syncAuthoredVolume());
-		const blob = new Blob([savedMml], { type: "text/plain" });
+		const blob = new Blob([mml], { type: "text/plain" });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement("a");
 		a.href = url;
@@ -332,14 +251,12 @@ export default function MmlEditor({
 		if (!daw) return;
 		const mml = daw.getMML().minified.trim();
 		if (mml) {
-			const savedMml = withMmlVolume(mml, syncAuthoredVolume());
-			saveHistory(storageKey, savedMml, "mml", 50);
+			saveHistory(storageKey, mml, "mml", 50);
 			// Clear autosave on manual save/post
 			clearAutosave(storageKey);
-			// サイト音量を掛けた値ではなく、MML自身のマスター音量で保存する
-			onSave(savedMml);
+			onSave(mml);
 		}
-	}, [onSave, storageKey, syncAuthoredVolume]);
+	}, [onSave, storageKey]);
 
 	return (
 		<div className="fixed inset-0 bg-[#0b0e14] z-50 flex flex-col select-none">
