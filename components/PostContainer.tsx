@@ -5,11 +5,9 @@ import {
 	Copy,
 	Flag,
 	Heart,
-	Image as ImageIcon,
 	Mail,
 	MessageCircle,
 	MoreHorizontal,
-	Music,
 	Pencil,
 	Plus,
 	Repeat,
@@ -19,19 +17,11 @@ import {
 	UserPlus,
 	VolumeX,
 } from "lucide-react";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { extractChordsFromContent } from "@/lib/chord";
-import { extractFirstEmbed } from "@/lib/embed";
-import {
-	extractMmlFromContent,
-	findMmlMarker,
-	getDisplayContent,
-	stripAnkaPrefixForSnsDisplay,
-} from "@/lib/mml";
+import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { getDistinctTitle } from "@/lib/post-title";
 import { playPostSfx } from "@/lib/post-sfx";
@@ -41,27 +31,19 @@ import { buildPostShareText } from "@/lib/share-text";
 import { getThreadDisplayTime } from "@/lib/time";
 import { showToast } from "@/lib/toast";
 import {
-	isCollabAllowed,
 	ORIGIN_TYPE_OPTIONS,
 	OriginType,
 	POST_BODY_COLLAPSE_LINES,
 	Post,
 } from "@/lib/types";
-import ChordPlayer from "./ChordPlayer";
 import DeletePostModal from "./DeletePostModal";
 import EditPostModal from "./EditPostModal";
-import EmbedCollabBar from "./EmbedCollabBar";
-import EmbedPart from "./EmbedPart";
-import GameBox from "./GameBox";
 import ImagePreview from "./ImagePreview";
-import MmlSource from "./MmlSource";
-import MvBox from "./MvBox";
 import OriginTypeModal from "./OriginTypeModal";
+import PostEmbeds from "./PostEmbeds";
 import ShareButton from "./ShareButton";
 import SpriteImage from "./SpriteImage";
 import UserActionMenu from "./UserActionMenu";
-
-const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 
 interface PostContainerProps {
 	post: Post;
@@ -736,150 +718,15 @@ export default function PostContainer({
 						);
 					})()}
 
-					{post.hasImage && (
-						<div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
-							{post.hasCollabButton && isCollabAllowed(post.originType) && (
-								<EmbedCollabBar
-									icon={ImageIcon}
-									label={post.dotW ? "ドット絵" : "画像"}
-									buttonLabel="コラボ"
-									colorClass="bg-lime-600/80 hover:bg-lime-500/90"
-									onClick={(e) => {
-										e.stopPropagation();
-										openCollab(post);
-									}}
-								/>
-							)}
-							<div
-								onClick={(e) => {
-									e.stopPropagation();
-									if (post.imageSrc)
-										setPreviewImage({
-											src: post.imageSrc,
-											alt: post.imageAlt || "ユーザーアート",
-											animFrames: post.animFrames,
-											animFps: post.animFps,
-											walkPreset: post.walkPreset,
-										});
-								}}
-								className="cursor-pointer gimp-checkered-background-white"
-							>
-								<SpriteImage
-									src={post.imageSrc}
-									alt={post.imageAlt || "ユーザーアート"}
-									className="max-w-full h-auto max-h-55 block mx-auto"
-									maxHeightPx={220}
-									animFrames={post.animFrames}
-									animFps={post.animFps}
-									walkPreset={post.walkPreset}
-									dotArt={!!post.dotW}
-									onError={(e) => {
-										const target = e.currentTarget;
-										target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
-									}}
-								/>
-							</div>
-						</div>
-					)}
-
-					{post.hasMv && post.mvId && (
-						<MvBox
-							mvId={post.mvId}
-							postId={post.id}
-							mvTitle={post.mvTitle || "MV"}
-							mvThumbnail={post.mvThumbnail}
-							mvPreset={post.mvPreset}
-							mvPlays={post.mvPlays}
-							originType={post.originType}
-							className="mb-3"
-						/>
-					)}
-
-					{post.hasGame && userId && (
-						<GameBox
-							gameId={post.gameId || ""}
-							postId={post.id}
-							gameTitle={post.gameTitle || "ゲーム"}
-							gameThumbnail={post.gameThumbnail}
-							gamePlays={post.gamePlays}
-							gameClears={post.gameClears}
-							userId={userId}
-							originType={post.originType}
-							className="mb-3"
-						/>
-					)}
-
-					{(() => {
-						// MML本文はR2から。プレイヤーの枠とコラボボタンは本文を待たずに出す
-						if (post.hasMml || extractMmlFromContent(post.content)) {
-							return (
-								<div onClick={(e) => e.stopPropagation()}>
-									{(() => {
-										const mmlMarker = findMmlMarker(post.content) ?? "#mml";
-										const tagClean = mmlMarker.replace(/^#/, "");
-										return (
-											<a
-												href={`/hashtag/${encodeURIComponent(tagClean)}`}
-												onClick={(e) => {
-													e.stopPropagation();
-													router.push(
-														`/hashtag/${encodeURIComponent(tagClean)}`,
-													);
-												}}
-												className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
-											>
-												{mmlMarker}
-											</a>
-										);
-									})()}
-									<div className="rounded-xl overflow-hidden border border-gray-800 bg-[#1a1b26]">
-										{post.hasCollabButton &&
-											isCollabAllowed(post.originType) && (
-												<EmbedCollabBar
-													icon={Music}
-													label="MML"
-													buttonLabel="コラボ"
-													colorClass="bg-pink-600/80 hover:bg-pink-500/90"
-													onClick={(e) => {
-														e.stopPropagation();
-														openCollab(post);
-													}}
-												/>
-											)}
-										<MmlSource post={post}>
-											{(mml) => <MmlPlayer mml={mml} />}
-										</MmlSource>
-									</div>
-								</div>
-							);
-						}
-						const chordRes = extractChordsFromContent(post.content);
-						if (chordRes)
-							return (
-								<div onClick={(e) => e.stopPropagation()}>
-									<a
-										href={`/hashtag/${encodeURIComponent("コード進行")}`}
-										onClick={(e) => {
-											e.stopPropagation();
-											router.push(
-												`/hashtag/${encodeURIComponent("コード進行")}`,
-											);
-										}}
-										className="text-blue-400 hover:underline mb-1 inline-block text-[15px]"
-									>
-										#コード進行
-									</a>
-									<ChordPlayer chords={chordRes.chords} />
-								</div>
-							);
-						if (post.hasImage || post.hasGame) return null;
-						const embed = extractFirstEmbed(post.content);
-						return embed ? (
-							<div onClick={(e) => e.stopPropagation()}>
-								<EmbedPart embed={embed} />
-							</div>
-						) : null;
-					})()}
+					<PostEmbeds
+						post={post}
+						onOpenCollab={openCollab}
+						onPreviewImage={setPreviewImage}
+						userId={userId}
+						mvClassName="mb-3"
+						gameClassName="mb-3"
+						suppressGenericEmbedIf={(p) => !!(p.hasImage || p.hasGame)}
+					/>
 
 					{quotedPost &&
 						(() => {

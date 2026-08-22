@@ -2,7 +2,6 @@
 
 import {
 	Ban,
-	Clapperboard,
 	Copy,
 	FileText,
 	Flag,
@@ -16,7 +15,6 @@ import {
 	Pause,
 	Pencil,
 	Play,
-	PlaySquare,
 	Repeat,
 	ThumbsDown,
 	ThumbsUp,
@@ -31,7 +29,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
 import { extractChordsFromContent } from "@/lib/chord";
-import { extractFirstEmbed } from "@/lib/embed";
 import {
 	applyMasterVolume,
 	subscribeMasterVolume,
@@ -39,7 +36,6 @@ import {
 } from "@/lib/master-volume";
 import {
 	extractMmlFromContent,
-	findMmlMarker,
 	getDisplayContent,
 	stripAnkaPrefixForSnsDisplay,
 } from "@/lib/mml";
@@ -47,25 +43,18 @@ import { ensureSessionId } from "@/lib/session";
 import { showToast } from "@/lib/toast";
 import {
 	AnonymousUser,
-	isCollabAllowed,
 	ORIGIN_TYPE_OPTIONS,
 	OriginType,
 	OshiItem,
 	Post,
 } from "@/lib/types";
-import ChordPlayer from "./ChordPlayer";
 import DeletePostModal from "./DeletePostModal";
 import EditPostModal from "./EditPostModal";
-import EmbedCollabBar from "./EmbedCollabBar";
-import EmbedPart from "./EmbedPart";
 import FollowListSheet, { type FollowListTab } from "./FollowListSheet";
 import ImagePreview from "./ImagePreview";
-import MmlSource from "./MmlSource";
 import OriginTypeModal from "./OriginTypeModal";
-import SpriteImage from "./SpriteImage";
+import PostEmbeds from "./PostEmbeds";
 import UserActionMenu from "./UserActionMenu";
-
-const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 const CropAvatarModal = dynamic(() => import("./CropAvatarModal"), {
 	ssr: false,
 });
@@ -1513,159 +1502,15 @@ export default function ProfileView({
 												})()}
 											</div>
 
-											{p.hasImage && (
-												<div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
-													{p.hasCollabButton &&
-														isCollabAllowed(p.originType) && (
-															<EmbedCollabBar
-																icon={Image}
-																label={p.dotW ? "ドット絵" : "画像"}
-																buttonLabel="コラボ"
-																colorClass="bg-lime-600/80 hover:bg-lime-500/90"
-																onClick={(e) => {
-																	e.stopPropagation();
-																	openCollab?.(p);
-																}}
-															/>
-														)}
-													<div
-														onClick={(e) => {
-															e.stopPropagation();
-															if (p.imageSrc)
-																setPreviewImage({
-																	src: p.imageSrc,
-																	alt: p.imageAlt || "ユーザーアート",
-																	animFrames: p.animFrames,
-																	animFps: p.animFps,
-																	walkPreset: p.walkPreset,
-																});
-														}}
-														className="cursor-pointer gimp-checkered-background-white"
-													>
-														<SpriteImage
-															src={p.imageSrc}
-															alt={p.imageAlt || "ユーザーアート"}
-															className="max-w-full h-auto max-h-[220px] block mx-auto"
-															maxHeightPx={220}
-															animFrames={p.animFrames}
-															animFps={p.animFps}
-															walkPreset={p.walkPreset}
-															dotArt={!!p.dotW}
-															onError={(e) => {
-																const target = e.currentTarget;
-																target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
-															}}
-														/>
-													</div>
-												</div>
-											)}
-
-											{p.hasMv && (
-												<div
-													onClick={() => handlePostClick(p)}
-													className="w-full aspect-video bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
-												>
-													<div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
-													<div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
-													<div className="z-10 flex flex-col items-center space-y-1">
-														<div className="bg-purple-600 p-3 rounded-full shadow-[0_0_15px_rgba(147,51,234,0.5)] group-hover:scale-110 transition-transform">
-															<Clapperboard
-																size={28}
-																className="text-white ml-0.5"
-															/>
-														</div>
-														<span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">
-															TAP TO WATCH MV
-														</span>
-													</div>
-													<div className="absolute bottom-2 left-2.5 z-10 flex items-center space-x-1.5">
-														<span className="font-bold text-xs bg-purple-600/90 text-white px-2 py-0.5 rounded">
-															Music Video
-														</span>
-													</div>
-												</div>
-											)}
-
-											{p.hasGame && (
-												<div
-													onClick={() => handlePostClick(p)}
-													className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
-												>
-													<div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
-													<div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
-													<div className="z-10 flex flex-col items-center space-y-1">
-														<div className="bg-red-600 p-3 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform">
-															<PlaySquare
-																size={28}
-																className="text-white ml-0.5"
-															/>
-														</div>
-														<span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">
-															TAP TO PLAY GAME
-														</span>
-													</div>
-													<div className="absolute bottom-2 left-2.5 z-10 flex items-center space-x-1.5">
-														<span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">
-															escape_the_mushroom
-														</span>
-													</div>
-												</div>
-											)}
-
-											{(() => {
-												// MML本文はR2へ外部化済みだと content にマーカーしか残らない（inline抽出は
-												// 常に空文字になる）ため、hasMml も見て MmlSource 経由で mmlUrl を解決する。
-												if (p.hasMml || extractMmlFromContent(p.content)) {
-													return (
-														<div>
-															{(() => {
-																const mmlMarker =
-																	findMmlMarker(p.content) ?? "#mml";
-																const tagClean = mmlMarker.replace(/^#/, "");
-																return (
-																	<a
-																		href={`/hashtag/${encodeURIComponent(tagClean)}`}
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			router.push(
-																				`/hashtag/${encodeURIComponent(tagClean)}`,
-																			);
-																		}}
-																		className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
-																	>
-																		{mmlMarker}
-																	</a>
-																);
-															})()}
-															<MmlSource post={p}>
-																{(mml) => <MmlPlayer mml={mml} />}
-															</MmlSource>
-														</div>
-													);
-												}
-												const chordRes = extractChordsFromContent(p.content);
-												if (chordRes)
-													return (
-														<div>
-															<a
-																href={`/hashtag/${encodeURIComponent("コード進行")}`}
-																onClick={(e) => {
-																	e.stopPropagation();
-																	router.push(
-																		`/hashtag/${encodeURIComponent("コード進行")}`,
-																	);
-																}}
-																className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
-															>
-																#コード進行
-															</a>
-															<ChordPlayer chords={chordRes.chords} />
-														</div>
-													);
-												if (p.hasImage || p.hasGame || p.hasMv) return null;
-												const embed = extractFirstEmbed(p.content);
-												return embed ? <EmbedPart embed={embed} /> : null;
-											})()}
+											<PostEmbeds
+												post={p}
+												onOpenCollab={(post) => openCollab?.(post)}
+												onPreviewImage={(img) => setPreviewImage(img)}
+												userId={viewerSlug}
+												mvClassName="mb-3"
+												gameClassName="mb-3"
+												hashtagLinkClassName="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
+											/>
 
 											<div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">
 												<button
