@@ -87,7 +87,15 @@ export const mockStore: DataStore = {
 	},
 
 	async deletePost(id: number, userId: string) {
-		return mockDb.deletePost(id, userId);
+		// mockモードでは常に空でよい：
+		// - MMLは content にインライン保持のまま（isUploaderAvailable=false時の挙動、
+		//   lib/mml-payload.ts 参照）でR2実体が無い。
+		// - ゲーム/MVはそもそもアップローダ未設定だと作成自体ができない
+		//   （lib/uploader.ts uploadText が isUploaderAvailable=false で即throw）ので、
+		//   mockDb側にorphan判定を足す実益が無い。gameStore/mvStore(lib/db/mock.ts)は
+		//   プロセス終了で消えるインメモリなので、消し忘れても実害は無い。
+		const ok = mockDb.deletePost(id, userId);
+		return ok ? {} : false;
 	},
 
 	async deleteMessage(id: number, userId: string) {

@@ -58,8 +58,10 @@ external services. Do not hard-code a provider.
   `pg` is dynamically imported and listed in `next.config.ts`'s `serverExternalPackages` so it
   never gets bundled into the Cloudflare Workers production build.
 - `lib/storage/s3.ts` is the **local filesystem** provider (`./public/uploads`) despite its name; only `lib/storage/r2.ts` uses `@aws-sdk/client-s3`.
-- Schema lives in `data/schema.sql`, which is **gitignored** — not in the repo. Migrations are
-  applied manually (see `README.md`).
+- Schema lives in `docker/init.sql` (also mounted by `docker compose up -d db-neon` for local dev).
+  It mirrors the original at `unj/wiki/init.sql` in the sibling `unj` repo — keep both in sync when
+  editing either. Migrations are applied manually (see `README.md`); there is no schema file that
+  auto-generates `ALTER TABLE` statements, so state them explicitly when a column changes.
 
 ## Neon egress budget & realtime
 

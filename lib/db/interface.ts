@@ -216,7 +216,28 @@ export interface DataStore {
 		mml?: MmlRef,
 		dotMeta?: DotMetaEdit,
 	): Promise<DbPost | null>;
-	deletePost(id: number, userId: string): Promise<boolean>;
+	/**
+	 * 投稿/レスを削除する。所有者不一致・存在しないIDは false。
+	 * 成功時は消えたMML/ゲーム・MV manifestの削除トークン（無ければ空オブジェクト）を返す。
+	 * ゲーム/MVは他の投稿からまだ参照されていれば消さない（実装側でorphan判定する）。
+	 * 呼び出し側（app/api/posts/[id]/route.ts）がこれをレスポンスに載せ、
+	 * クライアント（lib/api.ts posts.remove）がDB削除確定後にR2の実体を消す
+	 * （editPostのpreviousMmlと同じ「DB確定後に消す」順序）。
+	 */
+	deletePost(
+		id: number,
+		userId: string,
+	): Promise<
+		| {
+				mmlDeleteId?: string;
+				mmlDeleteHash?: string;
+				gameManifestDeleteId?: string;
+				gameManifestDeleteHash?: string;
+				mvManifestDeleteId?: string;
+				mvManifestDeleteHash?: string;
+		  }
+		| false
+	>;
 	deleteMessage(id: number, userId: string): Promise<boolean>;
 	getUserPostsBySlug(
 		slug: string,

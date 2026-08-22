@@ -149,6 +149,11 @@ CREATE TABLE threads (
     -- DTM(2048)・暗号レス(4096) の本文の保存先URL（R2）。本文そのものは入れない。
     -- MMLは encodeMml 後でも5000文字を超えうるのでカラムには収まらない。
     content_data_url TEXT NOT NULL DEFAULT '',
+    -- content_data_url（MML）の削除トークン。games/mvsのmanifest_delete_id/hashと同じ役目。
+    -- 編集で新しいR2オブジェクトへ上げ直すたびに、これが無いと旧オブジェクトを二度と消せず
+    -- R2にゴミが溜まり続ける（lib/db/pg.ts editPost 参照）。
+    mml_delete_id TEXT,
+    mml_delete_hash TEXT,
     -- ここから reze 由来（unj/unj-reze DB統合時に追加）
     hearts_total INTEGER NOT NULL DEFAULT 0,
     reposts INTEGER NOT NULL DEFAULT 0,
@@ -189,6 +194,9 @@ CREATE TABLE res (
     content_type SMALLINT NOT NULL DEFAULT 1,
     -- threads と同じくR2の保存先URL。本文そのものは入れない。
     content_data_url TEXT NOT NULL DEFAULT '',
+    -- threads.mml_delete_id/hash と同じ役目（このレスのMMLの削除トークン）。
+    mml_delete_id TEXT,
+    mml_delete_hash TEXT,
     command_result TEXT NOT NULL DEFAULT '',
     -- ここから reze 由来（unj/unj-reze DB統合時に追加）
     good_count SMALLINT NOT NULL DEFAULT 0, -- unjのresには元々いいね系の列が無かった

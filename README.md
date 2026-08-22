@@ -100,7 +100,8 @@ R2 パブリックアクセスの有効化：バケットの **Settings → Publ
 
 自動マイグレーションは廃止されました。初回セットアップ時やデータベースをリセットする際は、手動でSQLを適用してください。
 
-1. [data/schema.sql](./data/schema.sql) の内容をコピーします。
+1. [docker/init.sql](./docker/init.sql) の内容をコピーします（`docker compose up -d db-neon` で
+   ローカルDBを初期化するのと同じSQLです）。
 2. Neon のダッシュボードの **SQL Editor** を開くか、またはローカルの PostgreSQL クライアント等から接続します。
 3. コピーした SQL を実行してテーブルやインデックスを作成します。
 

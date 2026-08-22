@@ -6,6 +6,7 @@ import type { Message, Trend } from "./mock-db";
 import { db as mockDbInstance } from "./mock-db";
 import type { MvManifest } from "./mv-config";
 import { ensureSessionId } from "./session";
+import { deleteObject } from "./uploader";
 import {
 	decodeIdOrThrow,
 	encodeId,
@@ -664,6 +665,11 @@ const liveApi = {
 				}),
 			}),
 		// userId は互換のため残しているがサーバーは見ない（所有者判定はセッション）
+		//
+		// R2は immutable なので編集のたびに新しいMMLオブジェクトへ上げ直す（同じキーへの
+		// 上書きができない）。DB更新が確定した後だけ previousMml が返るので、それを見て
+		// 旧オブジェクトを消す。失敗しても投稿自体は成立しているので握り潰す
+		// （残るのは孤児オブジェクト1個で表示は壊れない。lib/game-mv-client.ts と同じ設計）。
 		edit: async (
 			id: string,
 			userId: string,
@@ -677,8 +683,10 @@ const liveApi = {
 				animFps?: number | null;
 				walkPreset?: string | null;
 			},
-		) =>
-			fetcher<Post>(`/posts/${id}`, {
+		) => {
+			const result = await fetcher<
+				Post & { previousMml?: { deleteId: string; deleteHash: string } }
+			>(`/posts/${id}`, {
 				method: "PATCH",
 				body: JSON.stringify({
 					userId,
@@ -688,12 +696,53 @@ const liveApi = {
 					...(await externalizeMml(content)),
 					sessionId: ensureSessionId(),
 				}),
-			}),
-		remove: (id: string, userId: string) =>
-			fetcher<{ success: boolean }>(`/posts/${id}`, {
+			});
+			const { previousMml, ...post } = result;
+			if (previousMml?.deleteId && previousMml?.deleteHash) {
+				try {
+					await deleteObject(previousMml.deleteId, previousMml.deleteHash);
+				} catch (e) {
+					console.warn("[uploader] 旧MMLの削除に失敗（孤児として残ります）", e);
+				}
+			}
+			return post as Post;
+		},
+		// 削除（レス=物理削除／スレ=論理削除どちらも）はR2側のMML/ゲーム・MV manifest実体も
+		// 道連れで消す。DB削除が確定した後だけ previousXxx が返るので、それを見てから消す
+		// （edit と同じ「DB確定後に消す」順序。lib/game-mv-client.ts 参照）。ゲーム/MVは
+		// 他の投稿からまだ参照されていればサーバー側で削除自体をスキップしているので、
+		// previousGameManifest/previousMvManifest が無いのは「消さなかった」という意味。
+		remove: async (id: string, userId: string) => {
+			const result = await fetcher<{
+				success: boolean;
+				previousMml?: { deleteId: string; deleteHash: string };
+				previousGameManifest?: { deleteId: string; deleteHash: string };
+				previousMvManifest?: { deleteId: string; deleteHash: string };
+			}>(`/posts/${id}`, {
 				method: "DELETE",
 				body: JSON.stringify({ userId, sessionId: ensureSessionId() }),
-			}),
+			});
+			const refs: [string, { deleteId: string; deleteHash: string } | undefined][] =
+				[
+					["旧MML", result.previousMml],
+					["ゲームmanifest", result.previousGameManifest],
+					["MV manifest", result.previousMvManifest],
+				];
+			await Promise.all(
+				refs.map(async ([label, ref]) => {
+					if (!ref?.deleteId || !ref?.deleteHash) return;
+					try {
+						await deleteObject(ref.deleteId, ref.deleteHash);
+					} catch (e) {
+						console.warn(
+							`[uploader] 削除済み投稿の${label}の削除に失敗（孤児として残ります）`,
+							e,
+						);
+					}
+				}),
+			);
+			return { success: result.success };
+		},
 		replies: {
 			list: (postId: string, userId?: string) => {
 				const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";

@@ -36,7 +36,7 @@ import {
 } from "@/lib/hooks/useScrollNav";
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
-import { createGame, createMv } from "@/lib/game-mv-client";
+import { createGame, createMv, updateGame, updateMv } from "@/lib/game-mv-client";
 import {
 	countUnreadMessages,
 	MESSAGES_READ_EVENT,
@@ -1289,21 +1289,17 @@ export default function App() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// manifest はブラウザから直接R2へ上げ、DBにはURLだけ渡す（docs/NEON_EGRESS.md）。
+	// updateGame/updateMv（lib/game-mv-client.ts）がアップロード→PATCH→旧manifestの
+	// 削除まで面倒を見る。ここで直接 fetch(PATCH) して生の manifest を送ると、
+	// サーバーは manifestUrl が無いとして 400 を返す（parseManifestRef 参照）。
 	const handleSaveEditedGame = async (
 		manifest: GameManifestDraft,
 		meta: { title: string; preset: string },
 	) => {
 		if (!playingGame?.gameId) return;
 		try {
-			await fetch(`/api/games/${playingGame.gameId}`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					title: meta.title,
-					manifest,
-					userSlug: currentUser?.slug,
-				}),
-			});
+			await updateGame(playingGame.gameId, { title: meta.title, manifest });
 		} catch {}
 		closeScreen();
 		setPlayingGame(null);
@@ -1320,14 +1316,9 @@ export default function App() {
 	}) => {
 		if (!playingMv?.mvId) return;
 		try {
-			await fetch(`/api/mvs/${playingMv.mvId}`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					title: data.title,
-					manifest: data.manifest,
-					userSlug: currentUser?.slug,
-				}),
+			await updateMv(playingMv.mvId, {
+				title: data.title,
+				manifest: data.manifest,
 			});
 		} catch {}
 		closeScreen();

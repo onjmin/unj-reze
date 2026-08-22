@@ -251,6 +251,8 @@ function deriveInsertContent(data: {
 	hasImage?: boolean;
 	imageSrc?: string;
 	mmlUrl?: string;
+	mmlDeleteId?: string;
+	mmlDeleteHash?: string;
 }) {
 	const content = data.content ?? "";
 	if (data.mmlUrl || extractMmlFromContent(content)) {
@@ -259,6 +261,10 @@ function deriveInsertContent(data: {
 			contentText: content,
 			contentUrl: "",
 			contentDataUrl: data.mmlUrl || null,
+			// 削除トークンはR2へ実際に上げた(mmlUrlがある)ときだけ持つ。外部化に失敗して
+			// 本文に生MMLが残っているだけの場合はR2に実体が無いのでnullのまま。
+			mmlDeleteId: data.mmlUrl ? data.mmlDeleteId || null : null,
+			mmlDeleteHash: data.mmlUrl ? data.mmlDeleteHash || null : null,
 		};
 	}
 	if (data.hasImage && data.imageSrc) {
@@ -267,6 +273,8 @@ function deriveInsertContent(data: {
 			contentText: content,
 			contentUrl: data.imageSrc,
 			contentDataUrl: "",
+			mmlDeleteId: null,
+			mmlDeleteHash: null,
 		};
 	}
 	// コード進行(#コード進行)はMMLと違ってR2へ外部化されず、本文にそのまま残る
@@ -278,6 +286,8 @@ function deriveInsertContent(data: {
 			contentText: content,
 			contentUrl: "",
 			contentDataUrl: "",
+			mmlDeleteId: null,
+			mmlDeleteHash: null,
 		};
 	}
 	return {
@@ -285,7 +295,102 @@ function deriveInsertContent(data: {
 		contentText: content,
 		contentUrl: "",
 		contentDataUrl: "",
+		mmlDeleteId: null,
+		mmlDeleteHash: null,
 	};
+}
+
+/**
+ * 削除確定した行から、消すべきR2オブジェクト（MML）の削除トークンを取り出す。
+ * content_type===Dtm のときだけ content_data_url がR2実体を指す（deriveDisplay と同じ判定）。
+ * deletePost（投稿/レス削除）が使う。ゲーム/MVの manifest は orphanedManifestRefsOf が別に扱う
+ * （games/mvs は他の投稿からも参照されうるため、単純な「消えたら即削除」にはできない）。
+ */
+function mmlDeleteRefOf(row: {
+	content_type: unknown;
+	content_data_url?: string | null;
+	mml_delete_id?: string | null;
+	mml_delete_hash?: string | null;
+}): { mmlDeleteId?: string; mmlDeleteHash?: string } {
+	if (
+		Number(row.content_type) === CT.Dtm &&
+		row.content_data_url &&
+		row.mml_delete_id
+	) {
+		return {
+			mmlDeleteId: row.mml_delete_id,
+			mmlDeleteHash: row.mml_delete_hash ?? undefined,
+		};
+	}
+	return {};
+}
+
+/**
+ * game_id/mv_id が、削除確定した行以外の投稿からまだ参照されているか。
+ * スレッドは論理削除（deleted_at）されるとどのみち二度と表示されないので、
+ * 「参照している」扱いから除外する（MMLの後始末と同じ「非表示＝もう消してよい」判断）。
+ */
+async function hasOtherPostRef(
+	column: "game_id" | "mv_id",
+	id: number,
+): Promise<boolean> {
+	const { rows } = await q(
+		`SELECT EXISTS (
+			SELECT 1 FROM threads WHERE ${column} = $1 AND deleted_at IS NULL
+			UNION ALL
+			SELECT 1 FROM res WHERE ${column} = $1
+		) AS has_ref`,
+		[id],
+	);
+	return !!rows[0]?.has_ref;
+}
+
+/**
+ * 削除確定した投稿/レスに game_id/mv_id が付いていたとき、他の投稿からもう参照されて
+ * いなければ games/mvs 行自体を削除し、R2 manifest の削除トークンを返す
+ * （呼び出し側=クライアントがR2実体を消す。previousMmlと同じ「DB確定後に消す」流儀）。
+ * 参照が残っていれば何もしない（他の投稿の再生/改造の起点として生きているため）。
+ */
+async function orphanedManifestRefsOf(row: {
+	game_id?: number | string | null;
+	mv_id?: number | string | null;
+}): Promise<{
+	gameManifestDeleteId?: string;
+	gameManifestDeleteHash?: string;
+	mvManifestDeleteId?: string;
+	mvManifestDeleteHash?: string;
+}> {
+	const out: {
+		gameManifestDeleteId?: string;
+		gameManifestDeleteHash?: string;
+		mvManifestDeleteId?: string;
+		mvManifestDeleteHash?: string;
+	} = {};
+	const gameId = row.game_id != null ? Number(row.game_id) : null;
+	if (gameId != null && !(await hasOtherPostRef("game_id", gameId))) {
+		// games行を消せば game_schedule/game_votes は ON DELETE CASCADE で連動して消える
+		// （docker/init.sql参照）。game_players のようなDB書き込みは元々存在しない。
+		const { rows } = await q(
+			`DELETE FROM games WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
+			[gameId],
+		);
+		if (rows[0]?.manifest_delete_id) {
+			out.gameManifestDeleteId = rows[0].manifest_delete_id;
+			out.gameManifestDeleteHash = rows[0].manifest_delete_hash ?? undefined;
+		}
+	}
+	const mvId = row.mv_id != null ? Number(row.mv_id) : null;
+	if (mvId != null && !(await hasOtherPostRef("mv_id", mvId))) {
+		const { rows } = await q(
+			`DELETE FROM mvs WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
+			[mvId],
+		);
+		if (rows[0]?.manifest_delete_id) {
+			out.mvManifestDeleteId = rows[0].manifest_delete_id;
+			out.mvManifestDeleteHash = rows[0].manifest_delete_hash ?? undefined;
+		}
+	}
+	return out;
 }
 
 // ============================================================================
@@ -326,6 +431,8 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
+		mmlDeleteId: row.mml_delete_id ?? undefined,
+		mmlDeleteHash: row.mml_delete_hash ?? undefined,
 		dotW: row.dot_w != null ? Number(row.dot_w) : undefined,
 		dotH: row.dot_h != null ? Number(row.dot_h) : undefined,
 		animFrames: row.anim_frames != null ? Number(row.anim_frames) : undefined,
@@ -371,6 +478,8 @@ function resRowToPost(row: any): DbPost {
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
+		mmlDeleteId: row.mml_delete_id ?? undefined,
+		mmlDeleteHash: row.mml_delete_hash ?? undefined,
 		dotW: row.dot_w != null ? Number(row.dot_w) : undefined,
 		dotH: row.dot_h != null ? Number(row.dot_h) : undefined,
 		animFrames: row.anim_frames != null ? Number(row.anim_frames) : undefined,
@@ -661,6 +770,7 @@ export const pgStore: DataStore = {
              cc_bitmask, content_types_bitmask,
              user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
              content_text, content_url, content_type, content_data_url,
+             mml_delete_id, mml_delete_hash,
              has_collab_button, game_id, mv_id, origin_type, dot_w, dot_h,
              anim_frames, anim_fps, walk_preset
            ) VALUES (
@@ -671,7 +781,7 @@ export const pgStore: DataStore = {
              ),
              '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,'',1,${RES_LIMIT},
                      ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                     $2,$3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                     $2,$3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
            RETURNING *`,
 					[
 						(mmlResolved.content || "")
@@ -713,6 +823,8 @@ export const pgStore: DataStore = {
 						data.animFrames ?? null,
 						data.animFps ?? null,
 						data.walkPreset ?? null,
+						c.mmlDeleteId,
+						c.mmlDeleteHash,
 					],
 				);
 				row = rows[0];
@@ -853,11 +965,12 @@ export const pgStore: DataStore = {
              thread_id, num, created_at, ip, is_owner, sage,
              user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
              content_text, content_url, content_type, content_data_url,
+             mml_delete_id, mml_delete_hash,
              has_collab_button, game_id, mv_id, parent_num, origin_type, dot_w, dot_h,
              anim_frames, anim_fps, walk_preset
            ) VALUES ($1, (SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1),
                      CURRENT_TIMESTAMP,'0.0.0.0'::inet,$2,FALSE,$3,$4,$5,0,$6,
-                     $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                     $7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
            RETURNING *`,
 					[
 						// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
@@ -888,6 +1001,8 @@ export const pgStore: DataStore = {
 						data.animFrames ?? null,
 						data.animFps ?? null,
 						data.walkPreset ?? null,
+						c.mmlDeleteId,
+						c.mmlDeleteHash,
 					],
 				);
 				inserted = rows[0];
@@ -964,16 +1079,38 @@ export const pgStore: DataStore = {
 	) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
-		const { rows } = await q(`SELECT user_id FROM ${table} WHERE id = $1`, [
-			rawId,
-		]);
+		const { rows } = await q(
+			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash FROM ${table} WHERE id = $1`,
+			[rawId],
+		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return null;
+		const prevRow = rows[0];
 
 		const sets: string[] = [];
 		const vals: any[] = [];
 		const push = (col: string, v: unknown) => {
 			vals.push(v);
 			sets.push(`${col} = $${vals.length}`);
+		};
+
+		// 旧MMLの削除トークン。content_data_url を実際に別の値へ差し替える分岐でだけ埋める。
+		// 新しい値が旧URLと同じ（無編集の再送）ときは何もしない — DBがまだ指している
+		// 実体をここで消してしまうと、他の閲覧者から見て再生不能になる事故になる。
+		let previousMml: { deleteId: string; deleteHash: string } | undefined;
+		const capturePreviousMmlIfReplaced = (
+			newDataUrl: string | null | undefined,
+		) => {
+			if (
+				Number(prevRow.content_type) === CT.Dtm &&
+				prevRow.mml_delete_id &&
+				prevRow.content_data_url &&
+				prevRow.content_data_url !== (newDataUrl || "")
+			) {
+				previousMml = {
+					deleteId: prevRow.mml_delete_id,
+					deleteHash: prevRow.mml_delete_hash,
+				};
+			}
 		};
 
 		// content_type は content_url/content_data_url と必ず連動させる。
@@ -992,6 +1129,8 @@ export const pgStore: DataStore = {
 			const c = deriveInsertContent({
 				content: mmlResolved.content,
 				mmlUrl: mmlResolved.mmlUrl,
+				mmlDeleteId: mmlResolved.mmlDeleteId,
+				mmlDeleteHash: mmlResolved.mmlDeleteHash,
 				hasImage: !!imageSrc,
 				imageSrc,
 			});
@@ -999,6 +1138,9 @@ export const pgStore: DataStore = {
 			push("content_url", c.contentUrl);
 			push("content_type", c.contentType);
 			push("content_data_url", c.contentDataUrl);
+			push("mml_delete_id", c.mmlDeleteId);
+			push("mml_delete_hash", c.mmlDeleteHash);
+			capturePreviousMmlIfReplaced(c.contentDataUrl);
 			// MML編集（この分岐）も画像編集（下の分岐）と同じくコラボの起点にする。
 			// c.contentType===CT.Dtm を見落とすとMML埋め込みだけ「コラボ」ボタンが
 			// 一度も出ないまま導線が死ぬ（createPost/addReplyと同じ罠）。
@@ -1014,6 +1156,9 @@ export const pgStore: DataStore = {
 			push("content_url", c.contentUrl);
 			push("content_type", c.contentType);
 			push("content_data_url", c.contentDataUrl);
+			push("mml_delete_id", c.mmlDeleteId);
+			push("mml_delete_hash", c.mmlDeleteHash);
+			capturePreviousMmlIfReplaced(c.contentDataUrl);
 			// 画像を新たに足した／差し替えた編集はコラボの起点にする。createPost/addReply
 			// と同じ理由（お絵描き投稿は自動的にコラボ可能にする設計）。
 			if (imageSrc) push("has_collab_button", true);
@@ -1039,33 +1184,55 @@ export const pgStore: DataStore = {
 			`UPDATE ${table} SET ${sets.join(", ")} WHERE id = $${vals.length}`,
 			vals,
 		);
-		return pgStore.getPost(id, userId);
+		const result = await pgStore.getPost(id, userId);
+		// 旧オブジェクトの削除トークンをここにだけ載せて返す。DB更新が確定したあとに
+		// 呼び出し側（app/api/posts/[id]/route.ts）がレスポンスに載せ、クライアントが
+		// 消す（lib/game-mv-client.ts の updateGame/updateMv と同じ順序）。
+		if (result) (result as DbPost & { previousMml?: typeof previousMml }).previousMml =
+			previousMml;
+		return result;
 	},
 
 	async deletePost(id: number, userId: string) {
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
 			const { rows } = await q(
-				`SELECT thread_id, user_id FROM res WHERE id = $1`,
+				`SELECT thread_id, user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id FROM res WHERE id = $1`,
 				[resId],
 			);
 			if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
+			const row = rows[0];
 			await q(`DELETE FROM res WHERE id = $1`, [resId]);
 			await q(
 				`UPDATE threads SET res_count = GREATEST(res_count - 1, 1) WHERE id = $1`,
-				[rows[0].thread_id],
+				[row.thread_id],
 			);
-			return true;
+			// レスは物理削除（=完全に取り消し不能）なので、この時点でMML/ゲーム・MVの
+			// R2オブジェクトを消しても復元不能事故にはならない
+			// （editPostのpreviousMmlと同じトークンの流儀）。
+			return {
+				...mmlDeleteRefOf(row),
+				...(await orphanedManifestRefsOf(row)),
+			};
 		}
 		const threadId = postIdToThreadId(id);
-		const { rows } = await q(`SELECT user_id FROM threads WHERE id = $1`, [
-			threadId,
-		]);
+		const { rows } = await q(
+			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id FROM threads WHERE id = $1`,
+			[threadId],
+		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
+		const row = rows[0];
 		await q(`UPDATE threads SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, [
 			threadId,
 		]);
-		return true;
+		// スレッドは論理削除（deleted_at）で、以後どのクエリも WHERE deleted_at IS NULL で
+		// 除外するため復元・再表示の経路は無い（削除後に「元に戻す」があるのは、
+		// DELETE APIが失敗したときのクライアント側の楽観更新ロールバックのみ）。
+		// よってここも安全にR2側のMML/ゲーム・MVを消せる。
+		return {
+			...mmlDeleteRefOf(row),
+			...(await orphanedManifestRefsOf(row)),
+		};
 	},
 
 	async deleteMessage(id: number, userId: string) {

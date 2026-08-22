@@ -224,7 +224,15 @@ export async function PATCH(
 		);
 	}
 	await attachEmbedInfo(result);
-	return NextResponse.json(encodePost(result));
+	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
+	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
+	// （lib/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
+	const previousMml = (
+		result as typeof result & {
+			previousMml?: { deleteId: string; deleteHash: string };
+		}
+	).previousMml;
+	return NextResponse.json({ ...encodePost(result), previousMml });
 }
 
 export async function DELETE(
@@ -242,12 +250,34 @@ export async function DELETE(
 	if (!user) {
 		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	}
-	const ok = await db.deletePost(decodedId, user.slug);
-	if (!ok) {
+	const result = await db.deletePost(decodedId, user.slug);
+	if (!result) {
 		return NextResponse.json(
 			{ error: "Post not found or not owned" },
 			{ status: 404 },
 		);
 	}
-	return NextResponse.json({ success: true });
+	// 削除確定後だけMML/ゲーム・MV manifestの削除トークンを載せる。クライアント
+	// （lib/api.ts posts.remove）がこれを見てR2の実体を消す
+	// （editPostのpreviousMmlと同じ仕組み）。ゲーム/MVは他の投稿からまだ参照されて
+	// いれば db.deletePost 側で削除自体をスキップしているので、この時点で無ければ
+	// 「消さなかった」という意味になる。
+	return NextResponse.json({
+		success: true,
+		previousMml: result.mmlDeleteId
+			? { deleteId: result.mmlDeleteId, deleteHash: result.mmlDeleteHash }
+			: undefined,
+		previousGameManifest: result.gameManifestDeleteId
+			? {
+					deleteId: result.gameManifestDeleteId,
+					deleteHash: result.gameManifestDeleteHash,
+				}
+			: undefined,
+		previousMvManifest: result.mvManifestDeleteId
+			? {
+					deleteId: result.mvManifestDeleteId,
+					deleteHash: result.mvManifestDeleteHash,
+				}
+			: undefined,
+	});
 }
