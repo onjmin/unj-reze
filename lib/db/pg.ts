@@ -1258,18 +1258,45 @@ export const pgStore: DataStore = {
 		}
 		const threadId = postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id FROM threads WHERE id = $1`,
+			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, res_count FROM threads WHERE id = $1`,
 			[threadId],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
 		const row = rows[0];
+		// res_count は OP自身を含む（返信0件なら1）。生きた返信が残っているスレに
+		// deleted_at を立てて丸ごと隠すと、以後どのクエリも t.deleted_at IS NULL で
+		// 除外するため、その返信は物理削除もされないまま「DB上は存在し件数にも数えられるが、
+		// フィード/ハッシュタグ/最新レスのどこからも二度と辿れない」迷子状態になる
+		// （返信=物理削除・スレ=論理削除という非対称性が原因。実際にこれで
+		// 表示不能になった返信を踏んだ）。mock.ts（MockDb.deletePost）は元々これを避けて
+		// 「子を持つ親はプレースホルダ化」する実装だったので、pg側もそれに合わせる：
+		// deleted_at は立てず、本文だけ「(削除されました)」に差し替えて画像/MML/ゲーム/MV/
+		// ドット絵メタを全部クリアする。スレ自体は生き続けるので返信は今まで通り辿れる。
+		if (Number(row.res_count ?? 1) > 1) {
+			await q(
+				`UPDATE threads SET content_text = $1, content_url = '', content_type = $2,
+         content_data_url = '', mml_delete_id = NULL, mml_delete_hash = NULL,
+         game_id = NULL, mv_id = NULL, dot_w = NULL, dot_h = NULL,
+         anim_frames = NULL, anim_fps = NULL, walk_preset = NULL
+       WHERE id = $3`,
+				["(削除されました)", CT.Text, threadId],
+			);
+			// 本文/添付は消えるが行自体とres_countは残るので、消えたR2実体だけ道連れにする
+			// （deleted_atパスと同じ「DB確定後にR2を消す」順序、他投稿から参照が残っていれば
+			// orphanedManifestRefsOf側でスキップされる）。
+			return {
+				...mmlDeleteRefOf(row),
+				...(await orphanedManifestRefsOf(row)),
+			};
+		}
 		await q(`UPDATE threads SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, [
 			threadId,
 		]);
 		// スレッドは論理削除（deleted_at）で、以後どのクエリも WHERE deleted_at IS NULL で
 		// 除外するため復元・再表示の経路は無い（削除後に「元に戻す」があるのは、
 		// DELETE APIが失敗したときのクライアント側の楽観更新ロールバックのみ）。
-		// よってここも安全にR2側のMML/ゲーム・MVを消せる。
+		// よってここも安全にR2側のMML/ゲーム・MVを消せる（返信が残っていない＝上のガードで
+		// 保証済みなので、迷子になる返信も存在しない）。
 		return {
 			...mmlDeleteRefOf(row),
 			...(await orphanedManifestRefsOf(row)),
