@@ -44,8 +44,6 @@ import { extractChordsFromContent } from "../chord";
 import type { Message, Trend } from "../mock-db";
 import { extractMmlFromContent } from "../mml";
 import { ensureMmlExternalized } from "../mml-payload";
-import { CH_FEED, chThread, chUser } from "../realtime/channels";
-import { publishRealtime } from "../realtime/publish";
 import { isThreadFull, RES_LIMIT } from "../thread-limits";
 import { formatRelativeTime } from "../time";
 import type {
@@ -1105,12 +1103,9 @@ export const pgStore: DataStore = {
 		post.parentPostId =
 			parentNum === 1 ? threadToPostId(threadId) : post.parentPostId;
 
-		publishRealtime({
-			channel: chThread(String(threadToPostId(threadId))),
-			event: "reply.created",
-			data: post,
-		});
-		publishRealtime({ channel: CH_FEED, event: "reply.created", data: post });
+		// 配信は呼び出し側（app/api/posts/[id]/replies/route.ts）が担う。ここでも publish
+		// すると mock では出ないpg限定の二重配信になり、しかもここは attachEmbedInfo 前の
+		// 素のpostなのでゲーム/MV埋め込み情報が欠けたデータが先に飛んでしまう。
 		return post;
 	},
 
@@ -1458,13 +1453,10 @@ export const pgStore: DataStore = {
 			`INSERT INTO messages (sender_user_id, recipient_user_id, text) VALUES ($1,$2,$3) RETURNING *`,
 			[senderId, recipientId, data.text],
 		);
-		if (recipientId != null) {
-			publishRealtime({
-				channel: chUser(String(recipientId)),
-				event: "message.created",
-				data: rowToMessage(rows[0]),
-			});
-		}
+		// 配信は呼び出し側（app/api/messages/route.ts）が担う。そちらは
+		// chUser(sender)/chUser(recipient) 双方へ送る（送信者自身の他タブにも
+		// 即時反映するため）ので、ここでも publish すると mock には無いpg限定の
+		// 二重配信になる。
 		return rowToMessage(rows[0]);
 	},
 

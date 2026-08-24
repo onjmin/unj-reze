@@ -21,6 +21,8 @@ export const chUser = (userId: string) => `user:${userId}`;
 export type RealtimeEventName =
 	| "post.created"
 	| "reply.created"
+	| "post.updated"
+	| "post.deleted"
 	| "notify"
 	| "message.created";
 

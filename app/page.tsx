@@ -559,15 +559,67 @@ export default function App() {
 		});
 	}, []);
 
-	// 新着投稿はハブから丸ごと届くので、確認のためだけの再取得は要らない。
+	// 他ユーザーの削除操作をタイムラインへ反映する。表示済み(posts)・未表示の新着候補
+	// (newPosts)のどちらに載っていても、対象のIDを一括で取り除く。
+	const removePostEverywhere = useCallback((id: string) => {
+		setPosts((prev) => {
+			if (!prev.some((p) => p.id === id)) return prev;
+			const next = prev.filter((p) => p.id !== id);
+			postsRef.current = next;
+			return next;
+		});
+		setNewPosts((prev) => prev.filter((p) => p.id !== id));
+	}, []);
+
+	// 他ユーザーの編集操作をタイムラインへ反映する。updated はPATCHレスポンスと同じ
+	// encodePost 済みオブジェクトだが、liked/disliked/reposted は「編集した本人（作者）
+	// 視点」の値なので混ぜない。それ以外の各閲覧者で共通のフィールドだけ上書きする。
+	const applyPostUpdateEverywhere = useCallback((updated: Post) => {
+		const merge = (p: Post): Post =>
+			p.id !== updated.id
+				? p
+				: {
+						...p,
+						content: updated.content,
+						imageSrc: updated.imageSrc,
+						imageAlt: updated.imageAlt,
+						hasImage: updated.hasImage,
+						originType: updated.originType,
+						isEdited: updated.isEdited,
+						hasCollabButton: updated.hasCollabButton,
+						hasMml: updated.hasMml,
+						mmlUrl: updated.mmlUrl,
+						dotW: updated.dotW,
+						dotH: updated.dotH,
+						animFrames: updated.animFrames,
+						animFps: updated.animFps,
+						walkPreset: updated.walkPreset,
+					};
+		setPosts((prev) => {
+			if (!prev.some((p) => p.id === updated.id)) return prev;
+			const next = prev.map(merge);
+			postsRef.current = next;
+			return next;
+		});
+		setNewPosts((prev) => prev.map(merge));
+	}, []);
+
+	// 新着投稿・削除・編集はハブから丸ごと届くので、確認のためだけの再取得は要らない。
 	useRealtimeSubscription(
 		userId ? [CH_FEED] : [],
 		useCallback(
 			(msg) => {
-				if (msg.t !== "event" || msg.event !== "post.created") return;
-				pushNewPosts([msg.data as Post]);
+				if (msg.t !== "event") return;
+				if (msg.event === "post.created") {
+					pushNewPosts([msg.data as Post]);
+				} else if (msg.event === "post.deleted") {
+					const { id } = msg.data as { id: string };
+					removePostEverywhere(id);
+				} else if (msg.event === "post.updated") {
+					applyPostUpdateEverywhere(msg.data as Post);
+				}
 			},
-			[pushNewPosts],
+			[pushNewPosts, removePostEverywhere, applyPostUpdateEverywhere],
 		),
 		!!userId,
 	);

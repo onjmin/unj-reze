@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import type { DotMetaEdit } from "@/lib/db/interface";
 import { parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
+import { CH_FEED, chThread } from "@/lib/realtime/channels";
+import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { tryHeart, tryVote } from "@/lib/vote-guard";
@@ -224,6 +226,15 @@ export async function PATCH(
 		);
 	}
 	await attachEmbedInfo(result);
+	const encoded = encodePost(result);
+	// 他クライアントのタイムライン/スレ表示にも編集内容を反映させる。いいね等の
+	// 個人差分フィールドは result.liked/disliked/reposted が「編集した本人（作者）視点」の
+	// 値なので載せない（クライアント側は content 系だけ拾って上書きする設計、
+	// app/page.tsx の post.updated ハンドラ参照）。
+	publishRealtime([
+		{ channel: CH_FEED, event: "post.updated", data: encoded },
+		{ channel: chThread(encoded.threadId), event: "post.updated", data: encoded },
+	]);
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
 	// （lib/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
@@ -232,7 +243,7 @@ export async function PATCH(
 			previousMml?: { deleteId: string; deleteHash: string };
 		}
 	).previousMml;
-	return NextResponse.json({ ...encodePost(result), previousMml });
+	return NextResponse.json({ ...encoded, previousMml });
 }
 
 export async function DELETE(
@@ -250,6 +261,10 @@ export async function DELETE(
 	if (!user) {
 		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	}
+	// threadId は削除前に確保しておく。レスは物理削除、スレは論理削除(deleted_at)で
+	// 以後 getPost が拾えなくなるため、削除後では取れない。
+	const existing = await db.getPost(decodedId, user.slug);
+	const threadId = existing ? encodePost(existing).threadId : undefined;
 	const result = await db.deletePost(decodedId, user.slug);
 	if (!result) {
 		return NextResponse.json(
@@ -257,6 +272,20 @@ export async function DELETE(
 			{ status: 404 },
 		);
 	}
+	// 他クライアントのタイムライン/スレ表示から消す。CH_FEED はスレッド一覧・返信タブ、
+	// chThread はスレ詳細（将来ワイヤリングする際の受け皿も兼ねる）向け。
+	publishRealtime([
+		{ channel: CH_FEED, event: "post.deleted", data: { id, threadId } },
+		...(threadId
+			? [
+					{
+						channel: chThread(threadId),
+						event: "post.deleted" as const,
+						data: { id, threadId },
+					},
+				]
+			: []),
+	]);
 	// 削除確定後だけMML/ゲーム・MV manifestの削除トークンを載せる。クライアント
 	// （lib/api.ts posts.remove）がこれを見てR2の実体を消す
 	// （editPostのpreviousMmlと同じ仕組み）。ゲーム/MVは他の投稿からまだ参照されて
