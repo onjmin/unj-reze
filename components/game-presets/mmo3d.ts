@@ -26,7 +26,7 @@ export const mmo3d: PresetData = {
 	titleScreen: {
 		enabled: true,
 		heading: "3D MMO",
-		subtitle: "WASD/矢印キーで移動 ／ Shiftでダッシュ ／ Space/クリックで攻撃",
+		subtitle: "ドラッグで視点移動 ／ WASDで移動 ／ Shiftダッシュ ／ タップで攻撃",
 		textColor: "#ffe0a0",
 		menu: [{ kind: "newGame", label: "はじめる" }],
 	},

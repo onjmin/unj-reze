@@ -27,6 +27,28 @@ import GameThreadBoard from "./GameThreadBoard";
 import type { Mmo3dRenderer } from "./game-presets/shared";
 
 const SYNC_INTERVAL_MS = 200; // 位置/アニメの送信間隔（既存2Dの2000msより短い。動きが速いため）
+// ── フェーズ28: 視点操作・仮想スティックの調整値（lib/yume25d.ts / Yume25DMaker.tsx と同値）。 ──
+/** ドラッグ1pxあたりの回転量（ラジアン）。 */
+const DRAG_TURN_SENSITIVITY = 0.006;
+/** これ以下の移動量で離したら「タップ（＝攻撃）」とみなす。 */
+const TAP_MAX_MOVE = 8;
+/** 仮想スティックの遊び（px）と有効半径（px）。プレイ領域（640x480を縮小した箱）が
+ *  モバイルでは高さ230px程度しかないため、HUDと喧嘩しないよう小さめにしてある。 */
+const STICK_DEADZONE = 5;
+const STICK_RADIUS = 34;
+const STICK_SIZE = 88;
+/** スティックをこの割合以上倒すと自動でダッシュになる（モバイルにShiftが無いため）。 */
+const STICK_RUN_THRESHOLD = 0.92;
+
+/** setPointerCapture はマルチタッチの取りこぼし等で例外を投げることがある。取れなくても
+ *  ドラッグ自体は ref 側の手動追跡で継続できるので握りつぶす（Yume25DMaker.tsx と同じ）。 */
+const tryCapturePointer = (el: Element, pointerId: number) => {
+	try {
+		el.setPointerCapture(pointerId);
+	} catch {
+		/* noop */
+	}
+};
 const BOARD_PROXIMITY_POLL_MS = 200;
 /** チャットログの保持件数上限（フェーズ25、DBには一切書かず画面内だけで完結する）。 */
 const CHAT_LOG_MAX = 30;
@@ -46,6 +68,7 @@ export default function Mmo3dMaker({
 	vmdWalkUrl,
 	vmdRunUrl,
 	npcs,
+	virtualKeys,
 }: {
 	renderer?: Mmo3dRenderer;
 	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three/babylon共通対応）。 */
@@ -78,8 +101,38 @@ export default function Mmo3dMaker({
 	vmdRunUrl?: string;
 	/** NPC（フェーズ26）。近づいてEキーで一方向のメッセージだけ表示する簡易会話。 */
 	npcs?: { x: number; z: number; name: string; message: string }[];
+	/** GameMakerの固定コントローラ（十字キー＋ABXY）の押下状態。フェーズ28で配線した。
+	 *  それまでmmo3dだけ未接続で、画面に出ているのに何を押しても反応しない状態だった。
+	 *  十字キー=移動（カメラ相対）、B=攻撃、X=スキル、A=話す/調べる、Y=ダッシュ。 */
+	virtualKeys?: {
+		up: boolean;
+		down: boolean;
+		left: boolean;
+		right: boolean;
+		action: boolean;
+		slow: boolean;
+		bomb: boolean;
+		shoot: boolean;
+	};
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	/** 入力ソースは3系統（キーボード / 画面内の仮想スティック / GameMakerの固定コントローラ）
+	 *  あり、どれか1つが「押していない」を書き込むと他の系統の入力を打ち消してしまう。
+	 *  そこで各系統の状態をここに溜め、下の統合ループだけが engine.setInput() を呼ぶ
+	 *  （唯一の書き込み経路にすることで、系統同士が上書きし合う事故を構造的に防ぐ）。 */
+	const inputSrcRef = useRef({
+		key: {
+			forward: false,
+			back: false,
+			left: false,
+			right: false,
+			turnL: false,
+			turnR: false,
+			run: false,
+		},
+		/** 仮想スティックを目一杯倒している間だけ true（モバイルにShiftが無いため）。 */
+		stickRun: false,
+	});
 	/** three/babylon 共通API（移動・戦闘・掲示板・位置同期）。フェーズ15でbabylon版もthree版と
 	 *  同じメソッド一式を持つようになったため、レンダラーを問わず1本のrefで扱える。 */
 	const engineRef = useRef<Mmo3dEngine | Mmo3dBabylonEngine | null>(null);
@@ -124,6 +177,18 @@ export default function Mmo3dMaker({
 	// フェーズ26: 出席（デイリーボーナス）。localStorageのみ、サーバー保存はしない
 	// （ブラウザ/端末を変えるとリセットされる。TODO(persist): 本格的にやるならDB）。
 	const [attendanceClaimedToday, setAttendanceClaimedToday] = useState(false);
+	// フェーズ28: タッチ主体の端末では仮想スティックとアクションボタンを出す
+	// （キーボードが無いと今まで移動すらできなかった）。SSRとの不一致を避けるため
+	// マウント後に判定する（既定はfalse＝デスクトップ扱い）。
+	const [isTouch, setIsTouch] = useState(false);
+	useEffect(() => {
+		if (typeof window.matchMedia !== "function") return;
+		const mq = window.matchMedia("(pointer: coarse)");
+		const apply = () => setIsTouch(mq.matches);
+		apply();
+		mq.addEventListener("change", apply);
+		return () => mq.removeEventListener("change", apply);
+	}, []);
 
 	// boards未指定ならboardPostId 1枚を既定位置に置くフォールバック（後方互換）。
 	// JSON化した内容をキーにuseMemoすることで、親が毎レンダー新しい配列を渡してきても
@@ -196,16 +261,23 @@ export default function Mmo3dMaker({
 					return observer;
 				})();
 
-		// タンク操作（フェーズ22でストレイフ廃止）: W/S・矢印上下=前後移動、A/D・矢印左右=旋回。
-		// Shift=ダッシュ、Space=攻撃、E=掲示板。three/babylon共通。
-		const keyToInput: Record<string, "forward" | "back" | "turnL" | "turnR"> = {
+		// フェーズ28: 一般的な三人称MMO操作へ変更（旧タンク操作は廃止）。
+		// W/S・矢印上下=カメラ奥/手前へ移動、A/D=カメラ基準の左右へ平行移動、
+		// 矢印左右=カメラ旋回、Shift=ダッシュ、Space/タップ=攻撃、F=スキル、E=調べる。
+		// 視点回転の主操作はキャンバスのドラッグ（下の onCanvasPointer*）。three/babylon共通。
+		const keyToInput: Record<
+			string,
+			"forward" | "back" | "left" | "right" | "turnL" | "turnR"
+		> = {
 			KeyW: "forward",
 			ArrowUp: "forward",
 			KeyS: "back",
 			ArrowDown: "back",
-			KeyA: "turnL",
+			KeyA: "left",
+			KeyD: "right",
+			// カメラ旋回は矢印左右のみ（Q/EはE=「調べる」と紛らわしいので割り当てない）。
+			// 視点操作の主役はドラッグなので、キーボードは補助という位置づけ。
 			ArrowLeft: "turnL",
-			KeyD: "turnR",
 			ArrowRight: "turnR",
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
@@ -213,9 +285,13 @@ export default function Mmo3dMaker({
 			// （フェーズ25: チャット入力中にWキーで移動してしまう事故を防ぐ）。
 			if (document.activeElement instanceof HTMLInputElement) return;
 			const field = keyToInput[e.code];
-			if (field) engine.setInput({ [field]: true });
+			if (field) {
+				// 矢印キーでのページスクロールを止める（ゲーム操作として消費する）。
+				e.preventDefault();
+				inputSrcRef.current.key[field] = true;
+			}
 			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
-				engine.setInput({ run: true });
+				inputSrcRef.current.key.run = true;
 			if (e.code === "Space") {
 				e.preventDefault();
 				engine.triggerAttack();
@@ -239,19 +315,26 @@ export default function Mmo3dMaker({
 		const onKeyUp = (e: KeyboardEvent) => {
 			if (document.activeElement instanceof HTMLInputElement) return;
 			const field = keyToInput[e.code];
-			if (field) engine.setInput({ [field]: false });
+			if (field) inputSrcRef.current.key[field] = false;
 			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
-				engine.setInput({ run: false });
+				inputSrcRef.current.key.run = false;
 		};
-		const onClick = () => engine.triggerAttack();
+		// フェーズ28: 攻撃は「クリック」ではなくポインタ操作側の“タップ判定”から呼ぶ
+		// （キャンバス全面が視点回転ドラッグになったので、ドラッグ終了で毎回攻撃が暴発する
+		//   のを防ぐ。onCanvasPointerUp の TAP_MAX_MOVE 判定を参照）。
+		// ホイールでカメラ距離を変える（passive:false でページスクロールを止める）。
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			engine.adjustCameraDistance(e.deltaY * 0.01);
+		};
 		window.addEventListener("keydown", onKeyDown);
 		window.addEventListener("keyup", onKeyUp);
-		canvas.addEventListener("click", onClick);
+		canvas.addEventListener("wheel", onWheel, { passive: false });
 
 		return () => {
 			window.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("keyup", onKeyUp);
-			canvas.removeEventListener("click", onClick);
+			canvas.removeEventListener("wheel", onWheel);
 			ro.disconnect();
 			engine.dispose();
 			engineRef.current = null;
@@ -410,6 +493,178 @@ export default function Mmo3dMaker({
 		client?.sendPartyLeave(gameId, sessionId);
 		setPartyMembers([]);
 	}, [gameId, sessionId]);
+	// ── フェーズ28: キャンバスのドラッグで視点回転（マウス・タッチ共通、Pointer Events）。
+	//    横方向=カメラ旋回(yaw)、縦方向=見上げ/見下ろし(elev)。ゆめにっき3D
+	//    （Yume25DMaker.tsx の glPointer* ）と同じ操作感・同じ符号に揃えてある。
+	//    ほとんど動かさずに離した場合は「タップ」＝通常攻撃として扱う（旧clickの置き換え）。
+	//    2本指の場合はピンチでカメラ距離を変える。 ──
+	const lookRef = useRef<{ id: number; lastX: number; lastY: number; moved: number } | null>(
+		null,
+	);
+	/** ピンチ中の全ポインタ位置（2点になったらピンチ、1点に戻ったら回転ドラッグ）。 */
+	const pinchRef = useRef(new Map<number, { x: number; y: number }>());
+	const pinchDistRef = useRef<number | null>(null);
+
+	const onCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+		e.preventDefault();
+		tryCapturePointer(e.currentTarget, e.pointerId);
+		pinchRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (pinchRef.current.size >= 2) {
+			lookRef.current = null; // 2本目が触れたらピンチへ切り替える
+			return;
+		}
+		lookRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, moved: 0 };
+	}, []);
+
+	const onCanvasPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+		const engine = engineRef.current;
+		if (!engine) return;
+		const tracked = pinchRef.current;
+		if (tracked.has(e.pointerId)) tracked.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+		if (tracked.size >= 2) {
+			// ピンチ: 2点間距離の増減をカメラ距離に反映する（広げる=寄る）。
+			const [a, b] = [...tracked.values()];
+			const dist = Math.hypot(a.x - b.x, a.y - b.y);
+			const prev = pinchDistRef.current;
+			if (prev !== null) engine.adjustCameraDistance((prev - dist) * 0.03);
+			pinchDistRef.current = dist;
+			return;
+		}
+
+		const d = lookRef.current;
+		if (!d || d.id !== e.pointerId) return;
+		const dx = e.clientX - d.lastX;
+		const dy = e.clientY - d.lastY;
+		d.lastX = e.clientX;
+		d.lastY = e.clientY;
+		d.moved += Math.abs(dx) + Math.abs(dy);
+		if (dx !== 0 || dy !== 0)
+			engine.turnBy(-dx * DRAG_TURN_SENSITIVITY, dy * DRAG_TURN_SENSITIVITY);
+	}, []);
+
+	const endCanvasPointer = useCallback(
+		(e: React.PointerEvent<HTMLCanvasElement>, canceled: boolean) => {
+			pinchRef.current.delete(e.pointerId);
+			if (pinchRef.current.size < 2) pinchDistRef.current = null;
+			const d = lookRef.current;
+			if (!d || d.id !== e.pointerId) return;
+			lookRef.current = null;
+			// タップ判定: 指ブレ程度しか動いていなければ通常攻撃を出す。
+			if (!canceled && d.moved <= TAP_MAX_MOVE) engineRef.current?.triggerAttack();
+		},
+		[],
+	);
+
+	// ── フェーズ28: 仮想スティック（左下）。モバイルには今まで移動手段が一切無かった。
+	//    倒した向き＝カメラ相対の移動方向、倒し具合＝速度。目一杯倒すとダッシュになる。 ──
+	const stickPointerRef = useRef<number | null>(null);
+	const [stickVec, setStickVec] = useState<{ x: number; y: number } | null>(null);
+	const applyStick = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const engine = engineRef.current;
+		if (!engine) return;
+		const rect = e.currentTarget.getBoundingClientRect();
+		const dx = e.clientX - (rect.left + rect.width / 2);
+		const dy = e.clientY - (rect.top + rect.height / 2);
+		const dist = Math.hypot(dx, dy);
+		if (dist < STICK_DEADZONE) {
+			engine.setAnalogMove(0, 0);
+			inputSrcRef.current.stickRun = false;
+			setStickVec({ x: 0, y: 0 });
+			return;
+		}
+		const clamped = Math.min(1, dist / STICK_RADIUS);
+		const nx = (dx / dist) * clamped;
+		const ny = (dy / dist) * clamped;
+		// 画面の上方向＝カメラ奥（forward）なので z は符号を反転する。
+		engine.setAnalogMove(nx, -ny);
+		inputSrcRef.current.stickRun = clamped >= STICK_RUN_THRESHOLD;
+		setStickVec({ x: nx, y: ny });
+	}, []);
+	const onStickDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			e.preventDefault();
+			tryCapturePointer(e.currentTarget, e.pointerId);
+			stickPointerRef.current = e.pointerId;
+			applyStick(e);
+		},
+		[applyStick],
+	);
+	const onStickMove = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			if (stickPointerRef.current !== e.pointerId) return;
+			applyStick(e);
+		},
+		[applyStick],
+	);
+	const onStickEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		if (stickPointerRef.current !== e.pointerId) return;
+		stickPointerRef.current = null;
+		setStickVec(null);
+		inputSrcRef.current.stickRun = false;
+		engineRef.current?.setAnalogMove(0, 0);
+	}, []);
+
+	// ── フェーズ28: 入力統合ループ。engine.setInput() を呼ぶ唯一の場所。
+	//    キーボード / GameMakerの固定コントローラ（virtualKeys）の押下状態を論理和で
+	//    まとめてから渡す。仮想スティックはアナログ値なので別経路（setAnalogMove）だが、
+	//    ダッシュ判定だけはここで合流させる。
+	//    ABXYは「押している間」ではなく「押した瞬間」に1回だけ発火させたいので、
+	//    前フレームの状態と比較して立ち上がりを取る（押しっぱなしで連射にならない）。 ──
+	const virtualKeysRef = useRef(virtualKeys);
+	const doInteractRef = useRef<() => void>(() => {});
+	useEffect(() => {
+		virtualKeysRef.current = virtualKeys;
+	}, [virtualKeys]);
+	useEffect(() => {
+		let raf = 0;
+		const prevPad = { shoot: false, bomb: false, action: false };
+		const tick = () => {
+			raf = requestAnimationFrame(tick);
+			const engine = engineRef.current;
+			if (!engine) return;
+			const k = inputSrcRef.current.key;
+			const v = virtualKeysRef.current;
+			engine.setInput({
+				forward: k.forward || !!v?.up,
+				back: k.back || !!v?.down,
+				left: k.left || !!v?.left,
+				right: k.right || !!v?.right,
+				turnL: k.turnL,
+				turnR: k.turnR,
+				run: k.run || !!v?.slow || inputSrcRef.current.stickRun,
+			});
+			if (v) {
+				if (v.shoot && !prevPad.shoot) engine.triggerAttack();
+				if (v.bomb && !prevPad.bomb) engine.triggerSkill();
+				if (v.action && !prevPad.action) doInteractRef.current();
+				prevPad.shoot = v.shoot;
+				prevPad.bomb = v.bomb;
+				prevPad.action = v.action;
+			}
+		};
+		tick();
+		return () => cancelAnimationFrame(raf);
+	}, []);
+
+	/** タッチ用アクションボタン（攻撃/スキル/調べる）。キーボードのSpace/F/Eと同じ経路。 */
+	const doAttack = useCallback(() => engineRef.current?.triggerAttack(), []);
+	const doSkill = useCallback(() => engineRef.current?.triggerSkill(), []);
+	const doInteract = useCallback(() => {
+		const engine = engineRef.current;
+		if (!engine) return;
+		const target = engine.nearBoard();
+		if (target !== null) {
+			setActiveBoardId(target);
+			setBoardOpen((prev) => !prev);
+			return;
+		}
+		setNpcDialog(engine.nearNpc());
+	}, []);
+	useEffect(() => {
+		doInteractRef.current = doInteract;
+	}, [doInteract]);
+
 	const sendChatMessage = useCallback(() => {
 		const text = chatInput.trim();
 		if (!text || !gameId || !sessionId) return;
@@ -420,16 +675,27 @@ export default function Mmo3dMaker({
 
 	return (
 		<div className="relative w-full h-full">
+			{/* フェーズ28: キャンバス全面がドラッグ視点回転になる。touch-action:none を付けないと
+			    タッチ操作がブラウザのスクロール/ピンチズームに吸われて視点が回らない。 */}
 			<canvas
 				ref={canvasRef}
-				className="block w-full h-full outline-none"
+				className="block w-full h-full outline-none cursor-grab active:cursor-grabbing"
+				style={{ touchAction: "none" }}
 				tabIndex={0}
-				aria-label="mmo3d プレイビュー"
+				aria-label="mmo3d プレイビュー（ドラッグで視点回転、タップで攻撃）"
+				onPointerDown={onCanvasPointerDown}
+				onPointerMove={onCanvasPointerMove}
+				onPointerUp={(e) => endCanvasPointer(e, false)}
+				onPointerCancel={(e) => endCanvasPointer(e, true)}
 			/>
 			{/* フェーズ26: ミニマップ。エンジンからのポーリングのみでDB非依存。 */}
 			{minimap && <Minimap data={minimap} />}
 			{Object.keys(dummyHp).length > 0 && (
-				<div className="absolute top-24 left-2 flex flex-col gap-1 pointer-events-none">
+				<div
+					className={`absolute left-2 flex flex-col gap-1 pointer-events-none ${
+						isTouch ? "top-11" : "top-24"
+					}`}
+				>
 					{Object.entries(dummyHp).map(([idx, v]) => (
 						<HpBar
 							key={idx}
@@ -444,7 +710,14 @@ export default function Mmo3dMaker({
 			{/* フェーズ24: 見た目を参考プロダクト（docs/mmo3d-feature-design.md参照）寄りに、
 			    自分のHPは画面下中央の大きなバーへ配置し直した（旧: 画面左上の小さいバー）。
 			    フェーズ25: レベル/XPバーもすぐ上に追加（キャラ育成、TODO(persist): 未永続化）。 */}
-			<div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-2/3 max-w-xs pointer-events-none">
+			{/* フェーズ28: タッチ操作UIを出しているときは、左右を仮想スティック/アクション
+			    ボタンに明け渡して中央の細い帯だけを使う（プレイ領域が狭いモバイルで
+			    HUDと操作系が重なるのを防ぐ）。 */}
+			<div
+				className={`absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none ${
+					isTouch ? "w-1/3 max-w-[150px]" : "w-2/3 max-w-xs"
+				}`}
+			>
 				<div className="flex items-center gap-1.5 mb-0.5">
 					<span className="shrink-0 text-[10px] font-bold text-white bg-amber-500/90 rounded px-1.5 py-0.5 drop-shadow">
 						Lv{growth.level}
@@ -474,14 +747,21 @@ export default function Mmo3dMaker({
 			{/* フェーズ26: ホットバー（装備武器・スキル選択）。参考プロダクトの6枠ホットバーに
 			    ならった配置。武器3種+スキル2種のみ選択可能で、残り枠はTODO（装備品の拡張余地）。
 			    Space=通常攻撃（選択中の武器）、Fキー=スキル発動（選択中のスキル）。 */}
-			<div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex gap-1 bg-black/50 rounded-lg p-1">
+			{/* タッチ時はスティックとアクションボタンの間の帯（bottom-10）へ寄せる。
+			    上部中央にも置けそうに見えるが、GameMakerのヘッダーがプレイ領域の上端
+			    48px程度に重なって隠れてしまう（実機検証で判明）。 */}
+			<div
+				className={`absolute left-1/2 -translate-x-1/2 flex gap-1 bg-black/50 rounded-lg p-1 ${
+					isTouch ? "bottom-14" : "bottom-20"
+				}`}
+			>
 				{WEAPON_TYPES.map((w) => (
 					<button
 						key={w.id}
 						type="button"
 						onClick={() => selectWeapon(w.id)}
 						title={`武器: ${w.label}`}
-						className={`w-9 h-9 rounded text-[10px] flex items-center justify-center border ${
+						className={`${isTouch ? "w-8 h-8" : "w-9 h-9"} rounded text-[10px] flex items-center justify-center border ${
 							equipment.weaponId === w.id
 								? "bg-amber-500 border-amber-300 text-black font-bold"
 								: "bg-gray-800/80 border-gray-600 text-gray-200 hover:border-gray-400"
@@ -497,7 +777,7 @@ export default function Mmo3dMaker({
 						type="button"
 						onClick={() => selectSkill(s.id)}
 						title={`スキル: ${s.label}（Fキーで発動）`}
-						className={`w-9 h-9 rounded text-[9px] flex items-center justify-center border leading-tight text-center ${
+						className={`${isTouch ? "w-8 h-8" : "w-9 h-9"} rounded text-[9px] flex items-center justify-center border leading-tight text-center ${
 							equipment.skillId === s.id
 								? "bg-sky-500 border-sky-300 text-black font-bold"
 								: "bg-gray-800/80 border-gray-600 text-gray-200 hover:border-gray-400"
@@ -508,9 +788,76 @@ export default function Mmo3dMaker({
 				))}
 			</div>
 
+			{/* ── フェーズ28: タッチ操作UI。左下=移動スティック、右下=アクション。
+			    それまでモバイルには移動手段が一切無く（キーボード専用だった）、
+			    「操作性が悪い」の一番の原因だった。 ── */}
+			{isTouch && (
+				<>
+					<div
+						className="absolute bottom-2 left-2 rounded-full bg-black/35 ring-1 ring-white/25 touch-none select-none"
+						style={{ width: STICK_SIZE, height: STICK_SIZE }}
+						onPointerDown={onStickDown}
+						onPointerMove={onStickMove}
+						onPointerUp={onStickEnd}
+						onPointerCancel={onStickEnd}
+					>
+						{/* スティックの頭。倒した向き/量をそのまま見せる。 */}
+						<div
+							className="absolute w-9 h-9 rounded-full bg-white/70 ring-1 ring-black/20 pointer-events-none"
+							style={{
+								left: "50%",
+								top: "50%",
+								transform: `translate(-50%, -50%) translate(${(stickVec?.x ?? 0) * STICK_RADIUS}px, ${(stickVec?.y ?? 0) * STICK_RADIUS}px)`,
+							}}
+						/>
+					</div>
+					<div className="absolute bottom-2 right-2 flex flex-col items-end gap-1.5 select-none">
+						<div className="flex gap-1.5">
+							<button
+								type="button"
+								onPointerDown={(e) => {
+									e.preventDefault();
+									doInteract();
+								}}
+								className="w-9 h-9 rounded-full bg-emerald-600/85 text-white text-sm ring-1 ring-white/30 active:bg-emerald-500"
+								title="調べる（Eキー）"
+							>
+								💬
+							</button>
+							<button
+								type="button"
+								onPointerDown={(e) => {
+									e.preventDefault();
+									doSkill();
+								}}
+								className="w-9 h-9 rounded-full bg-sky-600/85 text-white text-sm ring-1 ring-white/30 active:bg-sky-500"
+								title="スキル（Fキー）"
+							>
+								✨
+							</button>
+						</div>
+						<button
+							type="button"
+							onPointerDown={(e) => {
+								e.preventDefault();
+								doAttack();
+							}}
+							className="w-14 h-14 rounded-full bg-rose-600/85 text-white text-xl ring-1 ring-white/30 active:bg-rose-500"
+							title="攻撃（Spaceキー／画面タップ）"
+						>
+							⚔
+						</button>
+					</div>
+				</>
+			)}
+
 			{nearBoardId && !boardOpen && (
-				<div className="absolute bottom-32 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/70 text-white text-xs pointer-events-none">
-					Eキーで掲示板を開く
+				<div
+					className={`absolute left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/70 text-white text-xs pointer-events-none ${
+						isTouch ? "bottom-1/2" : "bottom-32"
+					}`}
+				>
+					{isTouch ? "💬ボタンで掲示板を開く" : "Eキーで掲示板を開く"}
 				</div>
 			)}
 			{boardOpen && activeBoardId && (

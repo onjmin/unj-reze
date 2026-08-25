@@ -33,8 +33,22 @@ import type { Mmo3dInputState } from "@/lib/mmo3d";
 import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 const WALK_SPEED = 2.2; // m/s（three版 lib/mmo3d.ts と揃える）
-const RUN_SPEED = 5.5; // m/s
-const TURN_SPEED = 2.4; // ラジアン/秒（three版・lib/yume25d.ts と同値）
+const RUN_SPEED = 6.0; // m/s
+const TURN_SPEED = 2.4; // ラジアン/秒（矢印キーでのカメラ旋回速度、three版と同値）
+/** キャラモデルの向きが入力方向へ寄る速さ（1/秒、three版 lib/mmo3d.ts と同値）。 */
+const PLAYER_TURN_LERP = 16;
+
+// ── フェーズ28: オービットカメラ（three版 lib/mmo3d.ts と同じ数値・同じ操作感）。 ──
+const CAM_MIN_DIST = 3.2;
+const CAM_MAX_DIST = 16;
+const CAM_DEFAULT_DIST = 7;
+const CAM_MIN_ELEV = (4 * Math.PI) / 180;
+const CAM_MAX_ELEV = (80 * Math.PI) / 180;
+const CAM_DEFAULT_ELEV = (22 * Math.PI) / 180;
+const CAM_TARGET_Y = 1.05;
+const CAM_FOLLOW_LERP = 14;
+/** 地面（40x40）の半径。three版 lib/mmo3d.ts の WORLD_HALF_SIZE と同値。 */
+const WORLD_HALF_SIZE = 20;
 
 // ── 簡易近接戦闘（three版 lib/mmo3d.ts と同じ数値。フェーズ15でbabylon版にも移植）。 ──
 const ATTACK_COOLDOWN_SEC = 0.6;
@@ -117,14 +131,25 @@ export class Mmo3dBabylonEngine {
 	private playerRoot: TransformNode;
 	private facing = 0; // ラジアン、three版 lib/mmo3d.ts の facing と同じ定義（+Zを0とする）
 
-	// ── 移動入力（フェーズ22: ストレイフ廃止のタンク操作。three版と共有の型）。 ──
+	// ── 移動入力（フェーズ28: カメラ相対移動。three版と共有の型）。 ──
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
+		left: false,
+		right: false,
 		turnL: false,
 		turnR: false,
 		run: false,
 	};
+
+	// ── フェーズ28: オービットカメラの状態（three版と同じ定義）。ArcRotateCamera の
+	// alpha/beta/radius は毎フレームこの値から算出する（babylon組み込みのドラッグ操作は
+	// detachControl して切り、React側のポインタ処理に一本化する）。 ──
+	private camYaw = 0;
+	private camElev = CAM_DEFAULT_ELEV;
+	private camDist = CAM_DEFAULT_DIST;
+	private analogX = 0;
+	private analogZ = 0;
 
 	// ── 他プレイヤー（ゴースト）。three版と同じく簡易カプセルのみ、実モデルは持たない。 ──
 	private ghostMat: StandardMaterial;
@@ -217,7 +242,10 @@ export class Mmo3dBabylonEngine {
 			new Vector3(0, 1, 0),
 			this.scene,
 		);
-		camera.attachControl(canvas, true);
+		// フェーズ28: babylon組み込みのカメラ操作は使わない（React側のポインタ処理で
+		// three版と同じ操作感に揃えるため。両方が効くと1ドラッグで二重に回ってしまう）。
+		camera.detachControl();
+		camera.radius = CAM_DEFAULT_DIST;
 		this.camera = camera;
 
 		new HemisphericLight("hemi", new Vector3(0, 1, 0), this.scene);
@@ -383,48 +411,107 @@ export class Mmo3dBabylonEngine {
 		Object.assign(this.input, next);
 	}
 
-	/** タンク操作（three版 lib/mmo3d.ts と共通のロジック、フェーズ22でストレイフ廃止）。
-	 *  前後移動はfacingを変更せず、旋回は専用入力(turnL/turnR、A/Dと矢印キー左右の両方)
-	 *  でしか起きない。以前はArcRotateCameraの向きを毎フレーム参照する「カメラ相対」実装
-	 *  だったが、後退キーで向きが変わって見える・facingを自己参照して回転先を決めるため
-	 *  無限回転するリスクがある、という構造的な問題があった（three版で実際にこのバグが
-	 *  発生した。フェーズ19参照）。ArcRotateCameraのドラッグ操作自体は引き続きでき、
-	 *  視点を自由に見回せる（移動には影響しない）。 */
+	/** ドラッグ操作による視点回転（three版 Mmo3dEngine.turnBy と同じAPI形・同じ符号）。 */
+	turnBy(deltaYaw: number, deltaPitch = 0) {
+		this.camYaw += deltaYaw;
+		if (deltaPitch !== 0)
+			this.camElev = Math.max(
+				CAM_MIN_ELEV,
+				Math.min(CAM_MAX_ELEV, this.camElev + deltaPitch),
+			);
+	}
+
+	/** ホイール/ピンチでのカメラ距離変更（three版と同じAPI形）。 */
+	adjustCameraDistance(delta: number) {
+		this.camDist = Math.max(
+			CAM_MIN_DIST,
+			Math.min(CAM_MAX_DIST, this.camDist + delta),
+		);
+	}
+
+	/** 仮想スティックからのアナログ移動入力（カメラ相対、-1..1）。 */
+	setAnalogMove(x: number, z: number) {
+		this.analogX = Math.max(-1, Math.min(1, x));
+		this.analogZ = Math.max(-1, Math.min(1, z));
+	}
+
+	getCameraState(): { yaw: number; elev: number; dist: number } {
+		return { yaw: this.camYaw, elev: this.camElev, dist: this.camDist };
+	}
+
+	/** カメラ相対移動（フェーズ28。three版 lib/mmo3d.ts の updateMovement と同一ロジック）。
+	 *  W/S はカメラ奥/手前、A/D はカメラ基準の左右へ平行移動し、キャラの見た目の向きだけが
+	 *  入力方向へ滑らかに追いつく。目標角は camYaw と入力ベクトルからのみ算出し facing を
+	 *  参照しないので、フェーズ19で起きた「Wキーで無限に回る」自己参照バグは起こらない
+	 *  （旧実装はカメラの向きを毎フレーム逆算する形だったのが原因で、camYaw を独立した
+	 *   状態として持つ今の形ならその経路自体が存在しない）。 */
 	private updateMovement(dt: number) {
-		const { forward, back, turnL, turnR, run } = this.input;
+		const { forward, back, left, right, turnL, turnR, run } = this.input;
 
 		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
-		this.facing += turn * TURN_SPEED * dt;
-		this.playerRoot.rotation.y = this.facing;
+		if (turn !== 0) this.camYaw += turn * TURN_SPEED * dt;
 
-		const move = (forward ? 1 : 0) - (back ? 1 : 0);
-		const moving = move !== 0;
+		let inFwd = this.analogZ;
+		let inRight = this.analogX;
+		if (inFwd === 0 && inRight === 0) {
+			inFwd = (forward ? 1 : 0) - (back ? 1 : 0);
+			inRight = (right ? 1 : 0) - (left ? 1 : 0);
+		}
+		const inLen = Math.hypot(inFwd, inRight);
+		const moving = inLen > 0.001;
 
 		if (moving) {
-			const fx = Math.sin(this.facing);
-			const fz = Math.cos(this.facing);
+			const sy = Math.sin(this.camYaw);
+			const cy = Math.cos(this.camYaw);
+			const dirX = (inFwd * sy + inRight * -cy) / inLen;
+			const dirZ = (inFwd * cy + inRight * sy) / inLen;
 
-			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
-			const ms = move * WALK_SPEED * runMult * dt;
+			const targetFacing = Math.atan2(dirX, dirZ);
+			let diff = targetFacing - this.facing;
+			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+			this.facing += diff * Math.min(1, PLAYER_TURN_LERP * dt);
+
+			const throttle = Math.min(1, inLen);
+			const ms = (run ? RUN_SPEED : WALK_SPEED) * throttle * dt;
 
 			const [nx, nz] = this.resolveObstacleCollision(
 				this.playerRoot.position.x,
 				this.playerRoot.position.z,
-				fx * ms,
-				fz * ms,
+				dirX * ms,
+				dirZ * ms,
 			);
-			this.playerRoot.position.x = nx;
-			this.playerRoot.position.z = nz;
-			this.curAnim = run ? "run" : "walk";
+			this.playerRoot.position.x = this.clampToWorld(nx);
+			this.playerRoot.position.z = this.clampToWorld(nz);
+			this.curAnim = run && throttle > 0.55 ? "run" : "walk";
 		} else {
 			this.curAnim = "idle";
 		}
+		this.playerRoot.rotation.y = this.facing;
 		this.applyStandHeight();
 		this.syncMmdAnimation();
+		this.updateCamera(dt);
+	}
 
-		// カメラの狙点だけプレイヤーに追従させる（alpha/beta/radiusはユーザーのドラッグ操作のまま）。
-		this.camera.target.x = this.playerRoot.position.x;
-		this.camera.target.z = this.playerRoot.position.z;
+	/** オービットカメラをプレイヤーへ追従させる（three版 updateCamera と同じ見え方）。
+	 *  ArcRotateCamera の位置は target + radius*(cos α sin β, cos β, sin α sin β) なので、
+	 *  「camYaw の逆方向・仰角 camElev」に置くには α = atan2(-cos camYaw, -sin camYaw)、
+	 *  β = π/2 - camElev となる（camYaw=0 で α=-π/2 ＝ babylon既定の背面カメラ位置）。 */
+	private updateCamera(dt: number) {
+		const k = Math.min(1, CAM_FOLLOW_LERP * dt);
+		const t = this.camera.target;
+		t.x += (this.playerRoot.position.x - t.x) * k;
+		t.y += (this.playerRoot.position.y + CAM_TARGET_Y - t.y) * k;
+		t.z += (this.playerRoot.position.z - t.z) * k;
+
+		this.camera.alpha = Math.atan2(-Math.cos(this.camYaw), -Math.sin(this.camYaw));
+		this.camera.beta = Math.PI / 2 - this.camElev;
+		this.camera.radius = this.camDist;
+	}
+
+	/** 地面の外へ出ないように座標を丸める（three版 clampToWorld と同じ）。 */
+	private clampToWorld(v: number): number {
+		const limit = WORLD_HALF_SIZE - this.PLAYER_RADIUS;
+		return Math.max(-limit, Math.min(limit, v));
 	}
 
 	/** walkable障害物（足場）に乗っていれば、その高さをplayerRootのYに反映する

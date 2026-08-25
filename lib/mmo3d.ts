@@ -65,26 +65,62 @@ function createSkyMaterial(): THREE.ShaderMaterial {
 	});
 }
 
-/** 移動キー入力の論理状態。lib/yume25d.ts の操作感（前後移動と旋回を別キーに分離した
- *  「タンク操作」）をベースに、フェーズ22でストレイフを廃止しシンプル化した
- *  （W/S=前後移動、A/D=旋回。矢印キーも同じ役割の別バインドとして残す）。forwardは
- *  facingを一切変更せず、その向きに前進/後退するだけ。旋回はturnL/turnRの専用入力でしか
- *  起きない。これにより「後退キーで向きが変わる」ような直感に反する挙動を構造的に防ぐ
- *  （moveキーがfacingの計算に一切関与しないため、自己参照バグも原理的に起こりえない）。 */
+/** 移動キー入力の論理状態（フェーズ28で「タンク操作」から一般的な三人称MMO操作へ変更）。
+ *
+ *  forward/back/left/right は **カメラ相対** の移動入力（W=カメラ奥、A/D=カメラ基準の
+ *  左右へ平行移動）。turnL/turnR は **カメラの旋回** 専用で、プレイヤーの向きには直接
+ *  作用しない（キーボードだけで遊ぶ人向けの矢印キー割当。主操作はドラッグによる視点回転）。
+ *
+ *  フェーズ19〜22で問題になった「Wキーで無限に回り続ける」自己参照バグは、facing（キャラの
+ *  向き）の目標角を **camYaw と入力ベクトルだけ** から算出することで構造的に防いでいる。
+ *  camYaw は turnBy()/ドラッグでしか変化せず facing を一切参照しないため、
+ *  facing → 目標角 → facing というループが存在しない。 */
 export interface Mmo3dInputState {
 	forward: boolean;
 	back: boolean;
+	/** カメラ基準の左へ平行移動（旧: 旋回）。 */
+	left: boolean;
+	/** カメラ基準の右へ平行移動（旧: 旋回）。 */
+	right: boolean;
+	/** カメラを左へ旋回（矢印キー左）。キャラの向きは変えない。 */
 	turnL: boolean;
+	/** カメラを右へ旋回（矢印キー右）。キャラの向きは変えない。 */
 	turnR: boolean;
 	run: boolean;
 }
 
 type AnimState = "idle" | "walk" | "run";
 
-const WALK_SPEED = 2.2; // m/s
-const RUN_SPEED = 5.5; // m/s
-const TURN_SPEED = 2.4; // ラジアン/秒（lib/yume25d.ts のTURN_SPEEDと同値）
-const CROSSFADE_SEC = 0.25;
+const WALK_SPEED = 2.6; // m/s
+const RUN_SPEED = 6.0; // m/s
+/** 矢印キーでカメラを旋回させる速度（ラジアン/秒）。主操作はドラッグなので控えめ。 */
+const TURN_SPEED = 2.4;
+/** キャラモデルの向きが「入力方向」へ寄っていく速さ（1/秒。大きいほどキビキビ回る）。
+ *  移動そのものは即座に入力方向へ行われ、見た目の向きだけがこの係数で追いつく。 */
+const PLAYER_TURN_LERP = 16;
+const CROSSFADE_SEC = 0.2;
+
+// ── フェーズ28: ドラッグで回せる三人称オービットカメラ（lib/yume25d.ts の視点操作に相当）。
+// camYaw   = カメラが向いているワールド方位（前方ベクトルは (sin, cos)、facing と同じ定義）
+// camElev  = プレイヤーを見下ろす仰角（0=真横、PI/2=真上）
+// camDist  = プレイヤーからの距離（ホイール/ピンチで変更）
+const CAM_MIN_DIST = 3.2;
+const CAM_MAX_DIST = 16;
+const CAM_DEFAULT_DIST = 7;
+const CAM_MIN_ELEV = (4 * Math.PI) / 180;
+const CAM_MAX_ELEV = (80 * Math.PI) / 180;
+const CAM_DEFAULT_ELEV = (22 * Math.PI) / 180;
+/** 注視点の高さ（キャラの胸〜頭のあたり）。 */
+const CAM_TARGET_Y = 1.05;
+/** カメラ位置の追従の滑らかさ（1/秒）。大きいほど固くキャラに張り付く。 */
+const CAM_FOLLOW_LERP = 14;
+/** カメラが地面や足場にめり込まないための最低高度。 */
+const CAM_MIN_HEIGHT = 0.6;
+
+/** 地面（40x40のPlaneGeometry）の半径。プレイヤーはこの内側から出られない。
+ *  フェーズ28以前は境界が無く、地面の外の「何も無い空間」へ延々と歩いて行けてしまい、
+ *  一度出ると目印が何も無いので戻れなくなっていた（実機検証で98m先まで歩けた）。 */
+const WORLD_HALF_SIZE = 20;
 
 const ATTACK_COOLDOWN_SEC = 0.6;
 const ATTACK_SWING_SEC = 0.25;
@@ -280,15 +316,28 @@ export class Mmo3dEngine {
 		height: number;
 	}[] = [];
 
-	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
+	/** 現在の入力状態。setInput() で外部（キーボード/仮想スティック）から更新する。 */
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
+		left: false,
+		right: false,
 		turnL: false,
 		turnR: false,
 		run: false,
 	};
-	private facing = 0; // ラジアン、+Zを0とする
+	private facing = 0; // ラジアン、+Zを0とする（前方ベクトルは (sin, cos)）
+
+	// ── フェーズ28: オービットカメラの状態。turnBy()/adjustCameraDistance() でのみ変化する。 ──
+	private camYaw = 0;
+	private camElev = CAM_DEFAULT_ELEV;
+	private camDist = CAM_DEFAULT_DIST;
+	/** 実際にカメラが見ている注視点（プレイヤー座標へ滑らかに追従させるためのバッファ）。 */
+	private camLookAt = new THREE.Vector3(0, CAM_TARGET_Y, 0);
+	/** 仮想スティックからのアナログ入力（-1..1）。キーボードより優先される。
+	 *  0,0 のときはキーボードの forward/back/left/right を使う。 */
+	private analogX = 0;
+	private analogZ = 0;
 
 	constructor(
 		canvas: HTMLCanvasElement,
@@ -319,11 +368,10 @@ export class Mmo3dEngine {
 		this.scene = new THREE.Scene();
 		this.scene.fog = new THREE.Fog(0xdff3ff, 30, 90);
 
-		// FOVを狭めて疑似アイソメトリック（望遠寄りにするとパースの歪みが減り、見下ろし
-		// アングルの固定カメラと組み合わせた時に「見下ろしMMO」らしい平坦な見え方になる）。
-		this.camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 200);
-		this.camera.position.set(0, 4, 7);
-		this.camera.lookAt(0, 1, 0);
+		// フェーズ28: 自由に回せるオービットカメラにしたのでFOVを実用的な値へ戻した。
+		// （フェーズ24の35°は「固定角の疑似アイソメトリック」前提の望遠寄り設定で、
+		//   視点を回せるようになると狭すぎて周囲の状況が掴めない。）
+		this.camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 200);
 
 		// 手続き的な空（大きな球のBackSideにグラデーションシェーダーを貼るだけ、外部テクスチャ非依存）。
 		this.skyGeo = new THREE.SphereGeometry(150, 24, 16);
@@ -511,6 +559,12 @@ export class Mmo3dEngine {
 
 		const sample = MMO3D_BUILTIN_MODELS.find((m) => m.hasAnimations);
 		if (sample) this.loadPlayerModel(sample.url);
+
+		// 開発時のみ：ブラウザコンソールからカメラ/位置などの内部状態を確認するためのハンドル
+		// （lib/yume25d.ts の `__yume25d` と同じ方針。本番ビルドには含めない）。
+		if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+			(window as unknown as { __mmo3d?: Mmo3dEngine }).__mmo3d = this;
+		}
 	}
 
 	/** キーボード/仮想パッドから移動入力を渡す。呼び出し側（Mmo3dMaker）が随時更新する。 */
@@ -882,36 +936,52 @@ export class Mmo3dEngine {
 	}
 
 	private updateMovement(dt: number) {
-		const { forward, back, turnL, turnR, run } = this.input;
-		// lib/yume25d.ts をベースにした「タンク操作」: 前後移動はfacingを一切変更せず、
-		// 旋回は専用入力(turnL/turnR、A/Dと矢印キー左右の両方をこれにバインドする)でしか
-		// 起きない。以前は移動キーの入力からfacingの目標角度を毎フレーム逆算していたが、
-		// 後退キー単体でも「後ろを向く」ような目標角度が出てしまい（直感に反する回転）、
-		// さらにfacing自身を参照して目標を再計算する構造だったため自己参照ループによる
-		// 無限回転バグ（Wキー押しっぱなしで回り続ける）も引き起こしていた。移動とfacingの
-		// 計算を完全に分離することで、両方の問題を構造的に防ぐ。フェーズ22でストレイフは
-		// 廃止し、A/Dキーは旋回専用にした（ユーザー指摘: A/D=旋回の方が直感的）。
-		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
-		this.facing += turn * TURN_SPEED * dt;
+		const { forward, back, left, right, turnL, turnR, run } = this.input;
 
-		const move = (forward ? 1 : 0) - (back ? 1 : 0);
-		const moving = move !== 0;
+		// ① 矢印キーによるカメラ旋回。キャラの向き(facing)には一切触らない。
+		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
+		if (turn !== 0) this.camYaw += turn * TURN_SPEED * dt;
+
+		// ② 入力ベクトル（カメラ空間）。仮想スティックのアナログ値があればそちらを優先する。
+		let inFwd = this.analogZ;
+		let inRight = this.analogX;
+		if (inFwd === 0 && inRight === 0) {
+			inFwd = (forward ? 1 : 0) - (back ? 1 : 0);
+			inRight = (right ? 1 : 0) - (left ? 1 : 0);
+		}
+		const inLen = Math.hypot(inFwd, inRight);
+		const moving = inLen > 0.001;
 
 		if (moving) {
-			const fx = Math.sin(this.facing);
-			const fz = Math.cos(this.facing);
+			// ③ カメラ相対 → ワールド方向へ変換する。
+			//    カメラ前方 f = (sin camYaw, cos camYaw)、カメラ右方 r = (-cos camYaw, sin camYaw)
+			//    （r = cross(f, up)。camYaw=0 で f=+Z, r=-X となり、画面の右方向と一致する）。
+			const sy = Math.sin(this.camYaw);
+			const cy = Math.cos(this.camYaw);
+			const dirX = (inFwd * sy + inRight * -cy) / inLen;
+			const dirZ = (inFwd * cy + inRight * sy) / inLen;
 
-			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
-			const ms = move * WALK_SPEED * runMult * dt;
+			// ④ キャラの見た目の向きを入力方向へ寄せる。目標角は camYaw と入力だけで決まり、
+			//    facing を参照しない（自己参照ループが原理的に起こらない — 型定義のコメント参照）。
+			const targetFacing = Math.atan2(dirX, dirZ);
+			let diff = targetFacing - this.facing;
+			diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // 最短角へ正規化
+			this.facing += diff * Math.min(1, PLAYER_TURN_LERP * dt);
+
+			// ⑤ 移動は「入力方向」へ即座に行う（facingの回転を待たないので操作がキビキビする）。
+			//    アナログ入力は倒し具合で速度が変わる（キーボードは常に1.0）。
+			const throttle = Math.min(1, inLen);
+			const speed = (run ? RUN_SPEED : WALK_SPEED) * throttle;
+			const ms = speed * dt;
 
 			const [nx, nz] = this.resolveObstacleCollision(
 				this.player.position.x,
 				this.player.position.z,
-				fx * ms,
-				fz * ms,
+				dirX * ms,
+				dirZ * ms,
 			);
-			this.player.position.x = nx;
-			this.player.position.z = nz;
+			this.player.position.x = this.clampToWorld(nx);
+			this.player.position.z = this.clampToWorld(nz);
 		}
 		this.player.rotation.y = this.facing;
 
@@ -920,13 +990,22 @@ export class Mmo3dEngine {
 		const groundY = this.standHeightAt(this.player.position.x, this.player.position.z);
 
 		if (this.mixer) {
-			this.setAnim(moving ? (run ? "run" : "walk") : "idle");
+			// 走りモーションは「ダッシュ中かつ実際に速く動いている」ときだけにする
+			// （アナログスティックを浅く倒したままShiftを押しても歩きのまま）。
+			const fast = run && Math.min(1, inLen) > 0.55;
+			this.setAnim(moving ? (fast ? "run" : "walk") : "idle");
 			this.player.position.y = groundY;
 		} else {
 			// モデル未ロード時（プレースホルダーカプセル）だけの仮アイドルモーション。
 			this.player.position.y =
 				groundY + CHIBI_BODY_CENTER_Y + Math.sin(this.clock.elapsedTime * 2) * 0.04;
 		}
+	}
+
+	/** 地面の外へ出ないように座標を丸める（x/z共通）。 */
+	private clampToWorld(v: number): number {
+		const limit = WORLD_HALF_SIZE - this.PLAYER_RADIUS;
+		return Math.max(-limit, Math.min(limit, v));
 	}
 
 	/** その地点で足場（walkable障害物）に乗っているなら最も高いものの高さを、無ければ0（地面）
@@ -960,26 +1039,61 @@ export class Mmo3dEngine {
 		return [nx, nz];
 	}
 
-	/** カメラの見下ろしオフセット（フェーズ24）。参考にした外部プロダクト
-	 *  （docs/mmo3d-feature-design.md参照、observed機能のみを着想として使用）の見た目に
-	 *  寄せ、プレイヤーの向き(facing)に追従して回転する三人称肩越しカメラから、
-	 *  「常に一定角度で見下ろす、位置だけ追従する」固定角アイソメトリック風カメラに変更した。
-	 *  キャラは画面上でほぼ中央に留まり続け、旋回してもカメラは振り回されない
-	 *  （アイソメトリックMMOに典型的な視点）。 */
-	// フェーズ27: ユーザー報告「カメラが遠い」を受けて距離を縮めた（旧: (0,16,13)、FOV35との
-	// 組み合わせでキャラが小さく見えすぎていた）。
-	private static readonly CAM_OFFSET = new THREE.Vector3(0, 8, 6.5);
+	// ── フェーズ28: ドラッグで回せる三人称オービットカメラ。 ──
+	// フェーズ24〜27は「固定角の見下ろしカメラ（CAM_OFFSET固定）」で、視点を一切動かせな
+	// かった。ゆめにっき3D（lib/yume25d.ts）と同じくドラッグで見回せるようにし、キャラの
+	// 向きではなく **カメラの向き** を基準に移動する一般的な三人称MMO操作へ変更した。
 
-	private updateCamera() {
-		const camX = this.player.position.x + Mmo3dEngine.CAM_OFFSET.x;
-		const camY = this.player.position.y + Mmo3dEngine.CAM_OFFSET.y;
-		const camZ = this.player.position.z + Mmo3dEngine.CAM_OFFSET.z;
-		this.camera.position.set(camX, camY, camZ);
-		this.camera.lookAt(
-			this.player.position.x,
-			this.player.position.y + 0.6,
-			this.player.position.z,
+	/** ドラッグ操作による視点回転（ラジアン加算）。lib/yume25d.ts の turnBy() と同じAPI形。
+	 *  deltaPitch は見上げ/見下ろし（正=見下ろす方向にカメラが上がる）。可動域でクランプする。 */
+	turnBy(deltaYaw: number, deltaPitch = 0) {
+		this.camYaw += deltaYaw;
+		if (deltaPitch !== 0)
+			this.camElev = Math.max(
+				CAM_MIN_ELEV,
+				Math.min(CAM_MAX_ELEV, this.camElev + deltaPitch),
+			);
+	}
+
+	/** ホイール/ピンチでカメラ距離を変える（lib/yume25d.ts の adjustPovDistance() 相当）。 */
+	adjustCameraDistance(delta: number) {
+		this.camDist = Math.max(
+			CAM_MIN_DIST,
+			Math.min(CAM_MAX_DIST, this.camDist + delta),
 		);
+	}
+
+	/** 仮想スティックからのアナログ移動入力（カメラ相対、-1..1）。0,0 でキーボードに戻る。 */
+	setAnalogMove(x: number, z: number) {
+		this.analogX = Math.max(-1, Math.min(1, x));
+		this.analogZ = Math.max(-1, Math.min(1, z));
+	}
+
+	/** 現在のカメラ状態（UIのコンパス表示・保存用）。 */
+	getCameraState(): { yaw: number; elev: number; dist: number } {
+		return { yaw: this.camYaw, elev: this.camElev, dist: this.camDist };
+	}
+
+	private updateCamera(dt: number) {
+		// 注視点をプレイヤーへ滑らかに追従させる（瞬間追従だと段差や壁ずりでカクつくため）。
+		const k = Math.min(1, CAM_FOLLOW_LERP * dt);
+		this.camLookAt.x += (this.player.position.x - this.camLookAt.x) * k;
+		this.camLookAt.y +=
+			(this.player.position.y + CAM_TARGET_Y - this.camLookAt.y) * k;
+		this.camLookAt.z += (this.player.position.z - this.camLookAt.z) * k;
+
+		// カメラは注視点の「後方」（camYawの逆方向）に、仰角camElevだけ持ち上げて置く。
+		const horiz = Math.cos(this.camElev) * this.camDist;
+		const camX = this.camLookAt.x - Math.sin(this.camYaw) * horiz;
+		const camZ = this.camLookAt.z - Math.cos(this.camYaw) * horiz;
+		let camY = this.camLookAt.y + Math.sin(this.camElev) * this.camDist;
+
+		// 地面/足場より下へ潜らないようにする（仰角を下げ切ったときのめり込み防止）。
+		const floorY = this.standHeightAt(camX, camZ) + CAM_MIN_HEIGHT;
+		if (camY < floorY) camY = floorY;
+
+		this.camera.position.set(camX, camY, camZ);
+		this.camera.lookAt(this.camLookAt);
 	}
 
 	resize(width: number, height: number) {
@@ -1005,7 +1119,7 @@ export class Mmo3dEngine {
 				const dt = Math.min(this.clock.getDelta(), 0.1);
 				this.updateMovement(dt);
 				this.updateCombat(dt);
-				this.updateCamera();
+				this.updateCamera(dt);
 				this.mixer?.update(dt);
 				this.composer.render();
 			} catch (err) {

@@ -13365,6 +13365,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 vmdWalkUrl={gameData.mmo3dConfig?.vmdWalkUrl}
                 vmdRunUrl={gameData.mmo3dConfig?.vmdRunUrl}
                 npcs={gameData.mmo3dConfig?.npcs}
+                virtualKeys={touchRef.current}
               />
             ) : gameData.engine === 'yume25d' ? (
               <Yume25DMaker
@@ -15283,7 +15284,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <div className="bg-black border-2 border-white p-3 max-w-xs text-white font-pixel pointer-events-auto">
                   <h4 className="text-yellow-300 font-bold text-xs mb-2">操作方法</h4>
                   <ul className="text-[10px] text-white leading-relaxed list-disc list-inside marker:text-gray-500">
-                    <li>移動 … [矢印キー] / [WASD]</li>
+                    {gameData.engine === 'mmo3d' ? (
+                      <li>移動 … [WASD]（カメラ基準）</li>
+                    ) : (
+                      <li>移動 … [矢印キー] / [WASD]</li>
+                    )}
+
+                    {/* フェーズ28: mmo3d は三人称オービットカメラ。視点操作が主役なので先頭に置く。 */}
+                    {gameData.engine === 'mmo3d' && (
+                      <>
+                        <li>視点移動 … ドラッグ（マウス / 指）</li>
+                        <li>ズーム … ホイール / ピンチ</li>
+                        <li>カメラ旋回 … [←] / [→]</li>
+                        <li>ダッシュ … [Shift]</li>
+                        <li>攻撃 … [Space] / 画面タップ</li>
+                        <li>スキル … [F]</li>
+                        <li>話す・調べる … [E]</li>
+                      </>
+                    )}
 
                     {gameData.engine === 'action' && (
                       <>
@@ -15391,7 +15409,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         let btnAActive = false; let btnALabel = "";
                         let btnBActive = false; let btnBLabel = "";
                         let btnXActive = false; let btnXLabel = "";
-                        const btnXKey: keyof typeof touchRef.current = 'slow';
+                        let btnXKey: keyof typeof touchRef.current = 'slow';
                         let btnYActive = false; let btnYLabel = "";
 
                         const hasOverlay = isPlaying && (!!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult || invOpen || !!battle);
@@ -15426,6 +15444,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         } else if (gameData.engine === 'yume25d') {
                           btnAActive = true; btnALabel = "JUMP";
                           btnBActive = true; btnBLabel = "話す";
+                          btnYActive = true; btnYLabel = "DASH";
+                        } else if (gameData.engine === 'mmo3d') {
+                          // フェーズ28: それまでmmo3dだけコントローラ未配線で、画面に出ている
+                          // のに何を押しても反応しなかった。十字キー=カメラ相対移動。
+                          btnAActive = true; btnALabel = "話す";
+                          btnBActive = true; btnBLabel = "⚔️ 攻撃";
+                          btnXActive = true; btnXLabel = "✨ スキル"; btnXKey = 'bomb';
                           btnYActive = true; btnYLabel = "DASH";
                         }
 
