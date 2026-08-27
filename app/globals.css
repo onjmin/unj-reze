@@ -342,6 +342,13 @@
   src: url('https://rorigaifont.pages.dev/nagamonfont.woff2') format('woff2');
 }
 
+@font-face {
+  font-family: 'KusaminFontV1';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://kusa.open2ch.net/fonts/KusaminFontV1.woff2') format('woff2');
+}
+
 @utility font-misaki {
   font-family: 'misaki_gothic', monospace;
 }

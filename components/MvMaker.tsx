@@ -3672,6 +3672,7 @@ export default function MvMaker({
 						{ value: "'chupakafont', sans-serif", label: "チュパカブラフォント" },
 						{ value: "'favofont', sans-serif", label: "ふぁぼフォント" },
 						{ value: "'nagamonfont', sans-serif", label: "長モンフォント" },
+						{ value: "'KusaminFontV1', sans-serif", label: "kusa民フォント" },
 						...customFonts.map((f) => ({
 							value: `'${f.name}', sans-serif`,
 							label: `${f.name}`,
