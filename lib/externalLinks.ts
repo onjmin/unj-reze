@@ -94,7 +94,7 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
 				name: "蓄音キリコ",
 				description:
 					"2026年8月18日、おーぷん2ちゃんねる有志によって作成されたUTAU音源です。",
-				src: "https://chi9nekiriko.wixsite.com/home",
+				src: "https://suzuhete.wixsite.com/home",
 			},
 		],
 	},
