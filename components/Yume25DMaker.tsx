@@ -14,6 +14,7 @@ import {
 	useState,
 } from "react";
 import { parseWalkRef } from "@/lib/asset-ref";
+import { tryCapturePointer } from "@/lib/pointer-capture";
 import {
 	cellRect,
 	detectStandard,
@@ -94,17 +95,6 @@ interface DialogueState {
 	message: string;
 	choices?: string[];
 }
-
-/** setPointerCapture は一部環境で「アクティブなポインタが見つからない」例外を投げることがある
- *  （マルチタッチの取りこぼしなど）。取れなくてもドラッグ自体は ref 側の手動追跡で継続できるので、
- *  ここで握りつぶして呼び出し元の状態更新を止めないようにする。 */
-const tryCapturePointer = (el: Element, pointerId: number) => {
-	try {
-		el.setPointerCapture(pointerId);
-	} catch {
-		/* noop */
-	}
-};
 
 interface Yume25DMakerProps {
 	layout: Layout25D;

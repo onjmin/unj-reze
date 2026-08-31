@@ -411,9 +411,18 @@ export class Mmo3dBabylonEngine {
 		Object.assign(this.input, next);
 	}
 
-	/** ドラッグ操作による視点回転（three版 Mmo3dEngine.turnBy と同じAPI形・同じ符号）。 */
+	/** ドラッグ操作による視点回転（three版 Mmo3dEngine.turnBy と同じAPI形・同じ操作感）。
+	 *
+	 *  yawだけ符号がthree版と逆になる。babylonのシーンは既定で**左手系**（three.jsは右手系）
+	 *  で、同じ eye/target/up でも画面の左右が反転するため（LookAtLH の xaxis =
+	 *  cross(up, target-eye) に対し、three.jsの Matrix4.lookAt は cross(up, eye-target)＝
+	 *  符号が逆）。camYaw の定義そのもの（カメラ前方 = (sin camYaw, 0, cos camYaw)）は
+	 *  幾何的な値なので両エンジンで共通のまま、「同じドラッグ＝同じ見え方」にするために
+	 *  ここで吸収する。移動のストレイフ軸（updateMovement）も同じ理由で符号が逆になる。
+	 *  ※ scene.useRightHandedSystem を立てれば揃うが、PMX/VMDの読み込みやライティングまで
+	 *    巻き込むので、影響範囲がこの2箇所で済む今の形にしてある。 */
 	turnBy(deltaYaw: number, deltaPitch = 0) {
-		this.camYaw += deltaYaw;
+		this.camYaw -= deltaYaw;
 		if (deltaPitch !== 0)
 			this.camElev = Math.max(
 				CAM_MIN_ELEV,
@@ -461,10 +470,15 @@ export class Mmo3dBabylonEngine {
 		const moving = inLen > 0.001;
 
 		if (moving) {
+			// カメラ前方 f = (sin camYaw, cos camYaw) は three版と共通。カメラ右方 r は
+			// **左手系なので three版と逆符号**の r = (cos camYaw, -sin camYaw) になる
+			// （LookAtLH の xaxis = cross(up, forward)。three版は cross(up, -forward)）。
+			// ここを three版のままにすると A/D と仮想スティックの左右が鏡像になる。
+			// 詳しい理由は turnBy() のコメント参照。
 			const sy = Math.sin(this.camYaw);
 			const cy = Math.cos(this.camYaw);
-			const dirX = (inFwd * sy + inRight * -cy) / inLen;
-			const dirZ = (inFwd * cy + inRight * sy) / inLen;
+			const dirX = (inFwd * sy + inRight * cy) / inLen;
+			const dirZ = (inFwd * cy - inRight * sy) / inLen;
 
 			const targetFacing = Math.atan2(dirX, dirZ);
 			let diff = targetFacing - this.facing;

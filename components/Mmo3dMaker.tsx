@@ -20,6 +20,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { realtimeConfigured, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
 import { Mmo3dEngine, SKILL_TYPES, WEAPON_TYPES } from "@/lib/mmo3d";
 import { Mmo3dBabylonEngine } from "@/lib/mmo3d-babylon";
+import { tryCapturePointer } from "@/lib/pointer-capture";
 import { chGame } from "@/lib/realtime/channels";
 import type { RealtimePlayer } from "@/lib/realtime/channels";
 import { getRealtimeClient } from "@/lib/realtime/client";
@@ -40,15 +41,6 @@ const STICK_SIZE = 88;
 /** スティックをこの割合以上倒すと自動でダッシュになる（モバイルにShiftが無いため）。 */
 const STICK_RUN_THRESHOLD = 0.92;
 
-/** setPointerCapture はマルチタッチの取りこぼし等で例外を投げることがある。取れなくても
- *  ドラッグ自体は ref 側の手動追跡で継続できるので握りつぶす（Yume25DMaker.tsx と同じ）。 */
-const tryCapturePointer = (el: Element, pointerId: number) => {
-	try {
-		el.setPointerCapture(pointerId);
-	} catch {
-		/* noop */
-	}
-};
 const BOARD_PROXIMITY_POLL_MS = 200;
 /** チャットログの保持件数上限（フェーズ25、DBには一切書かず画面内だけで完結する）。 */
 const CHAT_LOG_MAX = 30;

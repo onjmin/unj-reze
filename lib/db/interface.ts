@@ -230,12 +230,19 @@ export interface DataStore {
 	 * 呼び出し側（app/api/posts/[id]/route.ts）がこれをレスポンスに載せ、
 	 * クライアント（lib/api.ts posts.remove）がDB削除確定後にR2の実体を消す
 	 * （editPostのpreviousMmlと同じ「DB確定後に消す」順序）。
+	 *
+	 * threadId（属するスレッドのpostId）も併せて返す。呼び出し側はリアルタイム配信の
+	 * チャンネル名（chThread）にこれを使う。削除後は getPost で引けない（レス=物理削除、
+	 * スレ=論理削除）ので、事前に getPost を撃つ代わりにここで返す — 事前取得だと
+	 * スレ配下の全レスを読むうえ、所有者チェック前なので他人のスレへのDELETE試行だけで
+	 * 無駄な全件読み出しを誘発できてしまう（docs/NEON_EGRESS.md）。
 	 */
 	deletePost(
 		id: number,
 		userId: string,
 	): Promise<
 		| {
+				threadId?: number;
 				mmlDeleteId?: string;
 				mmlDeleteHash?: string;
 				gameManifestDeleteId?: string;

@@ -2,6 +2,7 @@
 
 import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { tryCapturePointer } from "@/lib/pointer-capture";
 import { walkPresetWays } from "@/lib/walk-cycle";
 
 interface ImagePreviewProps {
@@ -127,7 +128,7 @@ export default function ImagePreview({
 				startOffY: offset.y,
 			};
 			setDragging(true);
-			(e.target as HTMLElement).setPointerCapture(e.pointerId);
+			tryCapturePointer(e.target as HTMLElement, e.pointerId);
 		},
 		[offset],
 	);

@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseWalkRef } from "@/lib/asset-ref";
+import { tryCapturePointer } from "@/lib/pointer-capture";
 import type { Post } from "@/lib/types";
 import { walkPresetToStdId } from "@/lib/walk-cycle";
 import {
@@ -693,7 +694,7 @@ function SliceEditor({
 		if (!img) return;
 		const p = toImagePoint(e.clientX, e.clientY);
 		if (!p) return;
-		(e.target as Element).setPointerCapture(e.pointerId);
+		tryCapturePointer(e.target as Element, e.pointerId);
 
 		if (isWalkTemplateReady) {
 			// 歩行グラモード: クリックした地点を「幅」「高さ」の単位グリッドに吸着させ、その位置をブロックの左上にする。

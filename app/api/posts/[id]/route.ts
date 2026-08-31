@@ -6,7 +6,7 @@ import { parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
-import { decodeId, encodePost } from "@/lib/sqids";
+import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { tryHeart, tryVote } from "@/lib/vote-guard";
 import { isValidWalkPreset } from "@/lib/walk-cycle";
@@ -231,9 +231,30 @@ export async function PATCH(
 	// 個人差分フィールドは result.liked/disliked/reposted が「編集した本人（作者）視点」の
 	// 値なので載せない（クライアント側は content 系だけ拾って上書きする設計、
 	// app/page.tsx の post.updated ハンドラ参照）。
+	//
+	// 配信ペイロードは encoded の**そのまま**ではなく、下の2点を落としたものを使う:
+	// - previousMml … R2の削除トークン。encodePost の stripDeleteTokens は
+	//   mmlDeleteId/mmlDeleteHash しか剥がさず、editPost が result に後付けする
+	//   previousMml はすり抜ける。作者へのレスポンスに載せるのは意図通りだが、
+	//   フィード購読者全員へ配ると「見た人全員が他人のMMLを消せる」ことになる
+	//   （lib/sqids.ts stripDeleteTokens のコメント参照）。
+	// - replies … スレ本体の編集では getPost がスレ配下の全レスを詰めて返す。
+	//   クライアントは content 系しか使わないのに、返信1000件のスレを編集するたび
+	//   その全文を全接続へブロードキャストすることになる（docs/NEON_EGRESS.md）。
+	const {
+		previousMml: _omitPreviousMml,
+		replies: _omitReplies,
+		...broadcast
+	} = encoded as typeof encoded & {
+		previousMml?: { deleteId: string; deleteHash: string };
+	};
 	publishRealtime([
-		{ channel: CH_FEED, event: "post.updated", data: encoded },
-		{ channel: chThread(encoded.threadId), event: "post.updated", data: encoded },
+		{ channel: CH_FEED, event: "post.updated", data: broadcast },
+		{
+			channel: chThread(encoded.threadId),
+			event: "post.updated",
+			data: broadcast,
+		},
 	]);
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
@@ -261,10 +282,6 @@ export async function DELETE(
 	if (!user) {
 		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	}
-	// threadId は削除前に確保しておく。レスは物理削除、スレは論理削除(deleted_at)で
-	// 以後 getPost が拾えなくなるため、削除後では取れない。
-	const existing = await db.getPost(decodedId, user.slug);
-	const threadId = existing ? encodePost(existing).threadId : undefined;
 	const result = await db.deletePost(decodedId, user.slug);
 	if (!result) {
 		return NextResponse.json(
@@ -272,16 +289,30 @@ export async function DELETE(
 			{ status: 404 },
 		);
 	}
+	// 配信IDはURLの `id` ではなく decodedId を正規化し直したものを使う。decodeId は
+	// 旧sqids形式のURLも受け付けるので、`id` をそのまま流すとクライアント側の
+	// post.id（= encodeId 済みの生の数値文字列）と一致せず、配信が黙って無視される。
+	const encodedId = encodeId(decodedId);
+	// threadId は deletePost が返す（レスは物理削除・スレは論理削除で、どちらも
+	// 削除後には引けないため）。ここで getPost を撃つとスレ配下の全レスを読むことになり、
+	// しかも所有者チェック前なので他人のスレへのDELETE試行だけで無駄な全件読み出しを
+	// 誘発できてしまう（docs/NEON_EGRESS.md）。
+	const threadId =
+		result.threadId != null ? encodeId(result.threadId) : undefined;
 	// 他クライアントのタイムライン/スレ表示から消す。CH_FEED はスレッド一覧・返信タブ、
 	// chThread はスレ詳細（将来ワイヤリングする際の受け皿も兼ねる）向け。
 	publishRealtime([
-		{ channel: CH_FEED, event: "post.deleted", data: { id, threadId } },
+		{
+			channel: CH_FEED,
+			event: "post.deleted",
+			data: { id: encodedId, threadId },
+		},
 		...(threadId
 			? [
 					{
 						channel: chThread(threadId),
 						event: "post.deleted" as const,
-						data: { id, threadId },
+						data: { id: encodedId, threadId },
 					},
 				]
 			: []),

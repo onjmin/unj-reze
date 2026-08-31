@@ -1252,6 +1252,7 @@ export const pgStore: DataStore = {
 			// R2オブジェクトを消しても復元不能事故にはならない
 			// （editPostのpreviousMmlと同じトークンの流儀）。
 			return {
+				threadId: threadToPostId(Number(row.thread_id)),
 				...mmlDeleteRefOf(row),
 				...(await orphanedManifestRefsOf(row)),
 			};
@@ -1285,6 +1286,7 @@ export const pgStore: DataStore = {
 			// （deleted_atパスと同じ「DB確定後にR2を消す」順序、他投稿から参照が残っていれば
 			// orphanedManifestRefsOf側でスキップされる）。
 			return {
+				threadId: threadToPostId(threadId),
 				...mmlDeleteRefOf(row),
 				...(await orphanedManifestRefsOf(row)),
 			};
@@ -1298,6 +1300,7 @@ export const pgStore: DataStore = {
 		// よってここも安全にR2側のMML/ゲーム・MVを消せる（返信が残っていない＝上のガードで
 		// 保証済みなので、迷子になる返信も存在しない）。
 		return {
+			threadId: threadToPostId(threadId),
 			...mmlDeleteRefOf(row),
 			...(await orphanedManifestRefsOf(row)),
 		};

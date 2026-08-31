@@ -94,8 +94,12 @@ export const mockStore: DataStore = {
 		//   （lib/uploader.ts uploadText が isUploaderAvailable=false で即throw）ので、
 		//   mockDb側にorphan判定を足す実益が無い。gameStore/mvStore(lib/db/mock.ts)は
 		//   プロセス終了で消えるインメモリなので、消し忘れても実害は無い。
+		// threadId だけは削除前に控える（配信チャンネル名に使う。詳細は
+		// lib/db/interface.ts の deletePost のコメント）。mockDbはインメモリなので
+		// 事前取得のコストは無い。
+		const threadId = mockDb.getPost(id)?.threadId;
 		const ok = mockDb.deletePost(id, userId);
-		return ok ? {} : false;
+		return ok ? { threadId } : false;
 	},
 
 	async deleteMessage(id: number, userId: string) {

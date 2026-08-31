@@ -8,6 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { wrapCorsProxyUrl, notifyCorsProxyUsed, handleImgError } from '@/lib/cors-proxy';
 import { applyMasterVolume } from '@/lib/master-volume';
+import { tryCapturePointer } from '@/lib/pointer-capture';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
@@ -11997,7 +11998,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
       dpadPointerRef.current = e.pointerId;
-      e.currentTarget.setPointerCapture?.(e.pointerId);
+      // 素で呼ぶと例外時にここで中断し、applyDpad が走らず「押しても無反応」になる。
+      tryCapturePointer(e.currentTarget, e.pointerId);
       applyDpad(e.clientX, e.clientY);
     },
     onPointerMove: (e: React.PointerEvent) => {

@@ -10,6 +10,7 @@ import {
 	ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { tryCapturePointer } from "@/lib/pointer-capture";
 
 interface CropAvatarModalProps {
 	imageSrc: string;
@@ -111,7 +112,7 @@ export default function CropAvatarModal({
 	};
 
 	const handlePointerDown = (e: React.PointerEvent) => {
-		(e.target as Element).setPointerCapture?.(e.pointerId);
+		tryCapturePointer(e.target as Element, e.pointerId);
 		pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (pointersRef.current.size === 1) {
 			dragStartRef.current = {
