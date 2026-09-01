@@ -1,22 +1,22 @@
-// インストール可能な PWA として認識してもらうための最小 Service Worker。
-// キャッシュは一切持たない（素通し）。ゲームやフィードは常に最新であるべきで、
-// 中途半端なキャッシュは「更新したのに古い画面が出る」事故に直結するため。
+// 【原理的なデッドロック防止のためのクリーンアップ Service Worker】
+// キャッシュを持たない素通しSWであっても、fetch リスナーが存在すると Chromium 等で
+// SW プロセス待ちによる通信フリーズ（Network タブに何も出ず無限保留）を誘発する。
+// 現代のブラウザは Web App Manifest のみで PWA インストールが可能なため、
+// 本アプリに Service Worker は不要。既存ブラウザの登録を自己消滅させる。
+
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  // 過去に別実装のSWがキャッシュを残していた場合に備えて掃除しておく
   event.waitUntil(
     (async () => {
       if (self.caches) {
         const keys = await self.caches.keys();
         await Promise.all(keys.map((k) => self.caches.delete(k)));
       }
-      await self.clients.claim();
+      await self.registration.unregister();
     })()
   );
 });
 
-// fetch ハンドラの存在自体がインストール要件なので、素通しで登録しておく
-self.addEventListener('fetch', () => {});
