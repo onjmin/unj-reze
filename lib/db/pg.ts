@@ -68,6 +68,7 @@ import type {
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
+	GetRepliesOptions,
 	MessageParams,
 	MmlRef,
 	RecordGamePlayParams,
@@ -76,6 +77,7 @@ import type {
 	UpdateGameParams,
 	UpdateMvParams,
 } from "./interface";
+import { REPLIES_PAGE_SIZE } from "./interface";
 
 function getConnectionString() {
 	return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || "";
@@ -470,6 +472,8 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		isFalseDeclaration: row.is_false_declaration ?? false,
 		isEdited: row.is_edited ?? false,
 		threadId: postId,
+		// OPは常に1レス目（>>1）
+		num: 1,
 		parentPostId: undefined,
 		replies,
 	};
@@ -517,6 +521,8 @@ function resRowToPost(row: any): DbPost {
 		isFalseDeclaration: row.is_false_declaration ?? false,
 		isEdited: row.is_edited ?? false,
 		threadId: threadPostId,
+		num: row.num != null ? Number(row.num) : undefined,
+		parentNum: row.parent_num != null ? Number(row.parent_num) : 1,
 		parentPostId:
 			row.parent_num != null
 				? Number(row.parent_num) === 1
@@ -606,7 +612,7 @@ async function getHiddenUserIds(viewerId?: string): Promise<Set<number>> {
 // ============================================================================
 // フィード用: スレッドに付随する返信を軽量に埋め込む（全件は引かない）
 // ============================================================================
-const FEED_REPLIES_PER_THREAD = 20;
+const FEED_REPLIES_PER_THREAD = REPLIES_PAGE_SIZE;
 
 async function attachRepliesToThreads(
 	threads: DbPost[],
@@ -712,10 +718,12 @@ export const pgStore: DataStore = {
 		);
 		const filtered = rows.filter((r) => !hidden.has(Number(r.user_id)));
 		const posts = filtered.map((r) => threadRowToPost(r));
-		await attachRepliesToThreads(
-			posts,
-			filtered.map((r) => Number(r.id)),
-		);
+		if (options.withReplies !== false) {
+			await attachRepliesToThreads(
+				posts,
+				filtered.map((r) => Number(r.id)),
+			);
+		}
 		return posts.map((p) => withViewerVoteState(p, userId));
 	},
 
@@ -728,18 +736,22 @@ export const pgStore: DataStore = {
 			);
 			if (rows.length === 0) return null;
 			const row = rows[0];
-			const { rows: parentRows } = await q(
-				`SELECT num, id FROM res WHERE thread_id = $1`,
-				[row.thread_id],
-			);
-			const numToPostId = new Map<number, number>([
-				[1, threadToPostId(Number(row.thread_id))],
-			]);
-			for (const p of parentRows)
-				numToPostId.set(Number(p.num), resToPostId(Number(p.id)));
 			const post = resRowToPost(row);
 			const parentNum = row.parent_num != null ? Number(row.parent_num) : 1;
-			post.parentPostId = numToPostId.get(parentNum) ?? post.threadId;
+			// 親1件を引くためにスレ内の全 num を舐めない（1000レスのスレでレス1件を
+			// 開くだけで全行読み出しになっていた。docs/NEON_EGRESS.md）。
+			if (parentNum === 1) {
+				post.parentPostId = post.threadId;
+			} else {
+				const { rows: parentRows } = await q<{ id: number }>(
+					`SELECT id FROM res WHERE thread_id = $1 AND num = $2`,
+					[row.thread_id, parentNum],
+				);
+				post.parentPostId =
+					parentRows[0]?.id != null
+						? resToPostId(Number(parentRows[0].id))
+						: post.threadId;
+			}
 			return withViewerVoteState(post, userId);
 		}
 
@@ -915,7 +927,7 @@ export const pgStore: DataStore = {
 		return pgStore.getPost(id);
 	},
 
-	async getReplies(postId: number, userId?: string) {
+	async getReplies(postId: number, userId?: string, options?: GetRepliesOptions) {
 		// postId はOPを指す想定だが、レスのidが来ても同じスレッドへ解決する
 		const threadId = isReplyPostId(postId)
 			? Number(
@@ -929,11 +941,27 @@ export const pgStore: DataStore = {
 			: postIdToThreadId(postId);
 		if (!Number.isFinite(threadId)) return [];
 		const hidden = await getHiddenUserIds(userId);
-		const { rows } = await q(
-			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.thread_id = $1 ORDER BY r.num`,
-			[threadId],
+		// 常に「新しい順に limit 件」だけ引く。スレ全件を返すと1000レスのスレを
+		// 開いただけで転送量枠を持っていかれる（docs/NEON_EGRESS.md）。
+		// beforeNum があればそれより古い側の直近 limit 件＝上スクロールの追加読み込み。
+		const limit = Math.max(
+			1,
+			Math.min(options?.limit ?? REPLIES_PAGE_SIZE, RES_LIMIT),
 		);
+		const params: any[] = [threadId];
+		let cursorWhere = "";
+		if (options?.beforeNum != null && Number.isFinite(options.beforeNum)) {
+			params.push(options.beforeNum);
+			cursorWhere = ` AND r.num < $${params.length}`;
+		}
+		params.push(limit);
+		const { rows: desc } = await q(
+			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.thread_id = $1${cursorWhere} ORDER BY r.num DESC LIMIT $${params.length}`,
+			params,
+		);
+		// 表示は常に古い→新しいの昇順。
+		const rows = desc.reverse();
 		const filtered = rows.filter((r) => !hidden.has(Number(r.user_id)));
 		const numToPostId = new Map<number, number>([
 			[1, threadToPostId(threadId)],

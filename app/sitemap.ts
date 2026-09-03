@@ -10,7 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 	const isStaticExport = process.env.NEXT_PUBLIC_STATIC_EXPORT === "true";
-	const posts = isStaticExport ? mockDb.getPosts() : await db.getPosts();
+	// URLと更新日時しか使わないので返信は引かせない（docs/NEON_EGRESS.md）
+	const posts = isStaticExport
+		? mockDb.getPosts()
+		: await db.getPosts(undefined, { withReplies: false });
 
 	const staticEntries: MetadataRoute.Sitemap = [
 		{ url: SITE_URL, changeFrequency: "always", priority: 1 },

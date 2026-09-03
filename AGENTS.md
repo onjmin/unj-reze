@@ -78,7 +78,10 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
 - Never `SELECT p.*` on `posts` — use `POST_COLUMNS` (`lib/db/pg.ts`), always paired with the
   `COALESCE(au.display_name, p.display_name)` alias or every author renders as 名無し.
 - Never select `games.manifest` in a list query; never reintroduce `COUNT(*) FROM post_hearts`
-  (use denormalized `posts.hearts_total`); never uncap feed replies.
+  (use denormalized `posts.hearts_total`). Replies are read only as a window of the newest
+  `REPLIES_PAGE_SIZE` (feed, detail, and `/api/posts/[id]/replies`); older ones page upward by
+  `Post.num` via `useOlderReplies`. The 専ブラ `.dat` route is the one place that reads a whole
+  thread — never uncap anywhere else, and never number replies by array index.
 - **Workers free tier allows 10ms CPU per request** — response size is CPU-bound, not just bytes.
   `sqids.encode` (~15µs, up to 4× per post) once cost 17ms on a single feed page and 500'd every
   posts route; IDs are now raw numbers (`lib/sqids.ts`), which took that to 0.67ms. `decodeId` still

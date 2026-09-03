@@ -27,6 +27,10 @@ import { getAvatarInfo } from "@/lib/avatar";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import {
+	useOlderReplies,
+	useScrollToNewestReply,
+} from "@/lib/hooks/useOlderReplies";
+import {
 	extractMmlFromContent,
 	getDisplayContent,
 	stripAnkaPrefixForSnsDisplay,
@@ -219,20 +223,48 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setPrevInitial(initial);
 		setPost((prev) => {
 			if (prev.id !== initial.id) return initial;
+			const existingIds = new Set(initial.replies.map((r) => r.id));
 			const pendingReplies = prev.replies.filter((r) =>
 				r.id.startsWith("temp-"),
 			);
-			if (pendingReplies.length === 0) return initial;
-			const existingIds = new Set(initial.replies.map((r) => r.id));
 			const unmerged = pendingReplies.filter((r) => !existingIds.has(r.id));
-			if (unmerged.length === 0) return initial;
+			// initial はサーバーが返す「直近N件」の窓なので、上スクロールで読み足した
+			// 過去レスはこの中にいない。窓より古いぶんだけ持ち越さないと、裏で走る
+			// 再取得のたびに読み込み済みの過去レスが消える。
+			const oldestInitialNum = initial.replies.reduce(
+				(min, r) => (r.num != null && r.num < min ? r.num : min),
+				Number.POSITIVE_INFINITY,
+			);
+			const olderLoaded = prev.replies.filter(
+				(r) =>
+					!existingIds.has(r.id) &&
+					r.num != null &&
+					r.num < oldestInitialNum,
+			);
+			if (unmerged.length === 0 && olderLoaded.length === 0) return initial;
 			return {
 				...initial,
-				repliesCount: initial.replies.length + unmerged.length,
-				replies: [...initial.replies, ...unmerged],
+				// repliesCount はスレの総レス数（サーバー由来）。窓の件数で上書きしない。
+				repliesCount: initial.repliesCount + unmerged.length,
+				replies: [...olderLoaded, ...initial.replies, ...unmerged],
 			};
 		});
 	}
+
+	// 掲示板モードでは BbsThreadView が同じフックを持つので、こちらは止めておく
+	// （二重にスクロール監視と追加取得が走る）。
+	const snsMode = bbsMode !== "掲示板モード";
+	const { hasOlder, loadingOlder, loadOlder } = useOlderReplies(
+		post,
+		setPost,
+		userSlug,
+		snsMode,
+	);
+	const { anchorRef: newestReplyRef } = useScrollToNewestReply(
+		post.id,
+		post.replies.length,
+		snsMode,
+	);
 
 	useEffect(() => {
 		cachePost(initial);
@@ -266,8 +298,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			// content-text に直接埋め込む。番号はBbsThreadViewと同じ
 			// [post, ...post.replies] の並び順で採番する。
 			if (target) {
+				// レス番号は必ず Post.num（サーバー採番）を使う。一覧は直近N件の窓なので
+				// 配列の添字は実際のレス番と一致しない。num が無い旧データ/楽観追加分の
+				// ときだけ添字にフォールバックする。
 				const allPosts: Post[] = [post, ...post.replies];
-				const num = allPosts.findIndex((p) => p.id === target.id) + 1;
+				const num =
+					target.num ?? allPosts.findIndex((p) => p.id === target.id) + 1;
 				if (num > 0) {
 					setReplyText((prev) => `>>${num}\n${prev.replace(/^>>\d+\n/, "")}`);
 				}
@@ -304,7 +340,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	};
 
 	const handleMenuCopy = () => {
-		navigator.clipboard.writeText(post.content);
+		// 生の content ではなく表示テキストをコピーする。content には `#mml` の
+		// マーカー行が残っており、それごと貼り付けられて曲を添付されると本文側にも
+		// マーカーが立って二重になる（2本目は外部化されず生MMLが content_text に残る）。
+		navigator.clipboard.writeText(getDisplayContent(post.content));
 		setMenuOpen(false);
 	};
 
@@ -383,8 +422,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		replySubmittingRef.current = true;
 		const session = beginUiSession();
 		const targetParent = replyTo ?? post;
+		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
 		const parts: string[] = [];
-		if (replyText.trim()) parts.push(replyText.trim());
+		const bodyText = (replyMml ? stripMmlLine(replyText) : replyText).trim();
+		if (bodyText) parts.push(bodyText);
 		if (replyMml) parts.push(`#mml ${replyMml}`);
 		const content = parts.join("\n");
 
@@ -417,6 +459,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			replies: [],
 			threadId: post.id,
 			parentPostId: targetParent.id,
+			// 楽観追加ぶんの仮レス番号。窓の末尾＝スレの末尾なので +1 でよい
+			// （サーバーの採番で上書きされる）。
+			num: (post.replies[post.replies.length - 1]?.num ?? 1) + 1,
+			parentNum: targetParent.num ?? 1,
 			hasImage: !!replyImage,
 			imageSrc: replyImage ?? undefined,
 			dotW: replyDotSize?.w,
@@ -1430,7 +1476,26 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					);
 					return (
 						<div className="border-t border-gray-800 px-3 py-3 space-y-2">
-							<span className="text-[11px] text-gray-500 font-bold">返信</span>
+							<div className="flex items-baseline gap-2">
+								<span className="text-[11px] text-gray-500 font-bold">返信</span>
+								{post.repliesCount > post.replies.length && (
+									<span className="text-[10px] text-gray-600">
+										全{post.repliesCount}件中 直近{post.replies.length}件
+									</span>
+								)}
+							</div>
+							{/* 過去レスは上スクロールで自動的に読み足すが、画面が短くて
+							    スクロールが起きない場合のためにボタンも出す。 */}
+							{hasOlder && (
+								<button
+									type="button"
+									onClick={loadOlder}
+									disabled={loadingOlder}
+									className="w-full py-2 text-[11px] text-blue-400 hover:bg-gray-100/5 rounded transition-colors disabled:text-gray-600"
+								>
+									{loadingOlder ? "読み込み中..." : "過去のレスを読む"}
+								</button>
+							)}
 							{roots.map((reply) => {
 								return (
 									<ReplyTreeItem
@@ -1459,6 +1524,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									/>
 								);
 							})}
+							{/* 開いた直後にここへ着地させる＝最新レスが見えている状態 */}
+							<div ref={newestReplyRef} />
 						</div>
 					);
 				})()}
@@ -1804,7 +1871,8 @@ function ReplyTreeItem({
 	};
 
 	const handleMenuCopy = () => {
-		navigator.clipboard.writeText(localPost.content);
+		// マーカー行を貼り付けさせない。理由は上の handleMenuCopy と同じ。
+		navigator.clipboard.writeText(getDisplayContent(localPost.content));
 		setMenuOpen(false);
 	};
 

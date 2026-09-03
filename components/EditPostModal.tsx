@@ -3,7 +3,7 @@
 import { Clapperboard, Gamepad2, Music, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { MML_MARKERS } from "@/lib/mml";
+import { mmlMarkerOfLine } from "@/lib/mml";
 import type { Post } from "@/lib/types";
 import { presets as walkPresets } from "@/lib/walk-cycle";
 import { useMmlSource } from "./MmlSource";
@@ -84,19 +84,24 @@ function extractImageUrl(text: string): string | null {
 	return m ? m[0] : null;
 }
 
-/** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
+/**
+ * content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す。
+ * マーカー行が2行以上ある content でも、1行目だけを mmlLine として残し
+ * 残りは textOnly からも落とす——保存し直したときに二重マーカーを作り直さないため
+ * （lib/mml.ts replaceMmlWithMarker のコメント参照）。
+ */
 function splitMml(content: string): {
 	mmlLine: string | null;
 	textOnly: string;
 } {
 	const lines = content.split("\n");
-	const idx = lines.findIndex((line) => {
-		const t = line.trim().toLowerCase();
-		return MML_MARKERS.some((m) => t.startsWith(m.toLowerCase()));
+	const indexes: number[] = [];
+	lines.forEach((line, i) => {
+		if (mmlMarkerOfLine(line) !== null) indexes.push(i);
 	});
-	if (idx === -1) return { mmlLine: null, textOnly: content };
-	const mmlLine = lines[idx];
-	lines.splice(idx, 1);
+	if (indexes.length === 0) return { mmlLine: null, textOnly: content };
+	const mmlLine = lines[indexes[0]];
+	for (const idx of [...indexes].reverse()) lines.splice(idx, 1);
 	return { mmlLine, textOnly: lines.join("\n").trimEnd() };
 }
 
@@ -210,9 +215,9 @@ export default function EditPostModal({
 	const mmlCode = mmlLine
 		? resolvedMml ||
 			(() => {
-				const marker = MML_MARKERS.find((m) =>
-					mmlLine.trim().toLowerCase().startsWith(m.toLowerCase()),
-				);
+				// 長いマーカー優先で切る。`#MML作曲` を `#mml` として4文字だけ削ると
+				// 本文が `作曲 ...` で始まる壊れたMMLになる（lib/mml.ts 参照）。
+				const marker = mmlMarkerOfLine(mmlLine);
 				return marker ? mmlLine.trim().slice(marker.length).trim() : null;
 			})()
 		: null;

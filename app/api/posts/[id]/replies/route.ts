@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
+import { REPLIES_PAGE_MAX, REPLIES_PAGE_SIZE } from "@/lib/db/interface";
 import { withEdgeCache } from "@/lib/edge-cache";
 import { parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
@@ -20,12 +21,29 @@ export async function GET(
 	if (decodedId === null) {
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
-	const userId = new URL(_request.url).searchParams.get("userId") || undefined;
+	const sp = new URL(_request.url).searchParams;
+	const userId = sp.get("userId") || undefined;
+	// 既定は「直近 REPLIES_PAGE_SIZE 件」。スレ全件は返さない（docs/NEON_EGRESS.md）。
+	// before=<レス番号> で、その番号より古い側の直近 limit 件＝上スクロールの追加読み込み。
+	// 未指定は Number(null) === 0 になるので、パラメータの有無を先に見る
+	// （0 を limit として通すと1件しか返さない）。
+	const rawLimit = Number(sp.get("limit") ?? Number.NaN);
+	const limit =
+		Number.isFinite(rawLimit) && rawLimit > 0
+			? Math.min(rawLimit, REPLIES_PAGE_MAX)
+			: REPLIES_PAGE_SIZE;
+	const rawBefore = Number(sp.get("before") ?? Number.NaN);
+	// >>1 はOPなので、それ以前は存在しない
+	const beforeNum =
+		Number.isFinite(rawBefore) && rawBefore > 1 ? rawBefore : undefined;
 	return await withEdgeCache(
 		_request,
 		{ sMaxAge: 5, personalized: !!userId },
 		async () => {
-			const replies = await db.getReplies(decodedId, userId);
+			const replies = await db.getReplies(decodedId, userId, {
+				limit,
+				beforeNum,
+			});
 			await attachEmbedInfo(replies);
 			return NextResponse.json(replies.map(encodePost));
 		},

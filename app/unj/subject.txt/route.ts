@@ -17,7 +17,12 @@ export async function GET(request: NextRequest) {
 		request,
 		{ sMaxAge: 10, personalized: false },
 		async () => {
-			const posts = await db.getPosts(undefined, { limit: MAX_THREADS });
+			// レス数は threads.res_count 由来の repliesCount で足りる。返信本文は
+			// 1行も使わないので引かせない（300スレ×20返信を読んで捨てていた）。
+			const posts = await db.getPosts(undefined, {
+				limit: MAX_THREADS,
+				withReplies: false,
+			});
 			const body = posts
 				.map((p) =>
 					formatSubjectLine(

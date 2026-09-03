@@ -149,7 +149,10 @@ export default function PostContainer({
 	const handleMenuCopy = useCallback(
 		(e: React.MouseEvent) => {
 			e.stopPropagation();
-			navigator.clipboard.writeText(post.content);
+			// マーカー行(`#mml`)ごとコピーさせない。貼り付け先で曲を添付されると
+			// 本文側にもマーカーが立ち、2本目が外部化されないまま生MMLとして
+			// content_text に残る（lib/mml.ts replaceMmlWithMarker のコメント参照）。
+			navigator.clipboard.writeText(getDisplayContent(post.content));
 			setMenuOpen(false);
 		},
 		[post.content],
@@ -1054,7 +1057,10 @@ function ReplyPreview({
 			.values(),
 	);
 	const maxAvatars = Math.min(uniqueReplies.length, 5);
-	const extraCount = replies.length - maxAvatars;
+	// replies はフィードに埋め込まれた「直近N件」の窓なので、+N のNには
+	// スレの総レス数（サーバー由来の repliesCount）を使う。窓の件数で数えると
+	// 21件以上のスレが全部「+15」で頭打ちになる。
+	const extraCount = Math.max(replies.length, parentPost.repliesCount) - maxAvatars;
 
 	const activeAvatarInfo = getAvatarInfo(reply?.displayName);
 

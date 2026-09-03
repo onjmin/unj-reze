@@ -241,10 +241,15 @@ const staticApi = {
 			return { success: true };
 		},
 		replies: {
-			list: async (postId: string, userId?: string) => {
+			list: async (
+				postId: string,
+				userId?: string,
+				options?: { limit?: number; before?: number },
+			) => {
 				const replies = await mockDbInstance.getReplies(
 					decodeIdOrThrow(postId),
 					userId,
+					{ limit: options?.limit, beforeNum: options?.before },
 				);
 				return replies.map(encodePost);
 			},
@@ -744,8 +749,21 @@ const liveApi = {
 			return { success: result.success };
 		},
 		replies: {
-			list: (postId: string, userId?: string) => {
-				const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+			/**
+			 * 返信を**新しい側から limit 件**取る（返りは古い→新しいの昇順）。
+			 * スレ全件は取れない。`before` に画面上いちばん古いレス番号(num)を渡すと
+			 * その手前がもう1ページ返る＝上スクロールでの追加読み込み。
+			 */
+			list: (
+				postId: string,
+				userId?: string,
+				options?: { limit?: number; before?: number },
+			) => {
+				const params = new URLSearchParams();
+				if (userId) params.set("userId", userId);
+				if (options?.limit) params.set("limit", String(options.limit));
+				if (options?.before != null) params.set("before", String(options.before));
+				const qs = params.toString() ? `?${params}` : "";
 				return fetcher<Post[]>(`/posts/${postId}/replies${qs}`);
 			},
 			create: (

@@ -8,8 +8,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getUserIdLabel } from "@/lib/avatar";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import {
+	useOlderReplies,
+	useScrollToNewestReply,
+} from "@/lib/hooks/useOlderReplies";
 import { getDistinctTitle } from "@/lib/post-title";
-import { getDisplayContent } from "@/lib/mml";
+import { getDisplayContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
@@ -43,7 +47,7 @@ interface BbsThreadViewProps {
 	openCollab: (post: Post) => void;
 }
 
-function parseContent(text: string, replyMap: Map<string, number>) {
+function parseContent(text: string, onJumpToRes: (num: number) => void) {
 	const displayText = getDisplayContent(text);
 	const lines = displayText.split("\n");
 	return lines.map((line, li) => {
@@ -60,9 +64,7 @@ function parseContent(text: string, replyMap: Map<string, number>) {
 								className="text-green-400 hover:underline"
 								onClick={(e) => {
 									e.preventDefault();
-									document
-										.getElementById(`res-${n}`)
-										?.scrollIntoView({ behavior: "smooth", block: "center" });
+									onJumpToRes(n);
 								}}
 							>
 								{part}
@@ -107,8 +109,11 @@ function parseContent(text: string, replyMap: Map<string, number>) {
  * 実データの content 自体は書き換えず、表示用に合成するだけ。
  */
 function withSyntheticQuote(p: Post, indexMap: Map<string, number>): string {
-	if (!p.parentPostId) return p.content;
-	const parentNum = indexMap.get(p.parentPostId);
+	// 親のレス番号はサーバー由来の parentNum を優先する。indexMap は読み込み済みの
+	// 窓しか持たないので、それだけに頼ると「親が窓の外にいる返信の安価が消える」
+	// （parentPostId 側は窓外の親を解決できずOP扱いにフォールバックしてしまう）。
+	const parentNum =
+		p.parentNum ?? (p.parentPostId ? indexMap.get(p.parentPostId) : undefined);
 	if (!parentNum || parentNum === 1) return p.content;
 	const quote = `>>${parentNum}`;
 	if (p.content.split("\n")[0].trim() === quote) return p.content;
@@ -195,10 +200,67 @@ export default function BbsThreadView({
 			.catch(() => {});
 	}, []);
 
-	// Build ordered list: OP as #1, then replies in order
+	// レスはサーバーから直近N件しか来ない。上へ遡ったぶんだけ読み足す。
+	const { hasOlder, loadingOlder, loadOlder, loadOlderUntil } = useOlderReplies(
+		post,
+		setPost,
+		userSlug,
+	);
+
+	/**
+	 * `>>N` 安価のジャンプ。飛び先がまだ窓の外なら、そこまで遡ってから飛ぶ。
+	 * 遡らずに `getElementById` するだけだと、古いレスへの安価が無反応になる。
+	 */
+	const handleJumpToRes = useCallback(
+		async (num: number) => {
+			const jump = (el: HTMLElement) => {
+				const before = window.scrollY;
+				el.scrollIntoView({ behavior: "smooth", block: "center" });
+				// smooth スクロールを実装していない環境（組み込みWebView等。実際に
+				// 検証用ブラウザで無反応だった）では安価ジャンプが黙って死ぬので、
+				// 動かなければ即時スクロールで補う。
+				setTimeout(() => {
+					if (window.scrollY === before) el.scrollIntoView({ block: "center" });
+				}, 250);
+			};
+			const loaded = document.getElementById(`res-${num}`);
+			if (loaded) {
+				jump(loaded);
+				return;
+			}
+			if (!(await loadOlderUntil(num))) {
+				showToast("info", "そのレスはまだ読み込まれていません");
+				return;
+			}
+			// 要素が現れるまで待つ。要素が見えた時点でその commit は終わっており、
+			// スクロール位置を戻す useLayoutEffect（useOlderReplies）も既に走っている
+			// ——先に飛ぶと、その補正に上書きされて目的のレスから弾き飛ばされる。
+			// 待ちに requestAnimationFrame は使わない。タブが背面のときに発火せず、
+			// 安価ジャンプが「押しても何も起きない」状態で固まる。
+			for (let tick = 0; tick < 20; tick++) {
+				const el = document.getElementById(`res-${num}`);
+				if (el) {
+					jump(el);
+					return;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+			showToast("info", "そのレスは見つかりませんでした");
+		},
+		[loadOlderUntil],
+	);
+	const { anchorRef: newestReplyRef } = useScrollToNewestReply(
+		post.id,
+		post.replies.length,
+	);
+
+	// Build ordered list: OP as #1, then replies in order.
+	// レス番号はサーバー採番の Post.num を使う。一覧は直近N件の窓なので、
+	// 配列の添字は実際のレス番と一致しない（num の無い旧データだけ添字で代用）。
 	const allPosts: Post[] = [post, ...post.replies];
+	const numberOf = (p: Post, i: number) => p.num ?? i + 1;
 	const indexMap = new Map<string, number>(
-		allPosts.map((p, i) => [p.id, i + 1]),
+		allPosts.map((p, i) => [p.id, numberOf(p, i)]),
 	);
 
 	const handleAddReply = async () => {
@@ -213,8 +275,11 @@ export default function BbsThreadView({
 		if (submitting) return;
 		setSubmitting(true);
 		// >>レス番号 は返信ボタン押下時に content-text 側へ既に挿入済みなのでここでは足さない
+		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
 		const parts: string[] = [];
-		if (replyText.trim()) parts.push(replyText.trim());
+		const bodyText = (replyMml ? stripMmlLine(replyText) : replyText).trim();
+		if (bodyText) parts.push(bodyText);
 		if (replyMml) parts.push(`#mml ${replyMml}`);
 		const content = parts.join("\n");
 
@@ -237,6 +302,10 @@ export default function BbsThreadView({
 			replies: [],
 			threadId: post.id,
 			parentPostId: post.id,
+			// 仮のレス番号。サーバーの採番で上書きされる（PostDetail と同じ）。
+			num: (post.replies[post.replies.length - 1]?.num ?? 1) + 1,
+			// 掲示板モードの返信先は常にOP。安価は本文の >>N で表現する。
+			parentNum: 1,
 			hasImage: !!replyImage,
 			imageSrc: replyImage ?? undefined,
 			dotW: replyDotSize?.w,
@@ -470,7 +539,10 @@ export default function BbsThreadView({
 			{/* Thread stats bar */}
 			<div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800/60 text-[10px] text-gray-500 shrink-0">
 				<span>
-					全 <span className="text-gray-300 font-bold">{allPosts.length}</span>{" "}
+					全{" "}
+					<span className="text-gray-300 font-bold">
+						{post.repliesCount + 1}
+					</span>{" "}
 					レス
 				</span>
 				<span>👁 {viewCount}</span>
@@ -483,8 +555,19 @@ export default function BbsThreadView({
 
 			{/* Replies */}
 			<div className="divide-y divide-gray-800/40">
+				{/* 上スクロールでも自動で読み足すが、スクロールが起きない画面用にボタンも出す */}
+				{hasOlder && (
+					<button
+						type="button"
+						onClick={loadOlder}
+						disabled={loadingOlder}
+						className="w-full py-2 text-[11px] text-blue-400 hover:bg-gray-100/5 transition-colors disabled:text-gray-600"
+					>
+						{loadingOlder ? "読み込み中..." : "過去のレスを読む"}
+					</button>
+				)}
 				{allPosts.map((p, idx) => {
-					const num = idx + 1;
+					const num = numberOf(p, idx);
 					return (
 						<div key={p.id} id={`res-${num}`} className="px-3 py-3">
 							{/* Header line */}
@@ -541,7 +624,10 @@ export default function BbsThreadView({
 								</div>
 							)}
 							<div className="pl-6 text-[15px] text-gray-200 leading-relaxed whitespace-pre-wrap break-words">
-								{parseContent(withSyntheticQuote(p, indexMap), indexMap)}
+								{parseContent(
+									withSyntheticQuote(p, indexMap),
+									handleJumpToRes,
+								)}
 							</div>
 
 							{/* Embeds (MML / Chord / URL埋め込み / 画像 / MV / ゲーム) */}
@@ -574,6 +660,8 @@ export default function BbsThreadView({
 						</div>
 					);
 				})}
+				{/* 開いた直後にここへ着地させる＝最新レスが見えている状態 */}
+				<div ref={newestReplyRef} />
 			</div>
 
 			{/* Reply composer */}

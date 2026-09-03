@@ -188,12 +188,42 @@ export const MML_MARKERS = ["#mml", "#MML作曲"];
 // 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
 export const EMBED_TEXT_MARKERS = [...MML_MARKERS, "#コード進行"];
 
+/**
+ * 行頭のMMLマーカーを返す（無ければnull）。**長いマーカーを優先**して照合する。
+ *
+ * `#MML作曲` は小文字化すると `#mml作曲` になり `#mml` にも前方一致するため、
+ * 素直に `MML_MARKERS.find()` すると先に並んでいる `#mml`（4文字）が当たり、
+ * 本文が `作曲 ...` で始まる壊れたMMLとしてR2へ上がってしまう。
+ */
+export function mmlMarkerOfLine(line: string): string | null {
+	const trimmed = line.trim().toLowerCase();
+	let found: string | null = null;
+	for (const m of MML_MARKERS) {
+		if (!trimmed.startsWith(m.toLowerCase())) continue;
+		if (!found || m.length > found.length) found = m;
+	}
+	return found;
+}
+
 /** contentの中から「行頭がMMLマーカーの行」を探し、その行番号を返す(なければ-1)。 */
 function findMmlLineIndex(lines: string[]): number {
-	return lines.findIndex((line) => {
-		const trimmed = line.trim().toLowerCase();
-		return MML_MARKERS.some((m) => trimmed.startsWith(m.toLowerCase()));
+	return lines.findIndex((line) => mmlMarkerOfLine(line) !== null);
+}
+
+/**
+ * マーカー行の行番号を**すべて**返す。
+ *
+ * 1投稿に載せられるMMLは1本（`content_data_url` は1列）だが、content には
+ * マーカー行が2行以上現れうる——本文に `#mml ...` を書いた状態でエディタから曲を
+ * 添付した、`#mml` 行ごとコピペした、など。1行目しか見ないと2行目以降が生MMLの
+ * まま content_text に残り、外部化した意味が消える（docs/NEON_EGRESS.md）。
+ */
+function findAllMmlLineIndexes(lines: string[]): number[] {
+	const found: number[] = [];
+	lines.forEach((line, i) => {
+		if (mmlMarkerOfLine(line) !== null) found.push(i);
 	});
+	return found;
 }
 
 /**
@@ -207,54 +237,63 @@ export function findMmlMarker(content: string): string | null {
 	const lines = content.split("\n");
 	const idx = findMmlLineIndex(lines);
 	if (idx === -1) return null;
-	const line = lines[idx].trim();
-	return (
-		MML_MARKERS.find((m) => line.toLowerCase().startsWith(m.toLowerCase())) ??
-		null
-	);
+	return mmlMarkerOfLine(lines[idx]);
 }
 
 // MML行は他の行と混在しうる（1行下に自由コメントが入る等）ため、
 // マーカーが現れた行だけを対象に抽出・除去する。マーカー以降を全部飲み込まない。
+/**
+ * content に**直に**書かれているMML本文を返す。無ければ null。
+ *
+ * マーカーだけの行（外部化済み投稿の `#mml`）は「インラインMMLは無い」＝null。
+ * ここで空文字を返していたころは `extractMmlFromContent(c) !== null` の判定が
+ * どこでも true になり、本文だけの編集で content_type が Dtm から Text へ落ちて
+ * MMLごと失われていた（lib/db/pg.ts editPost の hasInlineMml）。
+ */
 export function extractMmlFromContent(content: string): string | null {
 	if (!content || typeof content !== "string") return null;
 	const lines = content.split("\n");
 	const idx = findMmlLineIndex(lines);
 	if (idx === -1) return null;
 	const line = lines[idx].trim();
-	const marker = MML_MARKERS.find((m) =>
-		line.toLowerCase().startsWith(m.toLowerCase()),
-	)!;
-	return line.slice(marker.length).trim();
+	const marker = mmlMarkerOfLine(line)!;
+	return line.slice(marker.length).trim() || null;
 }
 
 /**
  * MML本文をR2へ逃がしたあとの content を作る。
  *
- * マーカー行は「本文つき」から「マーカーだけ」に置き換える。行そのものを消さないのは、
- * getDisplayContent / EMBED_TEXT_MARKERS が「この行を埋め込みに差し替える」目印として
- * 使っているため。本文は posts.mml_url から取りにいく。
+ * 1行目のマーカー行は「本文つき」から「マーカーだけ」に置き換える。行そのものを
+ * 消さないのは、getDisplayContent / EMBED_TEXT_MARKERS が「この行を埋め込みに
+ * 差し替える」目印として使っているため。本文は posts.mml_url から取りにいく。
+ *
+ * 2行目以降のマーカー行は**行ごと落とす**。1投稿に載せられるMMLは1本だけなので
+ * 残しても鳴らないうえ、その行の生MML本文（11トラックで45,000文字）がそのまま
+ * content_text に居座り、フィード取得のたびにNeonから流れる。
  */
 export function replaceMmlWithMarker(content: string): string {
 	if (!content || typeof content !== "string") return content || "";
 	const lines = content.split("\n");
-	const idx = findMmlLineIndex(lines);
-	if (idx === -1) return content;
-	const line = lines[idx].trim();
-	const marker = MML_MARKERS.find((m) =>
-		line.toLowerCase().startsWith(m.toLowerCase()),
-	)!;
-	lines[idx] = marker;
+	const indexes = findAllMmlLineIndexes(lines);
+	if (indexes.length === 0) return content;
+	const [first, ...extras] = indexes;
+	lines[first] = mmlMarkerOfLine(lines[first])!;
+	// 後ろから消して添字をずらさない
+	for (const idx of extras.reverse()) lines.splice(idx, 1);
 	return lines.join("\n");
 }
 
-/** MMLマーカー行だけを取り除いたcontentを返す。前後の自由コメント行は維持する。 */
+/**
+ * MMLマーカー行を取り除いたcontentを返す。前後の自由コメント行は維持する。
+ * マーカー行が複数ある content（本文に手書きした `#mml` 行が残っている等）でも
+ * 取りこぼさないよう**すべて**消す。1行しか消さないと表示に生MMLが露出する。
+ */
 export function stripMmlLine(content: string): string {
 	if (!content || typeof content !== "string") return content || "";
 	const lines = content.split("\n");
-	const idx = findMmlLineIndex(lines);
-	if (idx === -1) return content;
-	lines.splice(idx, 1);
+	const indexes = findAllMmlLineIndexes(lines);
+	if (indexes.length === 0) return content;
+	for (const idx of indexes.reverse()) lines.splice(idx, 1);
 	return lines.join("\n");
 }
 

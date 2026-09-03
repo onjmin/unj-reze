@@ -779,8 +779,11 @@ export default function App() {
 		const currentParent =
 			postsRef.current.find((p) => p.id === threadId) || targetPost;
 
+		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
 		const parts: string[] = [];
-		if (inputText.trim()) parts.push(inputText.trim());
+		const bodyText = (attachedMml ? stripMmlLine(inputText) : inputText).trim();
+		if (bodyText) parts.push(bodyText);
 		if (attachedMml) parts.push(`#mml ${attachedMml}`);
 		const content = parts.join("\n");
 
@@ -1019,8 +1022,11 @@ export default function App() {
 
 		// #MML作曲行は1行目、自由コメントはその下の行として保存する
 		// （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
+		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
 		const parts: string[] = [];
-		if (inputText.trim()) parts.push(inputText.trim());
+		const bodyText = (attachedMml ? stripMmlLine(inputText) : inputText).trim();
+		if (bodyText) parts.push(bodyText);
 		if (attachedMml) parts.push(`#mml ${attachedMml}`);
 		const content = parts.join("\n");
 

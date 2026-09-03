@@ -134,6 +134,13 @@ export interface Post {
 	isEdited?: boolean;
 	threadId: string;
 	parentPostId?: string;
+	/** 返信先のレス番号（OP宛なら1）。`>>N` 表示用。詳細は DbPost.parentNum のコメント。 */
+	parentNum?: number;
+	/**
+	 * スレッド内のレス番号（OP=1）。`>>N` の採番と「古いレスをもっと読む」の
+	 * カーソルに使う。詳細は DbPost.num のコメント。
+	 */
+	num?: number;
 	replies: Post[];
 }
 

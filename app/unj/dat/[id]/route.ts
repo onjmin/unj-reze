@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { formatDatLine, titleOf } from "@/lib/bbs/format";
 import { utf8ToSjisBytes } from "@/lib/bbs/sjis";
 import { db } from "@/lib/db";
+import { RES_LIMIT } from "@/lib/thread-limits";
 // 専ブラ対応: GET /unj/dat/スレ番.dat
 // 板ID("unj" = board_id:1 うんでも実況J。C:\_own\git\_users\onjmin\unj\src\common\request\board.ts 参照)配下に配置。
 // 仕様: https://scrapbox.io/2chtypebbs/dat
@@ -34,7 +35,10 @@ export async function GET(
 	if (!op) {
 		return new NextResponse("Not Found", { status: 404 });
 	}
-	const replies = await db.getReplies(op.id);
+	// .dat は「>>1から全部を1本のテキストで返す」プロトコルで、専ブラは Range の
+	// バイトオフセットで差分を取る。直近N件だけを返すとオフセットがずれて既読が
+	// 壊れるので、ここだけは明示的にスレ全件（レス数上限＝RES_LIMIT）を引く。
+	const replies = await db.getReplies(op.id, undefined, { limit: RES_LIMIT });
 
 	// 最終更新 = 最新レスの投稿日時(レス無しならスレ立て日時)。
 	const lastMs = replies.reduce(

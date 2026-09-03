@@ -183,7 +183,31 @@ export interface GetPostsOptions {
 	hasImage?: boolean;
 	hasGame?: boolean;
 	hasMv?: boolean;
+	/**
+	 * 各スレッドに直近の返信を埋めるか（既定 true）。
+	 * 返信本文を一切使わない一覧——専ブラの subject.txt や sitemap——は false にする。
+	 * 300スレ×20返信の本文を読んで捨てるのは、そのまま転送量の無駄
+	 * （docs/NEON_EGRESS.md）。
+	 */
+	withReplies?: boolean;
 }
+
+export interface GetRepliesOptions {
+	/** 返す最大件数。既定 REPLIES_PAGE_SIZE、上限 REPLIES_PAGE_MAX。 */
+	limit?: number;
+	/** このレス番号より古い側を返すキーセットカーソル。省略時は最新側から。 */
+	beforeNum?: number;
+}
+
+/** 返信一覧の既定ページサイズ（フィード埋め込みの件数とも揃える） */
+export const REPLIES_PAGE_SIZE = 20;
+/**
+ * クライアント（GET /api/posts/[id]/replies）が要求できる上限。
+ * ストア側の上限はスレのレス数上限 RES_LIMIT で、こちらとは別物
+ * ——専ブラ向け .dat だけはプロトコル上スレ全文が必要なので
+ * `limit: RES_LIMIT` を明示して全件引く（app/unj/dat/[id]/route.ts）。
+ */
+export const REPLIES_PAGE_MAX = 50;
 
 export interface DataStore {
 	/** `beforeId` はキーセットページング用のカーソル（そのIDより古いスレッドを返す）。 */
@@ -205,7 +229,18 @@ export interface DataStore {
 	dislikePost(id: number, userId: string): Promise<DbPost | null>;
 	heartPost(id: number, userId: string, count?: number): Promise<DbPost | null>;
 	repostPost(id: number, userId?: string): Promise<DbPost | null>;
-	getReplies(postId: number, userId?: string): Promise<DbPost[]>;
+	/**
+	 * スレッドの返信を**新しい順に limit 件だけ**返す（返り値自体は num の昇順）。
+	 * 全件返してはいけない: 1000レスのスレを個別ページや実況ポーリングで丸ごと
+	 * 引くと、それだけで Neon の転送量枠を食い潰す（docs/NEON_EGRESS.md）。
+	 * `beforeNum` を渡すと「その番号より古い側」の直近 limit 件を返す＝
+	 * 上スクロールでの追加読み込み用カーソル。
+	 */
+	getReplies(
+		postId: number,
+		userId?: string,
+		options?: GetRepliesOptions,
+	): Promise<DbPost[]>;
 	addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
 	editPost(
 		id: number,

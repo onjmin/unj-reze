@@ -1,10 +1,12 @@
 import { INITIAL_POSTS } from "./data";
-import type { GetPostsOptions } from "./db/interface";
+import type { GetPostsOptions, GetRepliesOptions } from "./db/interface";
+import { REPLIES_PAGE_SIZE } from "./db/interface";
 import {
 	cleanContentForTrends,
 	extractMmlFromContent,
 	isValidTrendKeyword,
 } from "./mml";
+import { RES_LIMIT } from "./thread-limits";
 import { formatRelativeTime, nowISO } from "./time";
 import { AnonymousUser, FollowUser, OriginType } from "./types";
 import {
@@ -191,11 +193,19 @@ class MockDB {
 			if (post.hasMml === undefined)
 				post.hasMml = extractMmlFromContent(post.content) !== null;
 			this.heartCounts.set(post.id, post.heartsTotal);
-			for (const reply of post.replies) {
+			post.num = 1;
+			post.replies.forEach((reply, i) => {
 				if (!reply.slug) reply.slug = deriveSlug(reply.displayName);
 				if (!reply.createdAt) reply.createdAt = parseRelativeTime(reply.time);
 				if (reply.hasMml === undefined)
 					reply.hasMml = extractMmlFromContent(reply.content) !== null;
+				// OPが>>1なので返信は>>2から
+				reply.num = i + 2;
+			});
+			// num が全部揃ってから返信先のレス番号を引く（pg の res.parent_num 相当）
+			for (const reply of post.replies) {
+				const parent = post.replies.find((r) => r.id === reply.parentPostId);
+				reply.parentNum = parent?.num ?? 1;
 			}
 		}
 		this.notifications = NOTIFICATION_INFOS.map((n, i) => ({
@@ -500,9 +510,15 @@ class MockDB {
 				this.applyUserState(
 					{
 						...p,
-						replies: [...p.replies]
-							.filter((r) => !hidden.has(r.slug ?? ""))
-							.map((r) => this.applyUserState(r, userId)),
+						// pg.ts の attachRepliesToThreads と同じく直近 REPLIES_PAGE_SIZE 件だけ。
+						// mock だけ全件返すと、長いスレの表示崩れが本番でしか出なくなる。
+						replies:
+							options.withReplies === false
+								? []
+								: [...p.replies]
+										.filter((r) => !hidden.has(r.slug ?? ""))
+										.slice(-REPLIES_PAGE_SIZE)
+										.map((r) => this.applyUserState(r, userId)),
 					},
 					userId,
 				),
@@ -585,7 +601,12 @@ class MockDB {
 		if (!post) return undefined;
 		if (!this.canViewAuthor(post.slug ?? "", post.displayName, userId))
 			return undefined;
-		return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
+		// 個別ページも直近 REPLIES_PAGE_SIZE 件だけ（pg.ts の getPost と同じ）。
+		// それより古いレスは /api/posts/[id]/replies?before=N で追加取得する。
+		return this.applyUserState(
+			{ ...post, replies: post.replies.slice(-REPLIES_PAGE_SIZE) },
+			userId,
+		);
 	}
 
 	/** 専ブラ向け。dat/subject.txt の datKey（Unixエポック秒）からOPを引く。 */
@@ -596,7 +617,13 @@ class MockDB {
 		if (!post) return undefined;
 		if (!this.canViewAuthor(post.slug ?? "", post.displayName, userId))
 			return undefined;
-		return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
+		// getPost と同じく直近 REPLIES_PAGE_SIZE 件だけ（pg.ts の getPostByDatKey も
+		// attachRepliesToThreads 経由で同じ窓）。専ブラ向け .dat 本文は
+		// app/unj/dat/[id]/route.ts が getReplies で別途スレ全件を引く。
+		return this.applyUserState(
+			{ ...post, replies: post.replies.slice(-REPLIES_PAGE_SIZE) },
+			userId,
+		);
 	}
 
 	/** post.datKey があればそれを、無ければ createdAt から都度算出する（秒精度）。 */
@@ -678,6 +705,8 @@ class MockDB {
 			originType: data.originType,
 			isFalseDeclaration: false,
 			threadId: this.genId(),
+			// OPは常に>>1（pg.ts の threadRowToPost と同じ）
+			num: 1,
 			replies: [],
 		};
 		post.threadId = post.id;
@@ -834,6 +863,9 @@ class MockDB {
 			walkPreset: data.walkPreset,
 			originType: data.originType,
 		};
+		reply.num = (post.replies?.length ?? 0) + 2;
+		reply.parentNum =
+			post.replies?.find((r) => r.id === data.parentPostId)?.num ?? 1;
 		this.posts.push(reply);
 		post.repliesCount += 1;
 		if (post.replies) post.replies.push(reply);
@@ -870,11 +902,32 @@ class MockDB {
 		return reply;
 	}
 
-	getReplies(postId: number, userId?: string): Post[] {
+	/**
+	 * pg版と同じく「新しい順に limit 件」の窓で返す（返りは num 昇順）。
+	 * mock はメモリなので全件返しても動くが、そこで挙動が食い違うと
+	 * 本番Neonでだけ壊れるパターンを踏む（AGENTS.md）。窓の切り方を揃えておく。
+	 */
+	getReplies(
+		postId: number,
+		userId?: string,
+		options?: GetRepliesOptions,
+	): Post[] {
 		const post = this.posts.find((p) => p.id === postId);
 		if (!post) return [];
 		const hidden = this.getHiddenSlugs(userId);
-		return (post.replies ?? []).filter((r) => !hidden.has(r.slug ?? ""));
+		const limit = Math.max(
+			1,
+			Math.min(options?.limit ?? REPLIES_PAGE_SIZE, RES_LIMIT),
+		);
+		const beforeNum = options?.beforeNum;
+		const visible = (post.replies ?? [])
+			.map((r, i) => (r.num == null ? { ...r, num: i + 2 } : r))
+			.filter((r) => !hidden.has(r.slug ?? ""));
+		const windowed =
+			beforeNum != null
+				? visible.filter((r) => (r.num ?? 0) < beforeNum)
+				: visible;
+		return windowed.slice(-limit);
 	}
 
 	/**

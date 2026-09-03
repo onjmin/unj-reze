@@ -8,6 +8,7 @@ import type {
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
+	GetRepliesOptions,
 	MessageParams,
 	MmlRef,
 	RecordGamePlayParams,
@@ -58,8 +59,8 @@ export const mockStore: DataStore = {
 		return mockDb.repostPost(id, userId);
 	},
 
-	async getReplies(postId: number, userId?: string) {
-		return mockDb.getReplies(postId, userId);
+	async getReplies(postId: number, userId?: string, options?: GetRepliesOptions) {
+		return mockDb.getReplies(postId, userId, options);
 	},
 
 	async addReply(postId: number, data: ReplyParams) {

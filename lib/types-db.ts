@@ -108,6 +108,18 @@ export interface DbPost {
 	isEdited?: boolean;
 	threadId: number;
 	parentPostId?: number;
+	/**
+	 * 返信先の**レス番号**（`res.parent_num`。OP宛なら1）。`parentPostId` と違い、
+	 * 親が読み込み済みの窓の外にいても失われないので、掲示板モードの `>>N` 安価は
+	 * 必ずこちらを使う（`parentPostId` は窓外の親を解決できずOPへフォールバックする）。
+	 */
+	parentNum?: number;
+	/**
+	 * スレッド内のレス番号（OP=1、以降 res.num）。返信一覧は「直近N件の窓」でしか
+	 * 読まない（docs/NEON_EGRESS.md）ので、配列の添字から `>>N` を採番することは
+	 * できない。窓より古いレスを追加で読むときのカーソルもこの番号を使う。
+	 */
+	num?: number;
 	replies: DbPost[];
 }
 

@@ -143,7 +143,8 @@ function ProfilePostMenu({
 	const handleMenuCopy = useCallback(
 		(e: React.MouseEvent) => {
 			e.stopPropagation();
-			navigator.clipboard.writeText(post.content);
+			// マーカー行を貼り付けさせない（PostContainer の handleMenuCopy と同じ理由）
+			navigator.clipboard.writeText(getDisplayContent(post.content));
 			setMenuOpen(false);
 		},
 		[post.content],
