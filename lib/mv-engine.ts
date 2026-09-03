@@ -172,7 +172,7 @@ export async function parseMvSong(mml: string): Promise<MvSong> {
 				track: p.trackIndex,
 				startStep: p.startStep,
 				durationSteps: Math.max(1, p.durationSteps),
-				pitch: p.pitch,
+				pitch: p.pitchUnits / dtm.UNITS_PER_SEMITONE,
 				velocity: p.velocity ?? 100,
 			}))
 			.sort((a, b) => a.startStep - b.startStep);
