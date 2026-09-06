@@ -35,6 +35,7 @@ const DotDrawingEditor = dynamic(() => import("./DotDrawingEditor"), {
 const MmlEditor = dynamic(() => import("./MmlEditor"), { ssr: false });
 const GameMaker = dynamic(() => import("./GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("./MvMaker"), { ssr: false });
+const MangaEditor = dynamic(() => import("./MangaEditor"), { ssr: false });
 
 type ReplyGameDraft = {
 	manifest: GameManifestDraft;
@@ -165,7 +166,7 @@ export default function BbsThreadView({
 	/** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
 	 *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
 	const [activeScreen, setActiveScreen] = useState<
-		"drawing" | "dotdrawing" | "mml" | "gamemaker" | "mvmaker" | null
+		"drawing" | "dotdrawing" | "manga" | "mml" | "gamemaker" | "mvmaker" | null
 	>(null);
 	const [submitting, setSubmitting] = useState(false);
 	const [userId, setUserId] = useState("名無しvFZ");
@@ -440,6 +441,16 @@ export default function BbsThreadView({
 		);
 	};
 
+	const handleSaveManga = (imageData: string) => {
+		setReplyImage(imageData);
+		setReplyImageIsDrawn(true);
+		setReplyAnim(null);
+		setActiveScreen(null);
+		setReplyText((prev) =>
+			prev.trim() ? prev : "#漫画 自作漫画を描きました！",
+		);
+	};
+
 	const handleSaveMml = (mml: string) => {
 		setReplyMml(mml);
 		setActiveScreen(null);
@@ -703,6 +714,7 @@ export default function BbsThreadView({
 					onSubmit={handleAddReply}
 					onOpenDrawing={() => setActiveScreen("drawing")}
 					onOpenDotDrawing={() => setActiveScreen("dotdrawing")}
+					onOpenManga={() => setActiveScreen("manga")}
 					onOpenMml={() => setActiveScreen("mml")}
 					onOpenGameMaker={() => setActiveScreen("gamemaker")}
 					onOpenMvMaker={() => setActiveScreen("mvmaker")}
@@ -721,6 +733,13 @@ export default function BbsThreadView({
 					onClose={() => setActiveScreen(null)}
 					onSave={handleSaveDotDrawing}
 					collabImageUrl={replyImage ?? undefined}
+				/>
+			)}
+			{activeScreen === "manga" && (
+				<MangaEditor
+					onClose={() => setActiveScreen(null)}
+					onSave={handleSaveManga}
+					initialImageUrl={replyImage ?? undefined}
 				/>
 			)}
 			{activeScreen === "mml" && (

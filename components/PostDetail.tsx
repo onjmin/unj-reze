@@ -67,6 +67,7 @@ const DotDrawingEditor = dynamic(() => import("./DotDrawingEditor"), {
 const MmlEditor = dynamic(() => import("./MmlEditor"), { ssr: false });
 const GameMaker = dynamic(() => import("./GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("./MvMaker"), { ssr: false });
+const MangaEditor = dynamic(() => import("./MangaEditor"), { ssr: false });
 const PostComposer = dynamic(() => import("./PostComposer"), { ssr: false });
 const EditPostModal = dynamic(() => import("./EditPostModal"), { ssr: false });
 const DeletePostModal = dynamic(() => import("./DeletePostModal"), {
@@ -766,6 +767,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setActiveScreen(null);
 		setCollabImageUrl(undefined);
 		setReplyText("#ドット絵 自作ドット絵完成！");
+	};
+
+	const handleSaveManga = (canvasData: string) => {
+		setReplyImage(canvasData);
+		setReplyImageIsDrawn(true);
+		setReplyAnim(null);
+		setActiveScreen(null);
+		setCollabImageUrl(undefined);
+		setReplyText("#漫画 自作漫画を描きました！");
 	};
 
 	const handleSaveMml = (mml: string) => {
@@ -1591,6 +1601,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onOpenMml={() => openScreen("mml")}
 					onOpenGameMaker={() => openScreen("gamemaker")}
 					onOpenMvMaker={() => openScreen("mvmaker")}
+					onOpenManga={() => {
+						setCollabImageUrl(undefined);
+						openScreen("manga");
+					}}
 					replyToDisplayName={replyTo ? replyTo.displayName : post.displayName}
 				/>
 			)}
@@ -1616,6 +1630,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					collabImageUrl={collabImageUrl}
 					initialGridW={collabDotSize?.w}
 					initialGridH={collabDotSize?.h}
+				/>
+			)}
+			{activeScreen === "manga" && (
+				<MangaEditor
+					onClose={() => {
+						setActiveScreen(null);
+						setCollabImageUrl(undefined);
+					}}
+					onSave={handleSaveManga}
+					initialImageUrl={collabImageUrl}
 				/>
 			)}
 			{activeScreen === "gamemaker" && (

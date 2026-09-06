@@ -78,6 +78,7 @@ const MmlEditor = dynamic(() => import("@/components/MmlEditor"), {
 });
 const MvMaker = dynamic(() => import("@/components/MvMaker"), { ssr: false });
 const GameMaker = dynamic(() => import("@/components/GameMaker"), { ssr: false });
+const MangaEditor = dynamic(() => import("@/components/MangaEditor"), { ssr: false });
 
 export default function App() {
 	const router = useRouter();
@@ -244,7 +245,13 @@ export default function App() {
 	const postGameLastIdRef = useRef(0);
 	const [discardModalConfig, setDiscardModalConfig] = useState<{
 		discardType: "image" | "mml" | "game" | "mv";
-		targetScreen: "drawing" | "dotdrawing" | "mml" | "gamemaker" | "mvmaker";
+		targetScreen:
+			| "drawing"
+			| "dotdrawing"
+			| "manga"
+			| "mml"
+			| "gamemaker"
+			| "mvmaker";
 	} | null>(null);
 	const [editingPost, setEditingPost] = useState<Post | null>(null);
 	const [originalPostContent, setOriginalPostContent] = useState<string>("");
@@ -1341,6 +1348,24 @@ export default function App() {
 		);
 	};
 
+	const handleSaveManga = async (imageData: string) => {
+		if (editingPost) {
+			setEditingPost((prev) =>
+				prev ? { ...prev, imageSrc: imageData } : null,
+			);
+			closeScreen();
+			setCollabImageUrl(undefined);
+			setShowGlobalEditModal(true);
+			return;
+		}
+		setAttachedImage(imageData);
+		setAttachedImageIsDrawn(true);
+		setAttachedAnim(null);
+		closeScreen();
+		setCollabImageUrl(undefined);
+		setInputText("#漫画 自作漫画を描きました！");
+	};
+
 	const handleSaveMml = async (mml: string) => {
 		if (editingPost) {
 			const stripped = stripMmlLine(editingPost.content);
@@ -1551,14 +1576,24 @@ export default function App() {
 	}, [handleRemixDraft, handleMvRemixDraft]);
 
 	const handleOpenEditor = (
-		screenType: "drawing" | "dotdrawing" | "mml" | "gamemaker" | "mvmaker",
+		screenType:
+			| "drawing"
+			| "dotdrawing"
+			| "manga"
+			| "mml"
+			| "gamemaker"
+			| "mvmaker",
 	) => {
 		const hasImage = !!attachedImage;
 		const hasMml = !!attachedMml;
 		const hasGame = !!gameDraft;
 		const hasMv = !!mvDraft;
 
-		if (screenType === "drawing" || screenType === "dotdrawing") {
+		if (
+			screenType === "drawing" ||
+			screenType === "dotdrawing" ||
+			screenType === "manga"
+		) {
 			if (hasMml) {
 				setDiscardModalConfig({ discardType: "mml", targetScreen: screenType });
 				return;
@@ -1678,6 +1713,16 @@ export default function App() {
 					collabImageUrl={collabImageUrl}
 					initialGridW={collabDotSize?.w}
 					initialGridH={collabDotSize?.h}
+				/>
+			)}
+			{activeScreen === "manga" && (
+				<MangaEditor
+					onClose={() => {
+						closeScreen();
+						setCollabImageUrl(undefined);
+					}}
+					onSave={handleSaveManga}
+					initialImageUrl={collabImageUrl}
 				/>
 			)}
 			{activeScreen === "gamemaker" && (
@@ -1873,6 +1918,10 @@ export default function App() {
 													onOpenMml={() => handleOpenEditor("mml")}
 													onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 													onOpenMvMaker={() => handleOpenEditor("mvmaker")}
+													onOpenManga={() => {
+														setCollabImageUrl(attachedImage || undefined);
+														handleOpenEditor("manga");
+													}}
 												/>
 											)}
 
@@ -1996,6 +2045,10 @@ export default function App() {
 							onOpenMml={() => handleOpenEditor("mml")}
 							onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 							onOpenMvMaker={() => handleOpenEditor("mvmaker")}
+							onOpenManga={() => {
+								setCollabImageUrl(attachedImage || undefined);
+								handleOpenEditor("manga");
+							}}
 							replyToDisplayName={
 								replyTargetPost ? replyTargetPost.displayName : undefined
 							}

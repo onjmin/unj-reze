@@ -45,6 +45,7 @@ interface PostComposerProps {
 	onOpenMml: () => void;
 	onOpenGameMaker: () => void;
 	onOpenMvMaker: () => void;
+	onOpenManga?: () => void;
 	replyToDisplayName?: string;
 	inline?: boolean;
 	bbsMode?: string;
@@ -95,6 +96,7 @@ export default function PostComposer({
 	onOpenMml,
 	onOpenGameMaker,
 	onOpenMvMaker,
+	onOpenManga,
 	replyToDisplayName,
 	inline,
 	bbsMode,
@@ -103,6 +105,7 @@ export default function PostComposer({
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [menuPlacement, setMenuPlacement] = useState<"top" | "bottom">("top");
 	const [showOriginModal, setShowOriginModal] = useState(false);
 	const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -314,9 +317,21 @@ export default function PostComposer({
 		</>
 	);
 
+	const toggleMenu = () => {
+		if (!menuOpen && menuRef.current) {
+			const rect = menuRef.current.getBoundingClientRect();
+			if (rect.top < 240) {
+				setMenuPlacement("bottom");
+			} else {
+				setMenuPlacement("top");
+			}
+		}
+		setMenuOpen((v) => !v);
+	};
+
 	const toolbar = (
 		<div
-			className={`flex ${md ? "space-x-2 md:space-x-3" : "space-x-2"} text-gray-500`}
+			className={`flex ${md ? "space-x-2 md:space-x-3" : "space-x-2"} text-gray-500 shrink-0`}
 		>
 			<ToolbarButton
 				onClick={() => fileInputRef.current?.click()}
@@ -328,7 +343,7 @@ export default function PostComposer({
 			</ToolbarButton>
 			<div ref={menuRef} className="relative">
 				<ToolbarButton
-					onClick={() => setMenuOpen((v) => !v)}
+					onClick={toggleMenu}
 					title="コンテンツ作成メニュー"
 					hoverColor="hover:text-white"
 				>
@@ -338,7 +353,9 @@ export default function PostComposer({
 				{menuOpen && (
 					<div
 						role="menu"
-						className="absolute left-0 bottom-full mb-1.5 z-50 w-32 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-xs"
+						className={`absolute left-0 z-50 w-32 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-xs max-h-[min(280px,calc(100vh-100px))] overflow-y-auto ${
+							menuPlacement === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5"
+						}`}
 						onClick={(e) => e.stopPropagation()}
 					>
 						<button
@@ -363,6 +380,19 @@ export default function PostComposer({
 						>
 							ドット絵
 						</button>
+						{onOpenManga && (
+							<button
+								role="menuitem"
+								type="button"
+								onClick={() => {
+									setMenuOpen(false);
+									onOpenManga();
+								}}
+								className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+							>
+								漫画作成
+							</button>
+						)}
 						<button
 							role="menuitem"
 							type="button"
@@ -409,10 +439,8 @@ export default function PostComposer({
 		</div>
 	);
 
-	const originRow = (
-		<div
-			className={`flex items-center gap-1.5 pl-12 ${md ? "md:gap-2 md:pl-16 mb-0" : "mb-1.5"}`}
-		>
+	const originSelector = (
+		<div className="flex items-center gap-1.5 shrink-0">
 			<span
 				className={`text-gray-500 font-medium ${md ? "text-[10px] md:text-xs" : "text-[10px]"}`}
 			>
@@ -421,7 +449,7 @@ export default function PostComposer({
 			<button
 				type="button"
 				onClick={() => setShowOriginModal(true)}
-				className={`font-bold rounded-full border transition-colors ${md ? "text-[10px] md:text-xs px-2 py-1 md:px-3 md:py-1.5" : "text-[10px] px-2 py-0.5"} ${
+				className={`font-bold rounded-full border transition-colors ${md ? "text-[10px] md:text-xs px-2 py-0.5 md:px-2.5 md:py-1" : "text-[10px] px-1.5 py-0.5"} ${
 					originOption
 						? originOption.badgeClass
 						: "border-gray-700 text-gray-500 hover:text-gray-300"
@@ -513,11 +541,14 @@ export default function PostComposer({
 					)}
 				</div>
 			</div>
-			{originRow}
 			<div
-				className={`flex justify-between items-center ${avatar ? (md ? "pl-12 md:pl-16" : "pl-12") : ""}`}
+				className={`flex justify-between items-center gap-2 ${avatar ? (md ? "pl-12 md:pl-16" : "pl-12") : ""}`}
 			>
-				{toolbar}
+				<div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
+					{toolbar}
+					<div className="h-3.5 w-px bg-gray-800 shrink-0" />
+					{originSelector}
+				</div>
 				{submitButton}
 			</div>
 		</>
