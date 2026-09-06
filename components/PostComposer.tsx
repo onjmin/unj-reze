@@ -3,10 +3,9 @@
 import {
 	Clapperboard,
 	Gamepad2,
-	Grid3x3,
 	Image,
 	Music,
-	Pen,
+	Plus,
 	X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -102,6 +101,8 @@ export default function PostComposer({
 }: PostComposerProps) {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
+	const [menuOpen, setMenuOpen] = useState(false);
 	const [showOriginModal, setShowOriginModal] = useState(false);
 	const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -160,6 +161,26 @@ export default function PostComposer({
 	useEffect(() => {
 		if (!inline) textareaRef.current?.focus();
 	}, [inline]);
+
+	useEffect(() => {
+		if (!menuOpen) return;
+		const onDocClick = (e: MouseEvent) => {
+			if (!menuRef.current?.contains(e.target as Node)) {
+				setMenuOpen(false);
+			}
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				setMenuOpen(false);
+			}
+		};
+		document.addEventListener("mousedown", onDocClick);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("mousedown", onDocClick);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [menuOpen]);
 
 	const md = !inline;
 
@@ -305,46 +326,79 @@ export default function PostComposer({
 				<Image size={18} className={md ? "md:hidden" : undefined} />
 				{md && <Image size={22} className="hidden md:block" />}
 			</ToolbarButton>
-			<ToolbarButton
-				onClick={onOpenDrawing}
-				title="お絵描き"
-				hoverColor="hover:text-[#a3e635]"
-			>
-				<Pen size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Pen size={22} className="hidden md:block" />}
-			</ToolbarButton>
-			<ToolbarButton
-				onClick={onOpenDotDrawing}
-				title="ドット絵ット絵専用お絵描き"
-				hoverColor="hover:text-orange-400"
-			>
-				<Grid3x3 size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Grid3x3 size={22} className="hidden md:block" />}
-			</ToolbarButton>
-			<ToolbarButton
-				onClick={onOpenMml}
-				title="MML作曲"
-				hoverColor="hover:text-pink-400"
-			>
-				<Music size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Music size={22} className="hidden md:block" />}
-			</ToolbarButton>
-			<ToolbarButton
-				onClick={onOpenMvMaker}
-				title="MV作成"
-				hoverColor="hover:text-cyan-400"
-			>
-				<Clapperboard size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Clapperboard size={22} className="hidden md:block" />}
-			</ToolbarButton>
-			<ToolbarButton
-				onClick={onOpenGameMaker}
-				title="ゲーム作成"
-				hoverColor="hover:text-yellow-400"
-			>
-				<Gamepad2 size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Gamepad2 size={22} className="hidden md:block" />}
-			</ToolbarButton>
+			<div ref={menuRef} className="relative">
+				<ToolbarButton
+					onClick={() => setMenuOpen((v) => !v)}
+					title="コンテンツ作成メニュー"
+					hoverColor="hover:text-white"
+				>
+					<Plus size={18} className={md ? "md:hidden" : undefined} />
+					{md && <Plus size={22} className="hidden md:block" />}
+				</ToolbarButton>
+				{menuOpen && (
+					<div
+						role="menu"
+						className="absolute left-0 bottom-full mb-1.5 z-50 w-32 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-xs"
+						onClick={(e) => e.stopPropagation()}
+					>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
+								onOpenDrawing();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							お絵描き
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
+								onOpenDotDrawing();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							ドット絵
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
+								onOpenMml();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							MML作曲
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
+								onOpenMvMaker();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							MV作成
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
+								onOpenGameMaker();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							ゲーム作成
+						</button>
+					</div>
+				)}
+			</div>
 			<input
 				ref={fileInputRef}
 				type="file"
