@@ -374,7 +374,12 @@ const staticApi = {
 		},
 	},
 	users: {
-		profile: async (id: string, userId?: string, tab?: string) => {
+		profile: async (
+			id: string,
+			userId?: string,
+			tab?: string,
+			before?: string,
+		) => {
 			let posts: Post[];
 			// いいね/だめね/ハートの記録は displayName をキーに持つため、
 			// スラッグではなく持ち主のdisplayNameで引く（サーバー側の /api/users/[id] と同じ扱い）。
@@ -392,12 +397,16 @@ const staticApi = {
 					encodePost,
 				);
 			} else {
-				posts = (await mockDbInstance.getUserPostsBySlug(id, userId)).map(
-					encodePost,
-				);
+				posts = (
+					await mockDbInstance.getUserPostsBySlug(id, userId, undefined, before)
+				).map(encodePost);
 			}
 			const avatarUrl = mockDbInstance.getUserAvatarUrl(id);
 			const bio = mockDbInstance.getUserBio(id);
+			const nextCursor =
+				posts.length > 0 && posts[posts.length - 1]?.createdAt
+					? posts[posts.length - 1].createdAt
+					: null;
 			return {
 				id,
 				displayName,
@@ -405,6 +414,7 @@ const staticApi = {
 				bio,
 				posts,
 				postCount: posts.length,
+				nextCursor,
 			};
 		},
 		meta: async (id: string) => ({
@@ -876,10 +886,16 @@ const liveApi = {
 		},
 	},
 	users: {
-		profile: (id: string, userId?: string, tab?: string) => {
+		profile: (
+			id: string,
+			userId?: string,
+			tab?: string,
+			before?: string,
+		) => {
 			const params = new URLSearchParams();
 			if (userId) params.set("userId", userId);
 			if (tab) params.set("tab", tab);
+			if (before) params.set("before", before);
 			const qs = params.toString() ? `?${params.toString()}` : "";
 			return fetcher<{
 				id: string;
@@ -888,6 +904,7 @@ const liveApi = {
 				bio?: string;
 				posts: Post[];
 				postCount: number;
+				nextCursor?: string | null;
 			}>(`/users/${encodeURIComponent(id)}${qs}`);
 		},
 		/** 表示名とアイコンだけ（投稿一覧を引かない軽い版）。 */

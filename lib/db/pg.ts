@@ -704,6 +704,10 @@ export const pgStore: DataStore = {
 			where.push(`t.game_id IS ${options.hasGame ? "NOT NULL" : "NULL"}`);
 		if (options.hasMv !== undefined)
 			where.push(`t.mv_id IS ${options.hasMv ? "NOT NULL" : "NULL"}`);
+		if (hidden.size > 0) {
+			params.push(Array.from(hidden));
+			where.push(`t.user_id <> ALL($${params.length})`);
+		}
 		params.push(limit);
 
 		// 2ch的な「age(上げ)」順: スレ作成時刻ではなく最終レス時刻で並べる。
@@ -1345,20 +1349,39 @@ export const pgStore: DataStore = {
 		return true;
 	},
 
-	async getUserPostsBySlug(slug: string, userId?: string, limit = 20) {
-		const uid = Number(slug);
-		if (!Number.isFinite(uid)) return [];
+	async getUserPostsBySlug(
+		slug: string,
+		userId?: string,
+		limit = 20,
+		before?: string,
+	) {
+		const uid = toUid(slug);
+		if (!uid) return [];
 		const safeLimit = Math.max(1, Math.min(limit, 50));
-		const { rows: tRows } = await q(
-			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = $1 AND t.deleted_at IS NULL ORDER BY t.id DESC LIMIT $2`,
-			[uid, safeLimit],
-		);
-		const { rows: rRows } = await q(
-			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.user_id = $1 ORDER BY r.id DESC LIMIT $2`,
-			[uid, safeLimit],
-		);
+		const beforeDate =
+			before && !Number.isNaN(Date.parse(before))
+				? new Date(before).toISOString()
+				: null;
+
+		const tQuery = beforeDate
+			? `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.created_at < $2 ORDER BY t.created_at DESC, t.id DESC LIMIT $3`
+			: `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+       WHERE t.user_id = $1 AND t.deleted_at IS NULL ORDER BY t.id DESC LIMIT $2`;
+		const tParams = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+
+		const rQuery = beforeDate
+			? `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.user_id = $1 AND r.created_at < $2 ORDER BY r.created_at DESC, r.id DESC LIMIT $3`
+			: `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.user_id = $1 ORDER BY r.id DESC LIMIT $2`;
+		const rParams = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+
+		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
+			q(tQuery, tParams),
+			q(rQuery, rParams),
+		]);
+
 		const posts = [
 			...tRows.map((r) => threadRowToPost(r)),
 			...rRows.map((r) => resRowToPost(r)),

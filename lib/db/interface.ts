@@ -292,6 +292,7 @@ export interface DataStore {
 		slug: string,
 		userId?: string,
 		limit?: number,
+		before?: string,
 	): Promise<DbPost[]>;
 	getUserDisplayName(slug: string): Promise<string | undefined>;
 	getLikedPosts(userId: string, limit?: number): Promise<DbPost[]>;

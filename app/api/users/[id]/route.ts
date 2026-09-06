@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { encodePost } from "@/lib/sqids";
-import { DbPost } from "@/lib/types-db";
 
 export async function GET(
 	request: NextRequest,
@@ -29,6 +28,7 @@ export async function GET(
 	const limit = limitParam
 		? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50)
 		: 20;
+	const before = url.searchParams.get("before") || undefined;
 
 	// いいね/だめね/ハートは「このプロフィールの持ち主が押した記録」を引く。
 	// 記録は displayName（名無しXXX）をキーに保存されているため、URLのスラッグ
@@ -43,7 +43,7 @@ export async function GET(
 				? db.getDislikedPosts(ownerId, limit)
 				: tab === "hearts"
 					? db.getHeartedPosts(ownerId, limit)
-					: db.getUserPostsBySlug(id, userId, limit),
+					: db.getUserPostsBySlug(id, userId, limit, before),
 		db.getUserAvatarUrl(id),
 		db.getUserBio(id),
 	]);
@@ -51,12 +51,19 @@ export async function GET(
 	const displayName = ownerId;
 	await attachEmbedInfo(posts);
 
+	const encodedPosts = posts.map(encodePost);
+	const nextCursor =
+		posts.length >= limit && posts[posts.length - 1]?.createdAt
+			? posts[posts.length - 1].createdAt
+			: null;
+
 	return NextResponse.json({
 		id,
 		displayName,
 		avatarUrl,
 		bio,
-		posts: posts.map(encodePost),
+		posts: encodedPosts,
 		postCount: posts.length,
+		nextCursor,
 	});
 }

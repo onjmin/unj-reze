@@ -107,8 +107,13 @@ export const mockStore: DataStore = {
 		return mockDb.deleteMessage(id, userId);
 	},
 
-	async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
-		return mockDb.getUserPostsBySlug(slug, userId, limit);
+	async getUserPostsBySlug(
+		slug: string,
+		userId?: string,
+		limit?: number,
+		before?: string,
+	) {
+		return mockDb.getUserPostsBySlug(slug, userId, limit, before);
 	},
 
 	async getLikedPosts(userId: string, limit?: number) {

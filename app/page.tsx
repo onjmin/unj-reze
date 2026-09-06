@@ -403,37 +403,44 @@ export default function App() {
 	 */
 	const loadMorePosts = useCallback(async () => {
 		if (loadingMoreRef.current || !hasMorePosts) return;
+		const currentPosts = postsRef.current;
+		if (currentPosts.length === 0) {
+			setHasMorePosts(false);
+			return;
+		}
+		// タイムラインはage（最新アクティビティ）順に並んでいるため、
+		// 現在取得されている中で最も末尾（最古）のスレッドをキーセットカーソルにする。
+		const cursor = currentPosts[currentPosts.length - 1];
+		if (!cursor?.id) {
+			setHasMorePosts(false);
+			return;
+		}
+
 		loadingMoreRef.current = true;
 		setLoadingMore(true);
 		try {
-			let cursor: Post | null = null;
-			let minId = Number.POSITIVE_INFINITY;
-			for (const p of postsRef.current) {
-				const n = decodeId(p.id) || 0;
-				if (n > 0 && n < minId) {
-					minId = n;
-					cursor = p;
-				}
-			}
-			if (!cursor) {
-				setHasMorePosts(false);
-				return;
-			}
-
 			const older = await api.posts.list(viewerId, {
 				beforeId: cursor.id,
 				limit: FEED_PAGE_SIZE,
 			});
+			if (older.length === 0) {
+				setHasMorePosts(false);
+				return;
+			}
 			setPosts((prev) => {
 				const seen = new Set(prev.map((p) => String(p.id)));
-				const merged = [
-					...prev,
-					...older.filter((p) => !seen.has(String(p.id))),
-				];
+				const newPosts = older.filter((p) => !seen.has(String(p.id)));
+				if (newPosts.length === 0) {
+					setHasMorePosts(false);
+					return prev;
+				}
+				const merged = [...prev, ...newPosts];
 				postsRef.current = merged;
 				return merged;
 			});
-			setHasMorePosts(older.length >= FEED_PAGE_SIZE);
+			if (older.length < FEED_PAGE_SIZE) {
+				setHasMorePosts(false);
+			}
 		} catch {
 			// 失敗しても次のタップで再試行できるようにするだけ
 		} finally {

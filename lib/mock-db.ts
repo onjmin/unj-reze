@@ -529,13 +529,21 @@ class MockDB {
 		return result;
 	}
 
-	getUserPostsBySlug(slug: string, userId?: string, limit?: number): Post[] {
+	getUserPostsBySlug(
+		slug: string,
+		userId?: string,
+		limit?: number,
+		before?: string,
+	): Post[] {
 		const hidden = this.getHiddenSlugs(userId);
 		if (hidden.has(slug)) return [];
-		const posts = this.posts.filter((p) => p.slug === slug);
+		let posts = this.posts.filter((p) => p.slug === slug);
 		const author = posts[0];
 		if (author && !this.canViewAuthor(slug, author.displayName, userId))
 			return [];
+		if (before) {
+			posts = posts.filter((p) => p.createdAt && p.createdAt < before);
+		}
 		const res = posts.map((p) =>
 			this.applyUserState(
 				{

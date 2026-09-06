@@ -586,6 +586,8 @@ export default function ProfileView({
 	const [following, setFollowing] = useState(0);
 	const [isFollow, setIsFollow] = useState(false);
 	const [loading, setLoading] = useState(true);
+	const [hasMorePosts, setHasMorePosts] = useState(true);
+	const [loadingMore, setLoadingMore] = useState(false);
 	const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
 	const [bio, setBio] = useState("");
 	const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -780,6 +782,7 @@ export default function ProfileView({
 			const seed = readProfileSeed(slug) || readProfileSeed(cleanUserId);
 			Promise.resolve().then(() => {
 				setMyPosts([]);
+				setHasMorePosts(true);
 				setAvatarUrl(seed?.avatarUrl);
 				setBio("");
 				setProfileDisplayName(seed?.displayName || displayName);
@@ -833,11 +836,14 @@ export default function ProfileView({
 			.profile(slug, userId)
 			.then((data) => {
 				setMyPosts(data.posts);
+				setHasMorePosts(data.posts.length >= 20 && Boolean(data.nextCursor));
 				setAvatarUrl(data.avatarUrl || undefined);
 				setBio(data.bio || "");
 				if (data.displayName) setProfileDisplayName(data.displayName);
 			})
-			.catch(() => {})
+			.catch(() => {
+				setHasMorePosts(false);
+			})
 			.finally(() => setLoading(false));
 
 		api.follow
@@ -994,6 +1000,38 @@ export default function ProfileView({
 		},
 		[slug, userId],
 	);
+
+	const handleLoadMore = useCallback(() => {
+		if (loadingMore || !hasMorePosts || myPosts.length === 0) return;
+		const lastPost = myPosts[myPosts.length - 1];
+		if (!lastPost?.createdAt) return;
+
+		setLoadingMore(true);
+		api.users
+			.profile(slug, userId, undefined, lastPost.createdAt)
+			.then((data) => {
+				if (
+					data.posts.length === 0 ||
+					!data.nextCursor ||
+					data.posts.length < 20
+				) {
+					setHasMorePosts(false);
+				}
+				if (data.posts.length > 0) {
+					setMyPosts((prev) => {
+						const existingIds = new Set(prev.map((p) => p.id));
+						const newPosts = data.posts.filter((p) => !existingIds.has(p.id));
+						return [...prev, ...newPosts];
+					});
+				}
+			})
+			.catch(() => {
+				showToast("error", "過去の投稿の取得に失敗しました");
+			})
+			.finally(() => {
+				setLoadingMore(false);
+			});
+	}, [loadingMore, hasMorePosts, myPosts, slug, userId]);
 
 	const handleTabChange = (id: string) => {
 		setActiveTab(id);
@@ -1633,6 +1671,36 @@ export default function ProfileView({
 						)}
 					</div>
 				)}
+
+				{!loading &&
+					activeTab !== "hearts" &&
+					activeTab !== "likes" &&
+					activeTab !== "dislikes" && (
+						<div className="p-4 flex justify-center">
+							{hasMorePosts ? (
+								<button
+									onClick={handleLoadMore}
+									disabled={loadingMore}
+									className="px-4 py-2 text-xs font-semibold text-gray-300 hover:text-white bg-gray-800/80 hover:bg-gray-700/80 border border-gray-700/80 rounded-full transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
+								>
+									{loadingMore ? (
+										<>
+											<Loader2 size={14} className="animate-spin text-gray-400" />
+											<span>読み込み中...</span>
+										</>
+									) : (
+										<span>さらに過去の投稿を読み込む</span>
+									)}
+								</button>
+							) : (
+								myPosts.length >= 20 && (
+									<span className="text-[11px] text-gray-500">
+										すべての投稿を表示しました
+									</span>
+								)
+							)}
+						</div>
+					)}
 			</div>
 
 			{isEditModalOpen && (
