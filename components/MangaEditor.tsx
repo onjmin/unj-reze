@@ -552,9 +552,18 @@ export default function MangaEditor({
 	onSave,
 	initialImageUrl,
 }: MangaEditorProps) {
-	// キャンバス & ズーム
+	// キャンバス & ズーム & パン
 	const viewportRef = useRef<HTMLDivElement>(null);
 	const [zoom, setZoom] = useState(0.85);
+	const [isSpacePressed, setIsSpacePressed] = useState(false);
+	const isSpacePressedRef = useRef(false);
+	const isPanningRef = useRef(false);
+	const panStartRef = useRef<{
+		clientX: number;
+		clientY: number;
+		scrollLeft: number;
+		scrollTop: number;
+	} | null>(null);
 
 	// ツール状態
 	const [activeTool, setActiveTool] = useState<MangaTool>("pen");
@@ -953,6 +962,13 @@ export default function MangaEditor({
 				target instanceof HTMLTextAreaElement;
 
 			if (!isEditingText && !e.ctrlKey && !e.metaKey) {
+				// スペースキー: 手のひらツール(パン)モードの開始
+				if (e.code === "Space" && !e.repeat) {
+					e.preventDefault();
+					isSpacePressedRef.current = true;
+					setIsSpacePressed(true);
+					return;
+				}
 				// 選択中: Escapeで選択解除、Delete/Backspaceで選択要素を削除
 				const key = e.key;
 				if (key === "Escape") {
@@ -991,9 +1007,57 @@ export default function MangaEditor({
 				handlePasteSelection();
 			}
 		};
+
+		const onKeyUp = (e: KeyboardEvent) => {
+			if (e.code === "Space") {
+				isSpacePressedRef.current = false;
+				setIsSpacePressed(false);
+				if (isPanningRef.current) {
+					isPanningRef.current = false;
+					panStartRef.current = null;
+				}
+			}
+		};
+
 		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
+		window.addEventListener("keyup", onKeyUp);
+		return () => {
+			window.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("keyup", onKeyUp);
+		};
 	});
+
+	// マウスホイールによる拡大率変更（お絵描きエディタと同等仕様・カーソル位置中心ズーム）
+	useEffect(() => {
+		const el = viewportRef.current;
+		if (!el) return;
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			const zoomStep = e.deltaY < 0 ? 0.1 : -0.1;
+			setZoom((prevZoom) => {
+				const nextZoom = Math.min(
+					4.0,
+					Math.max(0.25, Math.round((prevZoom + zoomStep) * 100) / 100),
+				);
+				if (nextZoom === prevZoom) return prevZoom;
+
+				// マウス位置を中心にしたスクロール位置補正
+				const rect = el.getBoundingClientRect();
+				const mouseX = e.clientX - rect.left + el.scrollLeft;
+				const mouseY = e.clientY - rect.top + el.scrollTop;
+				const ratio = nextZoom / prevZoom;
+
+				requestAnimationFrame(() => {
+					el.scrollLeft = mouseX * ratio - (e.clientX - rect.left);
+					el.scrollTop = mouseY * ratio - (e.clientY - rect.top);
+				});
+
+				return nextZoom;
+			});
+		};
+		el.addEventListener("wheel", onWheel, { passive: false });
+		return () => el.removeEventListener("wheel", onWheel);
+	}, []);
 
 	// マウス/タッチ/ペン座標をキャンバス実座標に変換
 	const getCanvasPoint = (e: React.PointerEvent) => {
@@ -1014,6 +1078,21 @@ export default function MangaEditor({
 
 	// ポインターダウン (描画開始またはオブジェクト選択・移動開始)
 	const handlePointerDown = (e: React.PointerEvent) => {
+		// スペースキー押下中、または中クリック(ホイールボタン)ならパン(視点移動)操作
+		if (e.button === 1 || isSpacePressedRef.current) {
+			e.preventDefault();
+			isPanningRef.current = true;
+			panStartRef.current = {
+				clientX: e.clientX,
+				clientY: e.clientY,
+				scrollLeft: viewportRef.current?.scrollLeft ?? 0,
+				scrollTop: viewportRef.current?.scrollTop ?? 0,
+			};
+			activePointerIdRef.current = e.pointerId;
+			(e.target as Element).setPointerCapture?.(e.pointerId);
+			return;
+		}
+
 		// 既に別のポインター(指)で操作中なら無視する（二本指ドラッグでの誤描画防止）
 		if (activePointerIdRef.current !== null) return;
 		const pt = getCanvasPoint(e);
@@ -1160,6 +1239,16 @@ export default function MangaEditor({
 	// ポインター移動
 	const handlePointerMove = (e: React.PointerEvent) => {
 		if (e.pointerId !== activePointerIdRef.current) return;
+
+		// パン操作中
+		if (isPanningRef.current && panStartRef.current && viewportRef.current) {
+			const dx = e.clientX - panStartRef.current.clientX;
+			const dy = e.clientY - panStartRef.current.clientY;
+			viewportRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+			viewportRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+			return;
+		}
+
 		const pt = getCanvasPoint(e);
 		if (!pt) return;
 
@@ -1291,6 +1380,11 @@ export default function MangaEditor({
 	const handlePointerUp = (e: React.PointerEvent) => {
 		if (e.pointerId !== activePointerIdRef.current) return;
 		activePointerIdRef.current = null;
+		if (isPanningRef.current) {
+			isPanningRef.current = false;
+			panStartRef.current = null;
+			return;
+		}
 		isDrawingRef.current = false;
 		lastPointRef.current = null;
 		isDraggingObjectRef.current = null;
@@ -1671,20 +1765,25 @@ export default function MangaEditor({
 					<div className="h-4 w-px bg-gray-700 mx-1" />
 					<button
 						type="button"
-						onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
+						onClick={() => setZoom((z) => Math.max(0.25, Math.round((z - 0.1) * 100) / 100))}
 						className="p-1.5 rounded hover:bg-gray-700/50"
-						title="縮小"
+						title="縮小 (ホイール手前)"
 					>
 						<ZoomOut size={16} />
 					</button>
-					<span className="text-xs w-10 text-center font-mono">
-						{Math.round(zoom * 100)}%
-					</span>
 					<button
 						type="button"
-						onClick={() => setZoom((z) => Math.min(2.0, z + 0.1))}
+						onClick={() => setZoom(0.85)}
+						className="text-xs px-1 text-center font-mono hover:text-blue-400 transition-colors"
+						title="クリックで標準倍率(85%)にリセット"
+					>
+						{Math.round(zoom * 100)}%
+					</button>
+					<button
+						type="button"
+						onClick={() => setZoom((z) => Math.min(4.0, Math.round((z + 0.1) * 100) / 100))}
 						className="p-1.5 rounded hover:bg-gray-700/50"
-						title="拡大"
+						title="拡大 (ホイール奥)"
 					>
 						<ZoomIn size={16} />
 					</button>
@@ -1814,29 +1913,48 @@ export default function MangaEditor({
 				</aside>
 
 				{/* キャンバス表示領域 */}
+				{/* overflow-auto + 実サイズ指定によるスクロール対応ズーム。
+				    CSS transform: scale() はレイアウトに影響しないため overflow-auto が効かず
+				    上下が見切れていた。CSS width/height で実寸を確保し、スクロール可能にする。 */}
 				<div
 					ref={viewportRef}
-					className="flex-1 overflow-auto bg-[#07090e] flex items-center justify-center p-4 relative"
+					className="flex-1 overflow-auto bg-[#07090e] relative"
 				>
 					<div
 						style={{
-							transform: `scale(${zoom})`,
-							transformOrigin: "center center",
-							width: CANVAS_WIDTH,
-							height: CANVAS_HEIGHT,
+							minWidth: "100%",
+							minHeight: "100%",
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "center",
+							padding: 16,
 						}}
-						className="relative shrink-0 shadow-2xl transition-transform duration-75"
 					>
-						<canvas
-							ref={displayCanvasRef}
-							width={CANVAS_WIDTH}
-							height={CANVAS_HEIGHT}
-							onPointerDown={handlePointerDown}
-							onPointerMove={handlePointerMove}
-							onPointerUp={handlePointerUp}
-							onPointerCancel={handlePointerUp}
-							className="absolute inset-0 bg-white cursor-crosshair rounded shadow-lg touch-none"
-						/>
+						<div
+							style={{
+								width: Math.round(CANVAS_WIDTH * zoom),
+								height: Math.round(CANVAS_HEIGHT * zoom),
+								flexShrink: 0,
+								position: "relative",
+							}}
+							className="shadow-2xl"
+						>
+							<canvas
+								ref={displayCanvasRef}
+								width={CANVAS_WIDTH}
+								height={CANVAS_HEIGHT}
+								onPointerDown={handlePointerDown}
+								onPointerMove={handlePointerMove}
+								onPointerUp={handlePointerUp}
+								onPointerCancel={handlePointerUp}
+								className="block bg-white rounded shadow-lg touch-none"
+								style={{
+									width: Math.round(CANVAS_WIDTH * zoom),
+									height: Math.round(CANVAS_HEIGHT * zoom),
+									cursor: isSpacePressed ? "grab" : "crosshair",
+								}}
+							/>
+						</div>
 					</div>
 
 					{/* 選択中のセリフ操作バー */}
