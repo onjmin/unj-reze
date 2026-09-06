@@ -14,12 +14,12 @@ const DEFAULT_USER_ID = "名無しvFZ";
 // generateMetadata が固まる/落ちてもナビゲーション全体を巻き添えにしないための上限。
 // 通常は数十msで終わる想定なので、これを超えたら汎用metadataにフォールバックする。
 // （本文の描画自体はこの待ちに依存しない。下の PostPage 本体を参照）
-const METADATA_TIMEOUT_MS = 800;
+const METADATA_TIMEOUT_MS = 300;
 
 // generateMetadata専用の軽量フェッチ。OGP用のテキスト/画像URLしか使わないので
-// attachEmbedInfo（埋め込み解決）は呼ばない。同一リクエスト内でのみメモ化。
+// attachEmbedInfo（埋め込み解決）や返信一覧（attachRepliesToThreads）は呼ばない。同一リクエスト内でのみメモ化。
 const getMetadataPost = cache(async (decodedId: number) => {
-	return db.getPost(decodedId, DEFAULT_USER_ID);
+	return db.getPost(decodedId, DEFAULT_USER_ID, { withReplies: false });
 });
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
@@ -46,19 +46,35 @@ export function generateStaticParams() {
 
 export async function generateMetadata({
 	params,
+	searchParams,
 }: {
 	params: Promise<{ id: string }>;
+	searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }): Promise<Metadata> {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) return {};
 	const url = `${SITE_URL}/post/${id}`;
 
-	// クライアント側遷移（router.push/prefetch）のRSCフェッチには "RSC" ヘッダーが
-	// 付く。一覧から来た人は既にキャッシュ/クライアントフェッチ（PostPageClient側）で
+	// クライアント側遷移（router.push/prefetch）のRSCフェッチには "rsc" ヘッダーや
+	// "next-router-prefetch" ヘッダー、あるいは "?_rsc=..." クエリが付く。
+	// 一覧から来た人は既にキャッシュ/クライアントフェッチ（PostPageClient側）で
 	// 正しい情報を持っているので、ここでDBを叩かずに返す。DBが必要なのは
 	// 直リンク・リロード・クローラーによる「フルページ読み込み」のときだけ。
-	const isSoftNavigation = (await headers()).has("rsc");
+	const sp = searchParams ? await searchParams.catch(() => ({})) : {};
+	const isRscQuery = sp && typeof sp === "object" && "_rsc" in sp;
+	if (isRscQuery) {
+		return { alternates: { canonical: url } };
+	}
+
+	const reqHeaders = await headers();
+	const isSoftNavigation =
+		reqHeaders.has("rsc") ||
+		reqHeaders.has("next-router-prefetch") ||
+		reqHeaders.has("next-router-state-tree") ||
+		reqHeaders.get("purpose") === "prefetch" ||
+		reqHeaders.get("sec-purpose") === "prefetch";
+
 	if (isSoftNavigation) {
 		return { alternates: { canonical: url } };
 	}

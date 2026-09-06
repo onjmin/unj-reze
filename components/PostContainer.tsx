@@ -367,11 +367,9 @@ export default function PostContainer({
 
 	// router.push は <Link> と違い自動プリフェッチが効かないため、クリック時点で
 	// RSCペイロード取得がゼロから始まってしまう（＝楽観的キャッシュがあっても
-	// マウント自体がそのフェッチ完了待ちになる）。hover/touch＝クリック意思の
-	// 合図があった時点で先に投げておくことで、実際のクリック時には
-	// 大抵取得済みになっている。フィード全件に自動プリフェッチを掛けると
-	// DB往復が投稿数だけ増えてしまう（docs/NEON_EGRESS.md）ので、
-	// あくまで「意思表示があったものだけ」に絞る。
+	// マウント自体がそのフェッチ完了待ちになる）。PCでの hover（onMouseEnter）で
+	// 先に投げておく。モバイルの onTouchStart はスクロール時に全カードで同時多発し
+	// Worker の CPU 時間上限（10ms）を枯渇させる原因になるためつけない。
 	const prefetchedRef = useRef(false);
 	const prefetchPost = useCallback(() => {
 		if (prefetchedRef.current) return;
@@ -404,7 +402,6 @@ export default function PostContainer({
 		<div
 			className={`flex relative transition-all duration-700 ${isRankingMode ? "bg-gradient-to-r from-gray-900/10 via-transparent to-transparent" : ""} ${isFreshOwnPost ? "rounded-lg ring-2 ring-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.6)] kusa-pop-in" : ""}`}
 			onMouseEnter={prefetchPost}
-			onTouchStart={prefetchPost}
 		>
 			{isRankingMode && (
 				<div className="w-10 shrink-0 flex items-start justify-center pt-4 pl-1">

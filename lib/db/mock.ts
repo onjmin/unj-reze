@@ -31,7 +31,11 @@ export const mockStore: DataStore = {
 		return mockDb.getPosts(userId, limitOrOptions, beforeId, optionsArg);
 	},
 
-	async getPost(id: number, userId?: string) {
+	async getPost(
+		id: number,
+		userId?: string,
+		_options?: { withReplies?: boolean },
+	) {
 		return mockDb.getPost(id, userId) ?? null;
 	},
 

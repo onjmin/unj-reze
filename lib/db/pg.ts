@@ -740,7 +740,11 @@ export const pgStore: DataStore = {
 		return posts.map((p) => withViewerVoteState(p, userId));
 	},
 
-	async getPost(id: number, userId?: string) {
+	async getPost(
+		id: number,
+		userId?: string,
+		options?: { withReplies?: boolean },
+	) {
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
 			const { rows } = await q(
@@ -775,7 +779,9 @@ export const pgStore: DataStore = {
 		);
 		if (rows.length === 0) return null;
 		const post = threadRowToPost(rows[0]);
-		await attachRepliesToThreads([post], [threadId]);
+		if (options?.withReplies !== false) {
+			await attachRepliesToThreads([post], [threadId]);
+		}
 		return withViewerVoteState(post, userId);
 	},
 

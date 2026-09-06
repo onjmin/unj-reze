@@ -217,7 +217,11 @@ export interface DataStore {
 		beforeId?: number,
 		options?: GetPostsOptions,
 	): Promise<DbPost[]>;
-	getPost(id: number, userId?: string): Promise<DbPost | null>;
+	getPost(
+		id: number,
+		userId?: string,
+		options?: { withReplies?: boolean },
+	): Promise<DbPost | null>;
 	/**
 	 * 専ブラ向け。dat/bbs.cgi の `key`（=dat ファイル名の数値、DbPost.datKey）から
 	 * スレッド(OP)を引く。内部DBの連番id（threadId*2等）とは別の採番空間なので

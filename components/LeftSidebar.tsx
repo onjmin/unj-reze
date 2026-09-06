@@ -11,8 +11,7 @@ import {
 	User,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface LeftSidebarProps {
 	current: string;
@@ -43,7 +42,6 @@ export default function LeftSidebar({
 	userSlug,
 	onPost,
 }: LeftSidebarProps) {
-	const router = useRouter();
 	const badgeMap: Record<string, number> = {
 		notifications: notifCount,
 		messages: messageCount,
@@ -57,16 +55,6 @@ export default function LeftSidebar({
 		setPrevCurrent(current);
 		setPendingActiveId(null);
 	}
-
-	useEffect(() => {
-		router.prefetch("/");
-		router.prefetch("/search");
-		router.prefetch("/notifications");
-		router.prefetch("/messages");
-		router.prefetch("/links");
-		router.prefetch("/settings");
-		if (userSlug) router.prefetch(`/user/${userSlug}`);
-	}, [router, userSlug]);
 
 	const getItemHref = (id: string) => {
 		if (id === "search") return "/search";
@@ -94,7 +82,7 @@ export default function LeftSidebar({
 						<Link
 							key={item.id}
 							href={href}
-							prefetch={true}
+							prefetch={false}
 							onClick={() => {
 								setPendingActiveId(item.id);
 								if (item.id === "home") set("home");

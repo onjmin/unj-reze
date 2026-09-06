@@ -2,8 +2,7 @@
 
 import { Bell, Home, Mail, Search, User } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useScrollNav } from "@/lib/hooks/useScrollNav";
 
 interface BottomNavProps {
@@ -31,7 +30,6 @@ export default function BottomNav({
 	userAvatarUrl,
 	userSlug,
 }: BottomNavProps) {
-	const router = useRouter();
 	const badgeMap: Record<string, number> = {
 		notifications: notifCount,
 		messages: messageCount,
@@ -47,14 +45,6 @@ export default function BottomNav({
 		setPrevCurrent(current);
 		setPendingActiveId(null);
 	}
-
-	useEffect(() => {
-		router.prefetch("/");
-		router.prefetch("/search");
-		router.prefetch("/notifications");
-		router.prefetch("/messages");
-		if (userSlug) router.prefetch(`/user/${userSlug}`);
-	}, [router, userSlug]);
 
 	const getItemHref = (id: string) => {
 		if (id === "search") return "/search";
@@ -82,7 +72,7 @@ export default function BottomNav({
 					<Link
 						key={item.id}
 						href={href}
-						prefetch={true}
+						prefetch={false}
 						onClick={() => {
 							setPendingActiveId(item.id);
 							if (item.id === "home") set("home");
