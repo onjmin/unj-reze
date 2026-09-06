@@ -27,7 +27,86 @@ export interface FrameBox {
 	h: number;
 }
 
-export type FrameTemplate = "4koma" | "2rows" | "3rows" | "single";
+export type FrameTemplate =
+	| "4koma"
+	| "2rows"
+	| "3rows"
+	| "single"
+	| "topWideBottomTwo"
+	| "topTwoBottomWide"
+	| "grid2x2"
+	| "threeCol"
+	| "dynamicMix";
+
+// コマ割りの行構成。1行 = { heightWeight: 行の高さ比率, cols: 行内の各コマの幅比率 }
+// 「コマは全部横いっぱい」しか作れないと、実際の漫画のページ構成（1行に複数コマを横並びさせる）
+// を満たせない。日本漫画のコマ割りは基本的に「右→左・上→下」の可変グリッドなので、
+// 行ごとに列数・幅比率を変えられるようにする。
+interface FrameRowSpec {
+	heightWeight: number;
+	cols: number[];
+}
+
+const FRAME_ROW_TEMPLATES: Record<
+	Exclude<FrameTemplate, "4koma" | "2rows" | "3rows" | "single">,
+	FrameRowSpec[]
+> = {
+	// 上段: 見開き的な広いコマ / 下段: 会話などの並列コマ2つ
+	topWideBottomTwo: [
+		{ heightWeight: 1, cols: [1] },
+		{ heightWeight: 1, cols: [1, 1] },
+	],
+	// 上段: 並列コマ2つ / 下段: 締めの広いコマ
+	topTwoBottomWide: [
+		{ heightWeight: 1, cols: [1, 1] },
+		{ heightWeight: 1, cols: [1] },
+	],
+	// 2x2の均等グリッド
+	grid2x2: [
+		{ heightWeight: 1, cols: [1, 1] },
+		{ heightWeight: 1, cols: [1, 1] },
+	],
+	// 横3分割（テンポの速いカット割り用）
+	threeCol: [{ heightWeight: 1, cols: [1, 1, 1] }],
+	// 実際のストーリー漫画でよく見る「広い→細かい→大小混在」の可変レイアウト
+	dynamicMix: [
+		{ heightWeight: 1.2, cols: [1] },
+		{ heightWeight: 1, cols: [1, 1, 1] },
+		{ heightWeight: 1.4, cols: [2, 1] },
+	],
+};
+
+function generateFromRowSpecs(
+	rows: FrameRowSpec[],
+	contentX: number,
+	contentY: number,
+	contentW: number,
+	contentH: number,
+	rowGutter: number,
+	colGutter: number,
+): FrameBox[] {
+	const totalRowWeight = rows.reduce((sum, r) => sum + r.heightWeight, 0);
+	const totalRowGutter = rowGutter * (rows.length - 1);
+	const availableH = contentH - totalRowGutter;
+
+	const boxes: FrameBox[] = [];
+	let y = contentY;
+	for (const row of rows) {
+		const rowH = (availableH * row.heightWeight) / totalRowWeight;
+		const totalColWeight = row.cols.reduce((sum, c) => sum + c, 0);
+		const totalColGutter = colGutter * (row.cols.length - 1);
+		const availableW = contentW - totalColGutter;
+
+		let x = contentX;
+		for (const colWeight of row.cols) {
+			const colW = (availableW * colWeight) / totalColWeight;
+			boxes.push({ x, y, w: colW, h: rowH });
+			x += colW + colGutter;
+		}
+		y += rowH + rowGutter;
+	}
+	return boxes;
+}
 
 /**
  * 集中線を CanvasRenderingContext2D に描画する
@@ -147,6 +226,11 @@ export function generateFrameBoxes(
 ): FrameBox[] {
 	const contentW = canvasWidth - margin * 2;
 	const contentH = canvasHeight - margin * 2;
+	// 漫画のコマ間隔の基本ルール：同じ段(横)に並ぶコマ同士の間隔は狭く、
+	// 段と段(縦)の間隔は広くとる（視線を横→次の段へ大きく切り替えさせるため）。
+	// gutter を「段の間隔」の基準とし、「同段コマの間隔」はその6割程度に狭める。
+	const rowGutter = gutter;
+	const colGutter = Math.round(gutter * 0.6);
 
 	switch (template) {
 		case "4koma": {
@@ -182,8 +266,7 @@ export function generateFrameBoxes(
 			}));
 		}
 
-		case "single":
-		default: {
+		case "single": {
 			return [
 				{
 					x: margin,
@@ -192,6 +275,22 @@ export function generateFrameBoxes(
 					h: contentH,
 				},
 			];
+		}
+
+		default: {
+			const rowSpecs = FRAME_ROW_TEMPLATES[template];
+			if (!rowSpecs) {
+				return [{ x: margin, y: margin, w: contentW, h: contentH }];
+			}
+			return generateFromRowSpecs(
+				rowSpecs,
+				margin,
+				margin,
+				contentW,
+				contentH,
+				rowGutter,
+				colGutter,
+			);
 		}
 	}
 }

@@ -1,6 +1,9 @@
 "use client";
 
 import {
+	ClipboardPaste,
+	Copy,
+	Crop,
 	Download,
 	Eraser,
 	Eye,
@@ -105,6 +108,38 @@ function clampRectToPanel(
 	return { x: Math.round(outX), y: Math.round(outY) };
 }
 
+// ローカル座標(中心からの相対座標)を回転させてワールド座標へ変換する
+function localToWorld(
+	lx: number,
+	ly: number,
+	cx: number,
+	cy: number,
+	rotation: number,
+): { x: number; y: number } {
+	const cos = Math.cos(rotation);
+	const sin = Math.sin(rotation);
+	return { x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos };
+}
+
+// ワールド座標を中心・回転を基準としたローカル座標へ変換する（逆回転）
+function worldToLocal(
+	px: number,
+	py: number,
+	cx: number,
+	cy: number,
+	rotation: number,
+): { x: number; y: number } {
+	const dx = px - cx;
+	const dy = py - cy;
+	const cos = Math.cos(-rotation);
+	const sin = Math.sin(-rotation);
+	return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+}
+
+function distance(ax: number, ay: number, bx: number, by: number): number {
+	return Math.hypot(ax - bx, ay - by);
+}
+
 export interface MangaEditorProps {
 	onClose: () => void;
 	onSave: (imageData: string) => void;
@@ -120,7 +155,34 @@ type MangaTool =
 	| "text"
 	| "frame"
 	| "effect"
-	| "select";
+	| "select"
+	| "rectSelect";
+
+// 矩形選択（コピー&ペースト用）
+interface SelectionRect {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
+// 貼り付け直後、レイヤーへ確定(スタンプ)する前の「フローティング」編集状態。
+// 移動・拡縮・回転をここで自由に行い、確定するとレイヤーへ焼き込まれる。
+interface FloatingPaste {
+	canvas: HTMLCanvasElement;
+	cx: number;
+	cy: number;
+	w: number;
+	h: number;
+	rotation: number; // ラジアン
+}
+
+interface PasteDrag {
+	mode: "move" | "resize" | "rotate";
+	startX: number;
+	startY: number;
+	orig: FloatingPaste;
+}
 
 interface LayerMeta {
 	id: string;
@@ -166,6 +228,19 @@ export default function MangaEditor({
 	const [penSize, setPenSize] = useState(3);
 	const [penColor, setPenColor] = useState("#000000");
 	const [eraserSize, setEraserSize] = useState(24);
+
+	// 範囲選択コピー&ペースト状態（お絵かきエディタと同様に、選択範囲を内部クリップボードへコピーできるようにする）
+	const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+	const selectDragStartRef = useRef<{ x: number; y: number } | null>(null);
+	const clipboardCanvasRef = useRef<HTMLCanvasElement | null>(null);
+	const [hasClipboard, setHasClipboard] = useState(false);
+	// 貼り付け後のフローティング編集（移動・拡縮・回転してからレイヤーへ確定する）
+	const [floatingPaste, setFloatingPaste] = useState<FloatingPaste | null>(null);
+	const floatingPasteRef = useRef<FloatingPaste | null>(null);
+	const pasteDragRef = useRef<PasteDrag | null>(null);
+	useEffect(() => {
+		floatingPasteRef.current = floatingPaste;
+	}, [floatingPaste]);
 
 	// トーン状態
 	const [activeTone, setActiveTone] = useState<ToneType>("dot-20");
@@ -305,7 +380,81 @@ export default function MangaEditor({
 				ctx.restore();
 			}
 		}
-	}, [bubbles, texts, selectedBubbleId, selectedTextId]);
+
+		// 5. 範囲選択の点線マーキー
+		if (selectionRect) {
+			ctx.save();
+			ctx.strokeStyle = "#f59e0b";
+			ctx.lineWidth = 2;
+			ctx.setLineDash([6, 4]);
+			ctx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
+			ctx.restore();
+		}
+
+		// 6. フローティング貼り付け（レイヤーへ確定する前の、移動・拡縮・回転が可能な状態）
+		if (floatingPaste) {
+			const fp = floatingPaste;
+			ctx.save();
+			ctx.translate(fp.cx, fp.cy);
+			ctx.rotate(fp.rotation);
+			ctx.drawImage(fp.canvas, -fp.w / 2, -fp.h / 2, fp.w, fp.h);
+			ctx.restore();
+
+			if (activeTool === "rectSelect") {
+				// 枠線
+				ctx.save();
+				ctx.translate(fp.cx, fp.cy);
+				ctx.rotate(fp.rotation);
+				ctx.strokeStyle = "#f59e0b";
+				ctx.lineWidth = 2;
+				ctx.setLineDash([6, 4]);
+				ctx.strokeRect(-fp.w / 2, -fp.h / 2, fp.w, fp.h);
+				ctx.restore();
+
+				// リサイズハンドル(右下)・回転ハンドル(上)
+				const topCenter = localToWorld(0, -fp.h / 2, fp.cx, fp.cy, fp.rotation);
+				const rotateHandle = localToWorld(
+					0,
+					-fp.h / 2 - 30,
+					fp.cx,
+					fp.cy,
+					fp.rotation,
+				);
+				const resizeHandle = localToWorld(
+					fp.w / 2,
+					fp.h / 2,
+					fp.cx,
+					fp.cy,
+					fp.rotation,
+				);
+
+				ctx.save();
+				ctx.strokeStyle = "#f59e0b";
+				ctx.lineWidth = 1.5;
+				ctx.setLineDash([]);
+				ctx.beginPath();
+				ctx.moveTo(topCenter.x, topCenter.y);
+				ctx.lineTo(rotateHandle.x, rotateHandle.y);
+				ctx.stroke();
+
+				ctx.fillStyle = "#f59e0b";
+				ctx.beginPath();
+				ctx.arc(rotateHandle.x, rotateHandle.y, 7, 0, Math.PI * 2);
+				ctx.fill();
+
+				ctx.fillRect(resizeHandle.x - 7, resizeHandle.y - 7, 14, 14);
+				ctx.restore();
+			}
+		}
+	}, [
+		bubbles,
+		texts,
+		selectedBubbleId,
+		selectedTextId,
+		selectionRect,
+		floatingPaste,
+		activeTool,
+	]);
 
 	// カスタムフォント初期ロード
 	useEffect(() => {
@@ -410,6 +559,11 @@ export default function MangaEditor({
 
 	// Undo
 	const handleUndo = () => {
+		// フローティング貼り付け編集中は、キャンバス履歴ではなく貼り付け自体を取り消す
+		if (floatingPasteRef.current) {
+			setFloatingPaste(null);
+			return;
+		}
 		if (undoStackRef.current.length === 0) return;
 		redoStackRef.current.push(captureSnapshot());
 
@@ -432,18 +586,122 @@ export default function MangaEditor({
 		setCanRedo(redoStackRef.current.length > 0);
 	};
 
-	// Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) キーボードショートカット
+	// 選択範囲をアクティブレイヤーから内部クリップボードへコピー
+	const handleCopySelection = useCallback(() => {
+		if (!selectionRect) return;
+		const curLayer = layersRef.current[activeLayerIndex];
+		if (!curLayer) return;
+		const { x, y, w, h } = selectionRect;
+		const clip = document.createElement("canvas");
+		clip.width = w;
+		clip.height = h;
+		const clipCtx = clip.getContext("2d");
+		if (!clipCtx) return;
+		clipCtx.drawImage(curLayer.canvas, x, y, w, h, 0, 0, w, h);
+		clipboardCanvasRef.current = clip;
+		setHasClipboard(true);
+	}, [selectionRect, activeLayerIndex]);
+
+	// フローティング貼り付け内容をアクティブレイヤーへ焼き込んで確定する
+	const commitFloatingPaste = useCallback(() => {
+		const fp = floatingPasteRef.current;
+		if (!fp) return;
+		const curLayer = layersRef.current[activeLayerIndex];
+		if (!curLayer) {
+			setFloatingPaste(null);
+			return;
+		}
+		saveHistorySnapshot();
+		const ctx = curLayer.ctx;
+		ctx.save();
+		ctx.translate(fp.cx, fp.cy);
+		ctx.rotate(fp.rotation);
+		ctx.drawImage(fp.canvas, -fp.w / 2, -fp.h / 2, fp.w, fp.h);
+		ctx.restore();
+		setFloatingPaste(null);
+		renderDisplay();
+	}, [activeLayerIndex, saveHistorySnapshot, renderDisplay]);
+
+	// 内部クリップボードの内容を「フローティング貼り付け」として置く。
+	// レイヤーへは即焼き込まず、移動・拡縮・回転してから確定(commitFloatingPaste)する。
+	const handlePasteSelection = useCallback(() => {
+		const clip = clipboardCanvasRef.current;
+		if (!clip) return;
+		// 既にフローティング編集中の貼り付けがあれば先に確定してから、新しく貼る
+		if (floatingPasteRef.current) commitFloatingPaste();
+
+		// コピー元と全く同じ位置に重ねると変化が分かりづらいので、少しずらして貼り付ける
+		const baseX = selectionRect
+			? selectionRect.x + 16
+			: (CANVAS_WIDTH - clip.width) / 2;
+		const baseY = selectionRect
+			? selectionRect.y + 16
+			: (CANVAS_HEIGHT - clip.height) / 2;
+		const x = Math.min(Math.max(0, baseX), CANVAS_WIDTH - clip.width);
+		const y = Math.min(Math.max(0, baseY), CANVAS_HEIGHT - clip.height);
+
+		setFloatingPaste({
+			canvas: clip,
+			cx: x + clip.width / 2,
+			cy: y + clip.height / 2,
+			w: clip.width,
+			h: clip.height,
+			rotation: 0,
+		});
+		// 貼り付け直後はハンドルを操作できるよう、範囲選択ツールへ切り替える
+		setActiveTool("rectSelect");
+		setSelectionRect(null);
+	}, [selectionRect, commitFloatingPaste]);
+
+	// 範囲選択ツール以外に切り替えたら、フローティング貼り付けを自動的にレイヤーへ確定する
+	useEffect(() => {
+		if (activeTool !== "rectSelect" && floatingPasteRef.current) {
+			commitFloatingPaste();
+		}
+	}, [activeTool, commitFloatingPaste]);
+
+	// Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) / Ctrl+C / Ctrl+V キーボードショートカット
 	// ボタンのtitleに表示しているのに未実装だった（押しても何も起きない状態だった）ため配線する
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
+			// テキスト入力中(モーダルのセリフ欄など)は編集操作を奪わない
+			const target = e.target as HTMLElement | null;
+			const isEditingText =
+				target instanceof HTMLInputElement ||
+				target instanceof HTMLTextAreaElement;
+
+			if (!isEditingText && !e.ctrlKey && !e.metaKey) {
+				// フローティング貼り付け中: Enterで確定、Escape/Deleteで破棄
+				if (floatingPasteRef.current) {
+					const key = e.key;
+					if (key === "Enter") {
+						e.preventDefault();
+						commitFloatingPaste();
+					} else if (key === "Escape" || key === "Delete" || key === "Backspace") {
+						e.preventDefault();
+						setFloatingPaste(null);
+					}
+				}
+				return;
+			}
+
 			if (!(e.ctrlKey || e.metaKey)) return;
 			const key = e.key.toLowerCase();
 			if (key === "z" && !e.shiftKey) {
 				e.preventDefault();
+				// フローティング貼り付け編集中の取り消しは handleUndo 内で処理される
 				handleUndo();
 			} else if (key === "y" || (key === "z" && e.shiftKey)) {
 				e.preventDefault();
 				handleRedo();
+			} else if (key === "c") {
+				if (!selectionRect) return;
+				e.preventDefault();
+				handleCopySelection();
+			} else if (key === "v") {
+				if (!clipboardCanvasRef.current) return;
+				e.preventDefault();
+				handlePasteSelection();
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);
@@ -476,6 +734,36 @@ export default function MangaEditor({
 		activePointerIdRef.current = e.pointerId;
 		// キャンバス外に指が出てもドラッグ/描画を継続できるようにする
 		(e.target as Element).setPointerCapture?.(e.pointerId);
+
+		// 矩形選択ツール：フローティング貼り付け中ならハンドル操作を優先し、
+		// それ以外のドラッグはコピー用の範囲選択として扱う
+		if (activeTool === "rectSelect") {
+			const fp = floatingPasteRef.current;
+			if (fp) {
+				const HIT = 16;
+				const rotateHandle = localToWorld(0, -fp.h / 2 - 30, fp.cx, fp.cy, fp.rotation);
+				const resizeHandle = localToWorld(fp.w / 2, fp.h / 2, fp.cx, fp.cy, fp.rotation);
+				if (distance(pt.x, pt.y, rotateHandle.x, rotateHandle.y) <= HIT) {
+					pasteDragRef.current = { mode: "rotate", startX: pt.x, startY: pt.y, orig: fp };
+					return;
+				}
+				if (distance(pt.x, pt.y, resizeHandle.x, resizeHandle.y) <= HIT) {
+					pasteDragRef.current = { mode: "resize", startX: pt.x, startY: pt.y, orig: fp };
+					return;
+				}
+				const local = worldToLocal(pt.x, pt.y, fp.cx, fp.cy, fp.rotation);
+				if (Math.abs(local.x) <= fp.w / 2 && Math.abs(local.y) <= fp.h / 2) {
+					pasteDragRef.current = { mode: "move", startX: pt.x, startY: pt.y, orig: fp };
+					return;
+				}
+				// フローティング領域の外をタップ/クリック → 現在の貼り付けを確定してから
+				// 新しい範囲選択を開始する
+				commitFloatingPaste();
+			}
+			selectDragStartRef.current = pt;
+			setSelectionRect({ x: pt.x, y: pt.y, w: 0, h: 0 });
+			return;
+		}
 
 		// 選択ツール・フキダシ・文字ツール時はオブジェクトのヒットテスト
 		if (activeTool === "select" || activeTool === "bubble" || activeTool === "text") {
@@ -591,6 +879,40 @@ export default function MangaEditor({
 		const pt = getCanvasPoint(e);
 		if (!pt) return;
 
+		// フローティング貼り付けのハンドル操作（移動・拡縮・回転）
+		if (activeTool === "rectSelect" && pasteDragRef.current) {
+			const drag = pasteDragRef.current;
+			const orig = drag.orig;
+			if (drag.mode === "move") {
+				const dx = pt.x - drag.startX;
+				const dy = pt.y - drag.startY;
+				setFloatingPaste({ ...orig, cx: orig.cx + dx, cy: orig.cy + dy });
+			} else if (drag.mode === "resize") {
+				// 中心を固定したまま、ドラッグ位置をローカル座標(回転を考慮)に変換して幅高さを決める
+				const local = worldToLocal(pt.x, pt.y, orig.cx, orig.cy, orig.rotation);
+				const newW = Math.max(16, Math.round(Math.abs(local.x) * 2));
+				const newH = Math.max(16, Math.round(Math.abs(local.y) * 2));
+				setFloatingPaste({ ...orig, w: newW, h: newH });
+			} else if (drag.mode === "rotate") {
+				const angle =
+					Math.atan2(pt.y - orig.cy, pt.x - orig.cx) + Math.PI / 2;
+				setFloatingPaste({ ...orig, rotation: angle });
+			}
+			return;
+		}
+
+		// 矩形選択ツール：ドラッグ中の範囲更新
+		if (activeTool === "rectSelect" && selectDragStartRef.current) {
+			const start = selectDragStartRef.current;
+			setSelectionRect({
+				x: Math.min(start.x, pt.x),
+				y: Math.min(start.y, pt.y),
+				w: Math.abs(pt.x - start.x),
+				h: Math.abs(pt.y - start.y),
+			});
+			return;
+		}
+
 		// オブジェクトのドラッグ移動
 		if (isDraggingObjectRef.current) {
 			const drag = isDraggingObjectRef.current;
@@ -690,6 +1012,21 @@ export default function MangaEditor({
 		isDrawingRef.current = false;
 		lastPointRef.current = null;
 		isDraggingObjectRef.current = null;
+		pasteDragRef.current = null;
+
+		if (selectDragStartRef.current) {
+			selectDragStartRef.current = null;
+			// キャンバス範囲内にクランプし、極端に小さい(誤クリック)選択は破棄する
+			setSelectionRect((prev) => {
+				if (!prev) return null;
+				const x = Math.max(0, Math.round(prev.x));
+				const y = Math.max(0, Math.round(prev.y));
+				const w = Math.min(CANVAS_WIDTH - x, Math.round(prev.w));
+				const h = Math.min(CANVAS_HEIGHT - y, Math.round(prev.h));
+				if (w < 4 || h < 4) return null;
+				return { x, y, w, h };
+			});
+		}
 	};
 
 	// バケツ塗り (Flood Fill)
@@ -896,6 +1233,8 @@ export default function MangaEditor({
 
 	// 完成画像の保存 (PNG Data URL)
 	const handleSave = () => {
+		// 未確定のフローティング貼り付けがあれば、保存前にレイヤーへ焼き込む
+		commitFloatingPaste();
 		const finalCanvas = document.createElement("canvas");
 		finalCanvas.width = CANVAS_WIDTH;
 		finalCanvas.height = CANVAS_HEIGHT;
@@ -930,6 +1269,7 @@ export default function MangaEditor({
 
 	// 画像としてエクスポート
 	const handleExportPng = () => {
+		commitFloatingPaste();
 		const finalCanvas = document.createElement("canvas");
 		finalCanvas.width = CANVAS_WIDTH;
 		finalCanvas.height = CANVAS_HEIGHT;
@@ -983,6 +1323,25 @@ export default function MangaEditor({
 						title="やり直す (Ctrl+Y)"
 					>
 						<Redo size={16} />
+					</button>
+					<div className="h-4 w-px bg-gray-700 mx-1" />
+					<button
+						type="button"
+						onClick={handleCopySelection}
+						disabled={!selectionRect}
+						className="p-1.5 rounded hover:bg-gray-700/50 disabled:opacity-30"
+						title="選択範囲をコピー (Ctrl+C)"
+					>
+						<Copy size={16} />
+					</button>
+					<button
+						type="button"
+						onClick={handlePasteSelection}
+						disabled={!hasClipboard}
+						className="p-1.5 rounded hover:bg-gray-700/50 disabled:opacity-30"
+						title="貼り付け (Ctrl+V)"
+					>
+						<ClipboardPaste size={16} />
 					</button>
 					<div className="h-4 w-px bg-gray-700 mx-1" />
 					<button
@@ -1118,6 +1477,13 @@ export default function MangaEditor({
 						title="フキダシ/文字の選択・移動"
 						icon={<Move size={18} />}
 					/>
+					{/* 範囲選択（コピー&ペースト用） */}
+					<ToolButton
+						active={activeTool === "rectSelect"}
+						onClick={() => setActiveTool("rectSelect")}
+						title="範囲選択 (コピー&ペースト)"
+						icon={<Crop size={18} />}
+					/>
 
 					<div className="mt-auto flex flex-col items-center gap-2">
 						{/* レイヤーパネル開閉 */}
@@ -1181,6 +1547,30 @@ export default function MangaEditor({
 							>
 								<Trash2 size={13} />
 								削除
+							</button>
+						</div>
+					)}
+
+					{/* フローティング貼り付けの操作バー */}
+					{floatingPaste && activeTool === "rectSelect" && (
+						<div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#131720]/95 border border-gray-700 px-3 py-1.5 rounded-full flex items-center gap-2 text-xs shadow-xl backdrop-blur-md">
+							<span className="text-gray-400 font-bold">
+								貼り付け編集中 (ドラッグで移動・右下で拡縮・上のハンドルで回転)
+							</span>
+							<button
+								type="button"
+								onClick={() => setFloatingPaste(null)}
+								className="text-red-400 hover:text-red-300 flex items-center gap-1 font-bold pl-2 border-l border-gray-700"
+							>
+								<Trash2 size={13} />
+								破棄
+							</button>
+							<button
+								type="button"
+								onClick={commitFloatingPaste}
+								className="text-blue-400 hover:text-blue-300 flex items-center gap-1 font-bold pl-2 border-l border-gray-700"
+							>
+								確定 (Enter)
 							</button>
 						</div>
 					)}
@@ -1627,39 +2017,66 @@ export default function MangaEditor({
 								))}
 							</div>
 						</div>
-						<div className="grid grid-cols-2 gap-2">
-							<button
-								type="button"
-								onClick={() => handleApplyFramePreset("4koma")}
-								className="py-3 px-4 rounded border border-gray-700 bg-gray-800/40 hover:bg-gray-800 text-left"
-							>
-								<div className="font-bold text-gray-200 mb-1">4コマ漫画</div>
-								<div className="text-[10px] text-gray-500">等間隔の4段コマ枠</div>
-							</button>
-							<button
-								type="button"
-								onClick={() => handleApplyFramePreset("3rows")}
-								className="py-3 px-4 rounded border border-gray-700 bg-gray-800/40 hover:bg-gray-800 text-left"
-							>
-								<div className="font-bold text-gray-200 mb-1">3段分割</div>
-								<div className="text-[10px] text-gray-500">標準的なストーリー漫画枠</div>
-							</button>
-							<button
-								type="button"
-								onClick={() => handleApplyFramePreset("2rows")}
-								className="py-3 px-4 rounded border border-gray-700 bg-gray-800/40 hover:bg-gray-800 text-left"
-							>
-								<div className="font-bold text-gray-200 mb-1">2段分割</div>
-								<div className="text-[10px] text-gray-500">上下の大きな2コマ枠</div>
-							</button>
-							<button
-								type="button"
-								onClick={() => handleApplyFramePreset("single")}
-								className="py-3 px-4 rounded border border-gray-700 bg-gray-800/40 hover:bg-gray-800 text-left"
-							>
-								<div className="font-bold text-gray-200 mb-1">全画面単一枠</div>
-								<div className="text-[10px] text-gray-500">外枠マージンのみ</div>
-							</button>
+						<div className="grid grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-0.5">
+							{(
+								[
+									{
+										id: "4koma",
+										label: "4コマ漫画",
+										desc: "等間隔の4段コマ枠",
+									},
+									{
+										id: "3rows",
+										label: "3段分割",
+										desc: "均等な3段の縦積み",
+									},
+									{
+										id: "2rows",
+										label: "2段分割",
+										desc: "上下の大きな2コマ枠",
+									},
+									{
+										id: "single",
+										label: "全画面単一枠",
+										desc: "外枠マージンのみ",
+									},
+									{
+										id: "topWideBottomTwo",
+										label: "上1・下2",
+										desc: "広いコマ+下段に並列2コマ",
+									},
+									{
+										id: "topTwoBottomWide",
+										label: "上2・下1",
+										desc: "並列2コマ+締めの広いコマ",
+									},
+									{
+										id: "grid2x2",
+										label: "2x2グリッド",
+										desc: "均等4分割（縦横2列）",
+									},
+									{
+										id: "threeCol",
+										label: "横3分割",
+										desc: "テンポの速いカット割り",
+									},
+									{
+										id: "dynamicMix",
+										label: "大小混在",
+										desc: "広い→速いカット→大小の実践的な割り",
+									},
+								] as const
+							).map((p) => (
+								<button
+									key={p.id}
+									type="button"
+									onClick={() => handleApplyFramePreset(p.id)}
+									className="py-3 px-4 rounded border border-gray-700 bg-gray-800/40 hover:bg-gray-800 active:bg-gray-800 text-left"
+								>
+									<div className="font-bold text-gray-200 mb-1">{p.label}</div>
+									<div className="text-[10px] text-gray-500">{p.desc}</div>
+								</button>
+							))}
 						</div>
 					</div>
 				</ModalOverlay>
