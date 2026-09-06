@@ -6,15 +6,12 @@ import {
 	Crop,
 	Download,
 	Eraser,
-	Eye,
-	EyeOff,
 	Grid2X2,
 	Layers,
 	MessageSquare,
 	Move,
 	PaintBucket,
 	Pen,
-	Plus,
 	Redo,
 	Save,
 	Trash2,
@@ -57,6 +54,7 @@ import {
 } from "@/lib/mv-custom-fonts";
 import { exportSinglePng } from "@/lib/export-drawing";
 import * as oekaki from "@onjmin/oekaki";
+import LayerPanel, { type LayerEntry } from "./LayerPanel";
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 1130; // 約 1 : 1.414 (漫画用紙比率)
@@ -154,6 +152,9 @@ interface LayerMeta {
 	name: string;
 	visible: boolean;
 	opacity: number;
+	// レイヤーパネル(LayerPanel)への受け渡し用。renderRef中にlayersRef.currentを直接読むのはNGなため、
+	// setLayerMetas経由でstateとして持ち回す
+	oekaki: oekaki.LayeredCanvas;
 }
 
 // レイヤーの実体は @onjmin/oekaki の LayeredCanvas。選択・コピー&ペースト・移動/拡縮/回転は
@@ -452,6 +453,7 @@ export default function MangaEditor({
 					name: l.name,
 					visible: l.visible,
 					opacity: l.opacity,
+					oekaki: l.oekaki,
 				})),
 			);
 		}
@@ -551,7 +553,7 @@ export default function MangaEditor({
 		const clip = clipboardCanvasRef.current;
 		if (!clip) return;
 		const curLayer = layersRef.current[activeLayerIndex];
-		if (!curLayer || !curLayer.visible) return;
+		if (!curLayer || !curLayer.visible || curLayer.oekaki.locked) return;
 
 		saveHistorySnapshot();
 		curLayer.oekaki.paste(clip);
@@ -772,7 +774,7 @@ export default function MangaEditor({
 		setSelectedTextId(null);
 
 		const curLayer = layersRef.current[activeLayerIndex];
-		if (!curLayer || !curLayer.visible) return;
+		if (!curLayer || !curLayer.visible || curLayer.oekaki.locked) return;
 
 		saveHistorySnapshot();
 		isDrawingRef.current = true;
@@ -920,7 +922,7 @@ export default function MangaEditor({
 
 		if (!isDrawingRef.current || !lastPointRef.current) return;
 		const curLayer = layersRef.current[activeLayerIndex];
-		if (!curLayer || !curLayer.visible) return;
+		if (!curLayer || !curLayer.visible || curLayer.oekaki.locked) return;
 
 		const ctx = curLayer.ctx;
 		const prev = lastPointRef.current;
@@ -1546,86 +1548,150 @@ export default function MangaEditor({
 					)}
 				</div>
 
-				{/* レイヤーパネル（右側スライド） */}
+				{/* レイヤーパネル — DrawingEditorと同じ LayerPanel(oekaki.LayeredCanvas前提) を再利用。
+				    表示は「一番上のレイヤーがリストの先頭」という一般的な並び順にするため、
+				    実配列(layersRef、0=最背面)を反転して渡し、コールバックのindexは都度実indexへ変換する。 */}
 				{showLayersPanel && (
-					<aside className="w-56 shrink-0 border-l border-gray-800 bg-[#131720] flex flex-col z-20">
-						<div className="flex items-center justify-between p-2.5 border-b border-gray-800">
-							<span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
-								<Layers size={14} />
-								レイヤー
-							</span>
-							<button
-								type="button"
-								onClick={() => {
-									const name = `レイヤー ${layersRef.current.length + 1}`;
-									const lc = new oekaki.LayeredCanvas(name);
-									const newLayer: CanvasLayer = {
-										id: lc.uuid,
-										name,
-										canvas: lc.canvas,
-										ctx: lc.ctx,
-										visible: true,
-										opacity: 100,
-										oekaki: lc,
-									};
-									layersRef.current.push(newLayer);
-									setLayerMetas(
-										layersRef.current.map((l) => ({
-											id: l.id,
-											name: l.name,
-											visible: l.visible,
-											opacity: l.opacity,
-										})),
-									);
-									setActiveLayerIndex(layersRef.current.length - 1);
-									renderDisplay();
-								}}
-								className="grid place-items-center w-9 h-9 rounded-lg hover:bg-gray-700 active:bg-gray-700 text-gray-400 hover:text-white"
-								title="新規レイヤー追加"
-							>
-								<Plus size={16} />
-							</button>
-						</div>
-						<div className="flex-1 overflow-y-auto p-2 space-y-1">
-							{[...layerMetas].reverse().map((layer, revIdx) => {
-								const originalIdx = layerMetas.length - 1 - revIdx;
-								const isSelected = originalIdx === activeLayerIndex;
-								return (
-									<div
-										key={layer.id}
-										onClick={() => setActiveLayerIndex(originalIdx)}
-										className={`flex items-center justify-between px-2.5 py-2 rounded text-xs cursor-pointer transition-colors ${isSelected ? "bg-blue-600/30 border border-blue-500 text-white font-bold" : "hover:bg-gray-800 text-gray-300"}`}
-									>
-										<span className="truncate flex-1">{layer.name}</span>
-										<div className="flex items-center gap-1.5">
-											<button
-												type="button"
-												onClick={(e) => {
-													e.stopPropagation();
-													if (layersRef.current[originalIdx]) {
-														layersRef.current[originalIdx].visible =
-															!layersRef.current[originalIdx].visible;
-													}
-													setLayerMetas(
-														layersRef.current.map((l) => ({
-															id: l.id,
-															name: l.name,
-															visible: l.visible,
-															opacity: l.opacity,
-														})),
-													);
-													renderDisplay();
-												}}
-												className="grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-white active:bg-gray-700/50"
-											>
-												{layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-											</button>
-										</div>
-									</div>
-								);
-							})}
-						</div>
-					</aside>
+					<LayerPanel
+						layers={[...layerMetas].reverse().map(
+							(l): LayerEntry => ({ instance: l.oekaki, name: l.name }),
+						)}
+						activeIndex={layerMetas.length - 1 - activeLayerIndex}
+						onSelect={(panelIdx) => {
+							setActiveLayerIndex(layersRef.current.length - 1 - panelIdx);
+						}}
+						onReorder={(panelFrom, panelTo) => {
+							const len = layersRef.current.length;
+							const realFrom = len - 1 - panelFrom;
+							const realTo = len - 1 - panelTo;
+							const arr = [...layersRef.current];
+							const [moved] = arr.splice(realFrom, 1);
+							arr.splice(realTo, 0, moved);
+							layersRef.current = arr;
+							setActiveLayerIndex((cur) => {
+								if (cur === realFrom) return realTo;
+								if (realFrom < cur && realTo >= cur) return cur - 1;
+								if (realFrom > cur && realTo <= cur) return cur + 1;
+								return cur;
+							});
+							// レイヤー構成(並び順)が変わるとUndo履歴のインデックス対応が崩れるため、安全のためクリアする
+							undoStackRef.current = [];
+							redoStackRef.current = [];
+							setCanUndo(false);
+							setCanRedo(false);
+							setLayerMetas(
+								arr.map((l) => ({
+									id: l.id,
+									name: l.name,
+									visible: l.visible,
+									opacity: l.opacity,
+									oekaki: l.oekaki,
+								})),
+							);
+							renderDisplay();
+						}}
+						onToggleVisibility={(panelIdx) => {
+							const realIdx = layersRef.current.length - 1 - panelIdx;
+							const l = layersRef.current[realIdx];
+							if (!l) return;
+							l.visible = !l.visible;
+							l.oekaki.visible = l.visible;
+							setLayerMetas(
+								layersRef.current.map((ll) => ({
+									id: ll.id,
+									name: ll.name,
+									visible: ll.visible,
+									opacity: ll.opacity,
+									oekaki: ll.oekaki,
+								})),
+							);
+							renderDisplay();
+						}}
+						onToggleLock={(panelIdx) => {
+							const realIdx = layersRef.current.length - 1 - panelIdx;
+							const l = layersRef.current[realIdx];
+							if (!l) return;
+							l.oekaki.locked = !l.oekaki.locked;
+							setLayerMetas(
+								layersRef.current.map((ll) => ({
+									id: ll.id,
+									name: ll.name,
+									visible: ll.visible,
+									opacity: ll.opacity,
+									oekaki: ll.oekaki,
+								})),
+							);
+						}}
+						onOpacityChange={(panelIdx, opacity) => {
+							const realIdx = layersRef.current.length - 1 - panelIdx;
+							const l = layersRef.current[realIdx];
+							if (!l) return;
+							l.opacity = opacity;
+							l.oekaki.opacity = opacity;
+							setLayerMetas(
+								layersRef.current.map((ll) => ({
+									id: ll.id,
+									name: ll.name,
+									visible: ll.visible,
+									opacity: ll.opacity,
+									oekaki: ll.oekaki,
+								})),
+							);
+							renderDisplay();
+						}}
+						onAdd={() => {
+							const name = `レイヤー ${layersRef.current.length + 1}`;
+							const lc = new oekaki.LayeredCanvas(name);
+							const newLayer: CanvasLayer = {
+								id: lc.uuid,
+								name,
+								canvas: lc.canvas,
+								ctx: lc.ctx,
+								visible: true,
+								opacity: 100,
+								oekaki: lc,
+							};
+							layersRef.current.push(newLayer);
+							setLayerMetas(
+								layersRef.current.map((l) => ({
+									id: l.id,
+									name: l.name,
+									visible: l.visible,
+									opacity: l.opacity,
+									oekaki: l.oekaki,
+								})),
+							);
+							setActiveLayerIndex(layersRef.current.length - 1);
+							renderDisplay();
+						}}
+						onDelete={(panelIdx) => {
+							if (layersRef.current.length <= 1) return;
+							const realIdx = layersRef.current.length - 1 - panelIdx;
+							const arr = layersRef.current.filter((_, idx) => idx !== realIdx);
+							layersRef.current = arr;
+							let newIdx = activeLayerIndex;
+							if (newIdx >= arr.length) newIdx = arr.length - 1;
+							if (realIdx < activeLayerIndex) newIdx--;
+							if (newIdx < 0) newIdx = 0;
+							setActiveLayerIndex(newIdx);
+							// レイヤー構成が変わるとUndo履歴のインデックス対応が崩れるため、安全のためクリアする
+							undoStackRef.current = [];
+							redoStackRef.current = [];
+							setCanUndo(false);
+							setCanRedo(false);
+							setLayerMetas(
+								arr.map((l) => ({
+									id: l.id,
+									name: l.name,
+									visible: l.visible,
+									opacity: l.opacity,
+									oekaki: l.oekaki,
+								})),
+							);
+							renderDisplay();
+						}}
+						onClose={() => setShowLayersPanel(false)}
+					/>
 				)}
 			</div>
 
