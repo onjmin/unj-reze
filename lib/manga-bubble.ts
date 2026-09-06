@@ -1,6 +1,6 @@
 "use client";
 
-export type BubbleShape = "ellipse" | "roundRect" | "shout" | "thought";
+export type BubbleShape = "none" | "ellipse" | "roundRect" | "shout" | "thought";
 export type TailDirection =
 	| "none"
 	| "bottom"
@@ -39,6 +39,8 @@ export function drawBubble(ctx: CanvasRenderingContext2D, config: BubbleConfig):
 		borderColor = "#000000",
 		backgroundColor = "#ffffff",
 	} = config;
+
+	if (shape === "none") return;
 
 	ctx.save();
 	ctx.fillStyle = backgroundColor;
