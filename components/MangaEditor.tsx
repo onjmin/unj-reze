@@ -56,6 +56,7 @@ import {
 	upsertCustomFont,
 } from "@/lib/mv-custom-fonts";
 import { exportSinglePng } from "@/lib/export-drawing";
+import * as oekaki from "@onjmin/oekaki";
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 1130; // 約 1 : 1.414 (漫画用紙比率)
@@ -108,34 +109,6 @@ function clampRectToPanel(
 	return { x: Math.round(outX), y: Math.round(outY) };
 }
 
-// ローカル座標(中心からの相対座標)を回転させてワールド座標へ変換する
-function localToWorld(
-	lx: number,
-	ly: number,
-	cx: number,
-	cy: number,
-	rotation: number,
-): { x: number; y: number } {
-	const cos = Math.cos(rotation);
-	const sin = Math.sin(rotation);
-	return { x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos };
-}
-
-// ワールド座標を中心・回転を基準としたローカル座標へ変換する（逆回転）
-function worldToLocal(
-	px: number,
-	py: number,
-	cx: number,
-	cy: number,
-	rotation: number,
-): { x: number; y: number } {
-	const dx = px - cx;
-	const dy = py - cy;
-	const cos = Math.cos(-rotation);
-	const sin = Math.sin(-rotation);
-	return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
-}
-
 function distance(ax: number, ay: number, bx: number, by: number): number {
 	return Math.hypot(ax - bx, ay - by);
 }
@@ -166,22 +139,14 @@ interface SelectionRect {
 	h: number;
 }
 
-// 貼り付け直後、レイヤーへ確定(スタンプ)する前の「フローティング」編集状態。
-// 移動・拡縮・回転をここで自由に行い、確定するとレイヤーへ焼き込まれる。
-interface FloatingPaste {
-	canvas: HTMLCanvasElement;
-	cx: number;
-	cy: number;
-	w: number;
-	h: number;
-	rotation: number; // ラジアン
-}
-
-interface PasteDrag {
+// 選択範囲(コピー元 or 貼り付け直後)へのドラッグ操作
+interface SelectionDrag {
 	mode: "move" | "resize" | "rotate";
 	startX: number;
 	startY: number;
-	orig: FloatingPaste;
+	// resize/rotateの基準として、ドラッグ開始時点の選択範囲・回転角度を保持する
+	origSel: SelectionRect;
+	origRotation: number;
 }
 
 interface LayerMeta {
@@ -191,9 +156,13 @@ interface LayerMeta {
 	opacity: number;
 }
 
+// レイヤーの実体は @onjmin/oekaki の LayeredCanvas。選択・コピー&ペースト・移動/拡縮/回転は
+// そちらの実装（DrawingEditorと同じ基盤）に委譲し、このコンポーネントは
+// canvas/ctxを直接使うトーン塗り・コマ枠描画・Undo履歴(全レイヤー合成スナップショット)だけ独自に持つ。
 interface CanvasLayer extends LayerMeta {
 	canvas: HTMLCanvasElement;
 	ctx: CanvasRenderingContext2D;
+	oekaki: oekaki.LayeredCanvas;
 }
 
 interface MangaBubbleItem extends BubbleConfig {
@@ -229,18 +198,17 @@ export default function MangaEditor({
 	const [penColor, setPenColor] = useState("#000000");
 	const [eraserSize, setEraserSize] = useState(24);
 
-	// 範囲選択コピー&ペースト状態（お絵かきエディタと同様に、選択範囲を内部クリップボードへコピーできるようにする）
+	// 範囲選択コピー&ペースト状態
+	// 実際の選択/移動/拡縮/回転/削除は oekaki.LayeredCanvas 側(DrawingEditorと同じ実装)に委譲し、
+	// ここではハンドル表示用に選択矩形と回転角度(ライブラリ側は角度を保持しないため独自追跡)だけ持つ。
 	const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
 	const selectDragStartRef = useRef<{ x: number; y: number } | null>(null);
 	const clipboardCanvasRef = useRef<HTMLCanvasElement | null>(null);
 	const [hasClipboard, setHasClipboard] = useState(false);
-	// 貼り付け後のフローティング編集（移動・拡縮・回転してからレイヤーへ確定する）
-	const [floatingPaste, setFloatingPaste] = useState<FloatingPaste | null>(null);
-	const floatingPasteRef = useRef<FloatingPaste | null>(null);
-	const pasteDragRef = useRef<PasteDrag | null>(null);
-	useEffect(() => {
-		floatingPasteRef.current = floatingPaste;
-	}, [floatingPaste]);
+	const selectionRotationRef = useRef(0); // ラジアン。ハンドル位置計算のみに使用
+	const selectionDragRef = useRef<SelectionDrag | null>(null);
+	// oekaki初期化用の非表示マウント先（実際の表示は従来通りdisplayCanvasRefへ手動合成する）
+	const oekakiMountRef = useRef<HTMLDivElement | null>(null);
 
 	// トーン状態
 	const [activeTone, setActiveTone] = useState<ToneType>("dot-20");
@@ -381,7 +349,9 @@ export default function MangaEditor({
 			}
 		}
 
-		// 5. 範囲選択の点線マーキー
+		// 5. 範囲選択の点線マーキー + ハンドル
+		// 選択中の内容そのもの（コピー元 or 貼り付け直後）は既に oekaki.LayeredCanvas が
+		// レイヤーのcanvasへ直接描画済みなので、ここでは枠線とハンドルのみ描く。
 		if (selectionRect) {
 			ctx.save();
 			ctx.strokeStyle = "#f59e0b";
@@ -389,51 +359,23 @@ export default function MangaEditor({
 			ctx.setLineDash([6, 4]);
 			ctx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
 			ctx.restore();
-		}
-
-		// 6. フローティング貼り付け（レイヤーへ確定する前の、移動・拡縮・回転が可能な状態）
-		if (floatingPaste) {
-			const fp = floatingPaste;
-			ctx.save();
-			ctx.translate(fp.cx, fp.cy);
-			ctx.rotate(fp.rotation);
-			ctx.drawImage(fp.canvas, -fp.w / 2, -fp.h / 2, fp.w, fp.h);
-			ctx.restore();
 
 			if (activeTool === "rectSelect") {
-				// 枠線
-				ctx.save();
-				ctx.translate(fp.cx, fp.cy);
-				ctx.rotate(fp.rotation);
-				ctx.strokeStyle = "#f59e0b";
-				ctx.lineWidth = 2;
-				ctx.setLineDash([6, 4]);
-				ctx.strokeRect(-fp.w / 2, -fp.h / 2, fp.w, fp.h);
-				ctx.restore();
-
-				// リサイズハンドル(右下)・回転ハンドル(上)
-				const topCenter = localToWorld(0, -fp.h / 2, fp.cx, fp.cy, fp.rotation);
-				const rotateHandle = localToWorld(
-					0,
-					-fp.h / 2 - 30,
-					fp.cx,
-					fp.cy,
-					fp.rotation,
-				);
-				const resizeHandle = localToWorld(
-					fp.w / 2,
-					fp.h / 2,
-					fp.cx,
-					fp.cy,
-					fp.rotation,
-				);
+				const rotateHandle = {
+					x: selectionRect.x + selectionRect.w / 2,
+					y: selectionRect.y - 30,
+				};
+				const resizeHandle = {
+					x: selectionRect.x + selectionRect.w,
+					y: selectionRect.y + selectionRect.h,
+				};
 
 				ctx.save();
 				ctx.strokeStyle = "#f59e0b";
 				ctx.lineWidth = 1.5;
 				ctx.setLineDash([]);
 				ctx.beginPath();
-				ctx.moveTo(topCenter.x, topCenter.y);
+				ctx.moveTo(selectionRect.x + selectionRect.w / 2, selectionRect.y);
 				ctx.lineTo(rotateHandle.x, rotateHandle.y);
 				ctx.stroke();
 
@@ -446,15 +388,7 @@ export default function MangaEditor({
 				ctx.restore();
 			}
 		}
-	}, [
-		bubbles,
-		texts,
-		selectedBubbleId,
-		selectedTextId,
-		selectionRect,
-		floatingPaste,
-		activeTool,
-	]);
+	}, [bubbles, texts, selectedBubbleId, selectedTextId, selectionRect, activeTool]);
 
 	// カスタムフォント初期ロード
 	useEffect(() => {
@@ -466,21 +400,29 @@ export default function MangaEditor({
 	// レイヤーの初期化 (下描き、コマ枠、線画)
 	useEffect(() => {
 		const createLayer = (name: string): CanvasLayer => {
-			const canvas = document.createElement("canvas");
-			canvas.width = CANVAS_WIDTH;
-			canvas.height = CANVAS_HEIGHT;
-			const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+			const lc = new oekaki.LayeredCanvas(name);
 			return {
-				id: Math.random().toString(36).slice(2),
+				id: lc.uuid,
 				name,
-				canvas,
-				ctx,
+				canvas: lc.canvas,
+				ctx: lc.ctx,
 				visible: true,
 				opacity: 100,
+				oekaki: lc,
 			};
 		};
 
 		if (layersRef.current.length === 0) {
+			// oekakiは内部でレイヤーごとのcanvasをmountTargetへ実際に追加するライブラリ。
+			// このコンポーネントは従来通りdisplayCanvasRefへ手動合成する表示方式を維持するため、
+			// oekaki自身のcanvas群は非表示のマウント先に隔離し、画面には出さない
+			// （選択/コピー&ペースト/移動/拡縮/回転のロジックだけを再利用する）。
+			// この効果は renderDisplay の変化などで再実行され得るため、
+			// 初回レイヤー作成時の1回だけ呼び、以後の再実行では呼び直さない
+			// （呼び直すと選択状態などのoekaki内部グローバル状態が消えてしまう）。
+			if (oekakiMountRef.current) {
+				oekaki.init(oekakiMountRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
+			}
 			const initialLayers = [
 				createLayer("下描き"),
 				createLayer("トーン"),
@@ -559,11 +501,6 @@ export default function MangaEditor({
 
 	// Undo
 	const handleUndo = () => {
-		// フローティング貼り付け編集中は、キャンバス履歴ではなく貼り付け自体を取り消す
-		if (floatingPasteRef.current) {
-			setFloatingPaste(null);
-			return;
-		}
 		if (undoStackRef.current.length === 0) return;
 		redoStackRef.current.push(captureSnapshot());
 
@@ -587,78 +524,66 @@ export default function MangaEditor({
 	};
 
 	// 選択範囲をアクティブレイヤーから内部クリップボードへコピー
+	// （実体は oekaki.LayeredCanvas.copySelection() — DrawingEditorと同じ実装）
 	const handleCopySelection = useCallback(() => {
 		if (!selectionRect) return;
 		const curLayer = layersRef.current[activeLayerIndex];
 		if (!curLayer) return;
-		const { x, y, w, h } = selectionRect;
-		const clip = document.createElement("canvas");
-		clip.width = w;
-		clip.height = h;
-		const clipCtx = clip.getContext("2d");
-		if (!clipCtx) return;
-		clipCtx.drawImage(curLayer.canvas, x, y, w, h, 0, 0, w, h);
+		const clip = curLayer.oekaki.copySelection();
+		if (!clip) return;
 		clipboardCanvasRef.current = clip;
 		setHasClipboard(true);
 	}, [selectionRect, activeLayerIndex]);
 
-	// フローティング貼り付け内容をアクティブレイヤーへ焼き込んで確定する
-	const commitFloatingPaste = useCallback(() => {
-		const fp = floatingPasteRef.current;
-		if (!fp) return;
+	// アクティブレイヤーの選択を解除する（フローティング内容は既にcanvasへ反映済みのため、
+	// 状態を破棄するだけで確定したことになる）
+	const clearActiveSelection = useCallback(() => {
 		const curLayer = layersRef.current[activeLayerIndex];
-		if (!curLayer) {
-			setFloatingPaste(null);
-			return;
-		}
-		saveHistorySnapshot();
-		const ctx = curLayer.ctx;
-		ctx.save();
-		ctx.translate(fp.cx, fp.cy);
-		ctx.rotate(fp.rotation);
-		ctx.drawImage(fp.canvas, -fp.w / 2, -fp.h / 2, fp.w, fp.h);
-		ctx.restore();
-		setFloatingPaste(null);
-		renderDisplay();
-	}, [activeLayerIndex, saveHistorySnapshot, renderDisplay]);
+		curLayer?.oekaki.deselect();
+		setSelectionRect(null);
+		selectionRotationRef.current = 0;
+	}, [activeLayerIndex]);
 
-	// 内部クリップボードの内容を「フローティング貼り付け」として置く。
-	// レイヤーへは即焼き込まず、移動・拡縮・回転してから確定(commitFloatingPaste)する。
+	// 内部クリップボードの内容をアクティブレイヤーへ貼り付ける。
+	// oekaki.LayeredCanvas.paste() が「貼り付け直後は選択状態になり、そのまま移動・拡縮・削除できる」ため、
+	// 以降のハンドル操作(移動/拡縮/回転)もそのままoekaki側の選択範囲に対して行う。
 	const handlePasteSelection = useCallback(() => {
 		const clip = clipboardCanvasRef.current;
 		if (!clip) return;
-		// 既にフローティング編集中の貼り付けがあれば先に確定してから、新しく貼る
-		if (floatingPasteRef.current) commitFloatingPaste();
+		const curLayer = layersRef.current[activeLayerIndex];
+		if (!curLayer || !curLayer.visible) return;
 
-		// コピー元と全く同じ位置に重ねると変化が分かりづらいので、少しずらして貼り付ける
-		const baseX = selectionRect
-			? selectionRect.x + 16
-			: (CANVAS_WIDTH - clip.width) / 2;
-		const baseY = selectionRect
-			? selectionRect.y + 16
-			: (CANVAS_HEIGHT - clip.height) / 2;
-		const x = Math.min(Math.max(0, baseX), CANVAS_WIDTH - clip.width);
-		const y = Math.min(Math.max(0, baseY), CANVAS_HEIGHT - clip.height);
-
-		setFloatingPaste({
-			canvas: clip,
-			cx: x + clip.width / 2,
-			cy: y + clip.height / 2,
-			w: clip.width,
-			h: clip.height,
-			rotation: 0,
-		});
+		saveHistorySnapshot();
+		curLayer.oekaki.paste(clip);
+		selectionRotationRef.current = 0;
+		const sel = curLayer.oekaki.selection;
+		setSelectionRect(sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null);
 		// 貼り付け直後はハンドルを操作できるよう、範囲選択ツールへ切り替える
 		setActiveTool("rectSelect");
-		setSelectionRect(null);
-	}, [selectionRect, commitFloatingPaste]);
+		renderDisplay();
+	}, [activeLayerIndex, saveHistorySnapshot, renderDisplay]);
 
-	// 範囲選択ツール以外に切り替えたら、フローティング貼り付けを自動的にレイヤーへ確定する
+	// 選択範囲内の画素を削除する（Photoshop等の「選択範囲を削除」と同じ挙動）
+	const handleDeleteSelection = useCallback(() => {
+		const curLayer = layersRef.current[activeLayerIndex];
+		if (!curLayer || !curLayer.oekaki.selection) return;
+		saveHistorySnapshot();
+		curLayer.oekaki.deleteSelection();
+		clearActiveSelection();
+		renderDisplay();
+	}, [activeLayerIndex, saveHistorySnapshot, clearActiveSelection, renderDisplay]);
+
+	// 範囲選択ツール以外に切り替えたら、選択状態を解除する
+	// （フローティング内容は既にレイヤーcanvasへ反映済みなので、見た目は変わらず確定したことになる）
 	useEffect(() => {
-		if (activeTool !== "rectSelect" && floatingPasteRef.current) {
-			commitFloatingPaste();
+		if (activeTool !== "rectSelect") {
+			const curLayer = layersRef.current[activeLayerIndex];
+			if (curLayer?.oekaki.selection) {
+				curLayer.oekaki.deselect();
+				setSelectionRect(null);
+			}
 		}
-	}, [activeTool, commitFloatingPaste]);
+	}, [activeTool, activeLayerIndex]);
 
 	// Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) / Ctrl+C / Ctrl+V キーボードショートカット
 	// ボタンのtitleに表示しているのに未実装だった（押しても何も起きない状態だった）ため配線する
@@ -671,15 +596,15 @@ export default function MangaEditor({
 				target instanceof HTMLTextAreaElement;
 
 			if (!isEditingText && !e.ctrlKey && !e.metaKey) {
-				// フローティング貼り付け中: Enterで確定、Escape/Deleteで破棄
-				if (floatingPasteRef.current) {
+				// 選択中: Escapeで選択解除、Delete/Backspaceで選択範囲を削除
+				if (selectionRect) {
 					const key = e.key;
-					if (key === "Enter") {
+					if (key === "Escape") {
 						e.preventDefault();
-						commitFloatingPaste();
-					} else if (key === "Escape" || key === "Delete" || key === "Backspace") {
+						clearActiveSelection();
+					} else if (key === "Delete" || key === "Backspace") {
 						e.preventDefault();
-						setFloatingPaste(null);
+						handleDeleteSelection();
 					}
 				}
 				return;
@@ -689,7 +614,6 @@ export default function MangaEditor({
 			const key = e.key.toLowerCase();
 			if (key === "z" && !e.shiftKey) {
 				e.preventDefault();
-				// フローティング貼り付け編集中の取り消しは handleUndo 内で処理される
 				handleUndo();
 			} else if (key === "y" || (key === "z" && e.shiftKey)) {
 				e.preventDefault();
@@ -735,30 +659,55 @@ export default function MangaEditor({
 		// キャンバス外に指が出てもドラッグ/描画を継続できるようにする
 		(e.target as Element).setPointerCapture?.(e.pointerId);
 
-		// 矩形選択ツール：フローティング貼り付け中ならハンドル操作を優先し、
-		// それ以外のドラッグはコピー用の範囲選択として扱う
+		// 矩形選択ツール：既存の選択(コピー元 or 貼り付け直後)があればハンドル操作を優先し、
+		// それ以外のドラッグは新規の範囲選択として扱う
 		if (activeTool === "rectSelect") {
-			const fp = floatingPasteRef.current;
-			if (fp) {
+			const curLayer = layersRef.current[activeLayerIndex];
+			const sel = curLayer?.oekaki.selection;
+			if (curLayer && sel) {
+				const rotation = selectionRotationRef.current;
 				const HIT = 16;
-				const rotateHandle = localToWorld(0, -fp.h / 2 - 30, fp.cx, fp.cy, fp.rotation);
-				const resizeHandle = localToWorld(fp.w / 2, fp.h / 2, fp.cx, fp.cy, fp.rotation);
+				// ハンドルは常に選択範囲(未回転のバウンディングボックス)の角に固定表示する
+				// （oekakiの selection は回転しても x,y,w,h が変化しない仕様のため）
+				const rotateHandle = { x: sel.x + sel.w / 2, y: sel.y - 30 };
+				const resizeHandle = { x: sel.x + sel.w, y: sel.y + sel.h };
 				if (distance(pt.x, pt.y, rotateHandle.x, rotateHandle.y) <= HIT) {
-					pasteDragRef.current = { mode: "rotate", startX: pt.x, startY: pt.y, orig: fp };
+					selectionDragRef.current = {
+						mode: "rotate",
+						startX: pt.x,
+						startY: pt.y,
+						origSel: sel,
+						origRotation: rotation,
+					};
 					return;
 				}
 				if (distance(pt.x, pt.y, resizeHandle.x, resizeHandle.y) <= HIT) {
-					pasteDragRef.current = { mode: "resize", startX: pt.x, startY: pt.y, orig: fp };
+					selectionDragRef.current = {
+						mode: "resize",
+						startX: pt.x,
+						startY: pt.y,
+						origSel: sel,
+						origRotation: rotation,
+					};
 					return;
 				}
-				const local = worldToLocal(pt.x, pt.y, fp.cx, fp.cy, fp.rotation);
-				if (Math.abs(local.x) <= fp.w / 2 && Math.abs(local.y) <= fp.h / 2) {
-					pasteDragRef.current = { mode: "move", startX: pt.x, startY: pt.y, orig: fp };
+				if (
+					pt.x >= sel.x &&
+					pt.x <= sel.x + sel.w &&
+					pt.y >= sel.y &&
+					pt.y <= sel.y + sel.h
+				) {
+					selectionDragRef.current = {
+						mode: "move",
+						startX: pt.x,
+						startY: pt.y,
+						origSel: sel,
+						origRotation: rotation,
+					};
 					return;
 				}
-				// フローティング領域の外をタップ/クリック → 現在の貼り付けを確定してから
-				// 新しい範囲選択を開始する
-				commitFloatingPaste();
+				// 選択範囲の外をタップ/クリック → 選択解除してから新しい範囲選択を開始する
+				clearActiveSelection();
 			}
 			selectDragStartRef.current = pt;
 			setSelectionRect({ x: pt.x, y: pt.y, w: 0, h: 0 });
@@ -879,25 +828,40 @@ export default function MangaEditor({
 		const pt = getCanvasPoint(e);
 		if (!pt) return;
 
-		// フローティング貼り付けのハンドル操作（移動・拡縮・回転）
-		if (activeTool === "rectSelect" && pasteDragRef.current) {
-			const drag = pasteDragRef.current;
-			const orig = drag.orig;
+		// 選択範囲のハンドル操作（移動・拡縮・回転）— 実際の変形は oekaki.LayeredCanvas に委譲する
+		if (activeTool === "rectSelect" && selectionDragRef.current) {
+			const drag = selectionDragRef.current;
+			const curLayer = layersRef.current[activeLayerIndex];
+			if (!curLayer) return;
+			const { origSel } = drag;
+
 			if (drag.mode === "move") {
+				// moveSelectionは差分(dx,dy)指定なので、前回位置からの増分だけ渡す
 				const dx = pt.x - drag.startX;
 				const dy = pt.y - drag.startY;
-				setFloatingPaste({ ...orig, cx: orig.cx + dx, cy: orig.cy + dy });
+				curLayer.oekaki.moveSelection(dx, dy);
+				drag.startX = pt.x;
+				drag.startY = pt.y;
 			} else if (drag.mode === "resize") {
-				// 中心を固定したまま、ドラッグ位置をローカル座標(回転を考慮)に変換して幅高さを決める
-				const local = worldToLocal(pt.x, pt.y, orig.cx, orig.cy, orig.rotation);
-				const newW = Math.max(16, Math.round(Math.abs(local.x) * 2));
-				const newH = Math.max(16, Math.round(Math.abs(local.y) * 2));
-				setFloatingPaste({ ...orig, w: newW, h: newH });
+				// resizeSelectionは左上基準・常に元画像から再計算されるため、
+				// ドラッグ開始時点の選択範囲(origSel)を基準に絶対サイズを渡す
+				const newW = Math.max(16, Math.round(pt.x - origSel.x));
+				const newH = Math.max(16, Math.round(pt.y - origSel.y));
+				curLayer.oekaki.resizeSelection(newW, newH);
 			} else if (drag.mode === "rotate") {
-				const angle =
-					Math.atan2(pt.y - orig.cy, pt.x - orig.cx) + Math.PI / 2;
-				setFloatingPaste({ ...orig, rotation: angle });
+				// rotateSelectionは加算角度[度]指定。選択範囲の中心からの角度を求め、
+				// 前回からの差分角度だけ渡す
+				const cx = origSel.x + origSel.w / 2;
+				const cy = origSel.y + origSel.h / 2;
+				const angle = Math.atan2(pt.y - cy, pt.x - cx) + Math.PI / 2;
+				const deltaDeg = ((angle - selectionRotationRef.current) * 180) / Math.PI;
+				curLayer.oekaki.rotateSelection(deltaDeg);
+				selectionRotationRef.current = angle;
 			}
+
+			const sel = curLayer.oekaki.selection;
+			setSelectionRect(sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null);
+			renderDisplay();
 			return;
 		}
 
@@ -1012,7 +976,7 @@ export default function MangaEditor({
 		isDrawingRef.current = false;
 		lastPointRef.current = null;
 		isDraggingObjectRef.current = null;
-		pasteDragRef.current = null;
+		selectionDragRef.current = null;
 
 		if (selectDragStartRef.current) {
 			selectDragStartRef.current = null;
@@ -1024,6 +988,11 @@ export default function MangaEditor({
 				const w = Math.min(CANVAS_WIDTH - x, Math.round(prev.w));
 				const h = Math.min(CANVAS_HEIGHT - y, Math.round(prev.h));
 				if (w < 4 || h < 4) return null;
+				// 実際の選択状態は oekaki.LayeredCanvas.select() へ委譲する
+				// （以降のコピー/移動/拡縮/回転/削除はこの選択に対して行われる）
+				const curLayer = layersRef.current[activeLayerIndex];
+				curLayer?.oekaki.select(x, y, w, h);
+				selectionRotationRef.current = 0;
 				return { x, y, w, h };
 			});
 		}
@@ -1232,9 +1201,9 @@ export default function MangaEditor({
 	};
 
 	// 完成画像の保存 (PNG Data URL)
+	// 選択中の内容は既にレイヤーcanvasへ描画済み(oekaki側で継続的に反映される)なので、
+	// 保存前に特別な確定処理は不要
 	const handleSave = () => {
-		// 未確定のフローティング貼り付けがあれば、保存前にレイヤーへ焼き込む
-		commitFloatingPaste();
 		const finalCanvas = document.createElement("canvas");
 		finalCanvas.width = CANVAS_WIDTH;
 		finalCanvas.height = CANVAS_HEIGHT;
@@ -1269,7 +1238,6 @@ export default function MangaEditor({
 
 	// 画像としてエクスポート
 	const handleExportPng = () => {
-		commitFloatingPaste();
 		const finalCanvas = document.createElement("canvas");
 		finalCanvas.width = CANVAS_WIDTH;
 		finalCanvas.height = CANVAS_HEIGHT;
@@ -1292,6 +1260,8 @@ export default function MangaEditor({
 
 	return (
 		<div className="fixed inset-0 z-50 flex flex-col bg-[#0b0e14] text-gray-200 select-none">
+			{/* oekaki(レイヤーエンジン)の内部canvas群を隔離する非表示マウント先。画面には出さない */}
+			<div ref={oekakiMountRef} style={{ display: "none" }} aria-hidden="true" />
 			{/* トップバー */}
 			<header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-800 bg-[#131720] px-3">
 				<div className="flex items-center gap-2">
@@ -1551,26 +1521,26 @@ export default function MangaEditor({
 						</div>
 					)}
 
-					{/* フローティング貼り付けの操作バー */}
-					{floatingPaste && activeTool === "rectSelect" && (
+					{/* 範囲選択の操作バー（コピー元 or 貼り付け直後） */}
+					{selectionRect && activeTool === "rectSelect" && (
 						<div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#131720]/95 border border-gray-700 px-3 py-1.5 rounded-full flex items-center gap-2 text-xs shadow-xl backdrop-blur-md">
 							<span className="text-gray-400 font-bold">
-								貼り付け編集中 (ドラッグで移動・右下で拡縮・上のハンドルで回転)
+								選択中 (ドラッグで移動・右下で拡縮・上のハンドルで回転)
 							</span>
 							<button
 								type="button"
-								onClick={() => setFloatingPaste(null)}
+								onClick={handleDeleteSelection}
 								className="text-red-400 hover:text-red-300 flex items-center gap-1 font-bold pl-2 border-l border-gray-700"
 							>
 								<Trash2 size={13} />
-								破棄
+								削除
 							</button>
 							<button
 								type="button"
-								onClick={commitFloatingPaste}
+								onClick={clearActiveSelection}
 								className="text-blue-400 hover:text-blue-300 flex items-center gap-1 font-bold pl-2 border-l border-gray-700"
 							>
-								確定 (Enter)
+								選択解除 (Esc)
 							</button>
 						</div>
 					)}
@@ -1587,17 +1557,16 @@ export default function MangaEditor({
 							<button
 								type="button"
 								onClick={() => {
-									const canvas = document.createElement("canvas");
-									canvas.width = CANVAS_WIDTH;
-									canvas.height = CANVAS_HEIGHT;
-									const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+									const name = `レイヤー ${layersRef.current.length + 1}`;
+									const lc = new oekaki.LayeredCanvas(name);
 									const newLayer: CanvasLayer = {
-										id: Math.random().toString(36).slice(2),
-										name: `レイヤー ${layersRef.current.length + 1}`,
-										canvas,
-										ctx,
+										id: lc.uuid,
+										name,
+										canvas: lc.canvas,
+										ctx: lc.ctx,
 										visible: true,
 										opacity: 100,
+										oekaki: lc,
 									};
 									layersRef.current.push(newLayer);
 									setLayerMetas(
