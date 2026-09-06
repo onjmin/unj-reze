@@ -76,7 +76,7 @@ export default function ProfileLoading() {
 	}
 
 	const name = seed.displayName || slug;
-	const info = getAvatarInfo(name);
+	const info = getAvatarInfo(slug, name);
 
 	return (
 		<div style={wrapperStyle}>

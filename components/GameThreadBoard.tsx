@@ -13,6 +13,9 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 interface ThreadReply {
 	id: string;
 	displayName: string;
+	userId?: string;
+	slug?: string;
+	bbsId?: string;
 	content: string;
 	createdAt?: string;
 }
@@ -106,7 +109,13 @@ export default function GameThreadBoard({
 						replies.map((r, i) => (
 							<div key={r.id} className="border-b border-gray-800/60 pb-1.5">
 								<div className="text-gray-500">
-									{i + 1} 名前：{getAvatarInfo(r.displayName).username}
+									{i + 1} 名前：
+									{
+										getAvatarInfo(
+											r.bbsId || r.userId,
+											r.displayName,
+										).username
+									}
 								</div>
 								<div className="text-gray-200 whitespace-pre-wrap break-words">
 									{r.content}

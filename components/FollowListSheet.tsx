@@ -171,7 +171,7 @@ export default function FollowListSheet({
 						</div>
 					) : (
 						users.map((u) => {
-							const info = getAvatarInfo(u.displayName);
+							const info = getAvatarInfo(u.userId || u.slug, u.displayName);
 							const isPending = pendingSlug === u.slug;
 							return (
 								<div

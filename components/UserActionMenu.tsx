@@ -24,6 +24,7 @@ interface UserActionMenuProps {
 	isOpen: boolean;
 	onClose: () => void;
 	targetUserDisplayName: string;
+	targetUserId?: string;
 	targetUserSlug?: string;
 	/** 表示専用（isSelf判定・アバター等）。フォロー/DMなどAPI呼び出しには currentUserSlug を使う。 */
 	currentUserId?: string;
@@ -40,6 +41,7 @@ export default function UserActionMenu({
 	isOpen,
 	onClose,
 	targetUserDisplayName,
+	targetUserId,
 	targetUserSlug,
 	currentUserId,
 	currentUserSlug,
@@ -70,7 +72,10 @@ export default function UserActionMenu({
 	const isSelf =
 		currentUserId === targetUserDisplayName ||
 		currentUserSlug === targetUserSlug;
-	const avatarInfo = getAvatarInfo(targetUserDisplayName);
+	const avatarInfo = getAvatarInfo(
+		targetUserId || targetUserSlug,
+		targetUserDisplayName,
+	);
 
 	// Cache update helper that merges updates with existing cache data
 	const updateCache = (

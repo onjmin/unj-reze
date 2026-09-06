@@ -256,7 +256,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 		}
 	};
 
-	const partnerInfo = getAvatarInfo(partnerName);
+	const partnerInfo = getAvatarInfo(partnerSlug, partnerName);
 	// API は新しい順で返すので、表示は古い順に戻す。
 	const ordered = useMemo(() => messages.slice().reverse(), [messages]);
 
@@ -461,6 +461,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 					isOpen={true}
 					onClose={() => setMenuPos(null)}
 					targetUserDisplayName={partnerName}
+					targetUserId={partnerSlug}
 					targetUserSlug={partnerSlug}
 					currentUserId={me?.displayName}
 					currentUserSlug={me?.slug}

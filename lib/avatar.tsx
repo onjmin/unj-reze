@@ -77,8 +77,11 @@ export function getUserIdLabel(
 	return match ? match[0] : displayName || "???";
 }
 
-export function getAvatarInfo(userId: string | null | undefined) {
-	if (!userId) {
+export function getAvatarInfo(
+	userId: string | null | undefined,
+	displayName?: string | null,
+) {
+	if (!userId && !displayName) {
 		return {
 			style: { backgroundColor: "#4b5563" },
 			Icon: User,
@@ -86,19 +89,12 @@ export function getAvatarInfo(userId: string | null | undefined) {
 		};
 	}
 
-	let username = "";
-	const isGenerated = /^[a-zA-Z0-9]{15}$/.test(userId);
-	if (isGenerated) {
-		const idPart = userId.substring(0, 3) || "???";
-		username = `名無し${idPart}`;
-	} else {
-		username = userId;
-	}
+	// ハッシュ計算のシードは投稿者識別子（userId）。無ければ displayName を使う
+	const seed = userId || displayName || "???";
 
-	// Simple string hashing
 	let hash = 0;
-	for (let i = 0; i < userId.length; i++) {
-		hash = (hash * 31 + userId.charCodeAt(i)) | 0;
+	for (let i = 0; i < seed.length; i++) {
+		hash = (hash * 31 + seed.charCodeAt(i)) | 0;
 	}
 	const absHash = Math.abs(hash);
 
@@ -109,6 +105,16 @@ export function getAvatarInfo(userId: string | null | undefined) {
 	};
 
 	const Icon = AVATAR_ICONS[absHash % AVATAR_ICONS.length];
+
+	let username = "";
+	if (displayName) {
+		username = displayName;
+	} else if (/^[a-zA-Z0-9]{15}$/.test(seed)) {
+		const idPart = seed.substring(0, 3) || "???";
+		username = `名無し${idPart}`;
+	} else {
+		username = seed;
+	}
 
 	return {
 		style,

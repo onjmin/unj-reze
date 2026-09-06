@@ -97,6 +97,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	}, []);
 
 	const [post, setPost] = useState<Post>(initial);
+	const postAuthorId = post.bbsId || post.userId;
+	const postAvatarInfo = getAvatarInfo(postAuthorId, post.displayName);
 	// MML本文はR2にある（content にはマーカーだけ）。「曲を編集」導線はここで
 	// 解決済みの本文を使い回す。独自に都度フェッチすると失敗時の扱いがずれて
 	// 「編集画面に移行できない」「MMLが空の編集画面に遷移する」の両方の温床になっていた。
@@ -188,6 +190,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [selectedUser, setSelectedUser] = useState<{
 		displayName: string;
 		slug?: string;
+		userId?: string;
 	} | null>(null);
 	const [avatarMenuPos, setAvatarMenuPos] = useState<{
 		x: number;
@@ -196,7 +199,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 	const handleAvatarClick = useCallback(
 		(
-			user: { displayName: string; slug?: string },
+			user: { displayName: string; slug?: string; userId?: string },
 			pos: { x: number; y: number },
 		) => {
 			setSelectedUser(user);
@@ -1190,7 +1193,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>
 											{following
 												? "フォロー中"
-												: `${getAvatarInfo(post.displayName).username}さんをフォロー`}
+												: `${postAvatarInfo.username}さんをフォロー`}
 										</span>
 									</button>
 								)}
@@ -1217,7 +1220,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>
 											{muted
 												? "ミュート解除"
-												: `${getAvatarInfo(post.displayName).username}さんをミュート`}
+												: `${postAvatarInfo.username}さんをミュート`}
 										</span>
 									</button>
 								)}
@@ -1231,7 +1234,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>
 											{blocked
 												? "ブロック解除"
-												: `${getAvatarInfo(post.displayName).username}さんをブロック`}
+												: `${postAvatarInfo.username}さんをブロック`}
 										</span>
 									</button>
 								)}
@@ -1264,25 +1267,31 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						} else {
 							const rect = e.currentTarget.getBoundingClientRect();
 							handleAvatarClick(
-								{ displayName: post.displayName, slug: post.slug || undefined },
+								{
+									displayName: post.displayName,
+									slug: post.slug || undefined,
+									userId: post.bbsId || post.userId,
+								},
 								{ x: rect.left, y: rect.bottom },
 							);
 						}
 					}}
 					className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
 					style={
-						post.avatarUrl ? undefined : getAvatarInfo(post.displayName).style
+						post.avatarUrl
+							? undefined
+							: postAvatarInfo.style
 					}
 				>
 					{post.avatarUrl ? (
 						<img
 							src={post.avatarUrl}
-							alt={getAvatarInfo(post.displayName).username}
+							alt={postAvatarInfo.username}
 							className="w-full h-full object-cover rounded-full"
 						/>
 					) : (
 						(() => {
-							const AvatarIcon = getAvatarInfo(post.displayName).Icon;
+							const AvatarIcon = postAvatarInfo.Icon;
 							return (
 								<AvatarIcon className="w-5 h-5 text-white/40 leading-none" />
 							);
@@ -1292,7 +1301,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				<div className="flex-1 min-w-0">
 					<div className="flex items-baseline space-x-1.5 mb-0.5">
 						<span className="font-bold text-sm text-gray-200">
-							{getAvatarInfo(post.displayName).username}
+							{postAvatarInfo.username}
 						</span>
 						{isSelf && (
 							<span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">
@@ -1737,6 +1746,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					isOpen={true}
 					onClose={() => setSelectedUser(null)}
 					targetUserDisplayName={selectedUser.displayName}
+					targetUserId={selectedUser.userId}
 					targetUserSlug={selectedUser.slug}
 					currentUserId={userId}
 					currentUserSlug={userSlug}
@@ -1834,7 +1844,7 @@ function ReplyTreeItem({
 	) => Promise<void>;
 	onDelete: (replyId: string) => Promise<void>;
 	onAvatarClick: (
-		user: { displayName: string; slug?: string },
+		user: { displayName: string; slug?: string; userId?: string },
 		pos: { x: number; y: number },
 	) => void;
 	onPreviewImage?: (
@@ -1999,7 +2009,8 @@ function ReplyTreeItem({
 	const { handleLike, handleDislike, handleRepost, handleHeart } =
 		usePostActions(userId, (_id, updater) => setLocalPost(updater));
 
-	const avatarInfo = getAvatarInfo(localPost.displayName);
+	const authorId = localPost.bbsId || localPost.userId;
+	const avatarInfo = getAvatarInfo(authorId, localPost.displayName);
 	const isSelf =
 		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;
 
@@ -2020,6 +2031,7 @@ function ReplyTreeItem({
 									{
 										displayName: localPost.displayName,
 										slug: localPost.slug || undefined,
+										userId: localPost.bbsId || localPost.userId,
 									},
 									{ x: rect.left, y: rect.bottom },
 								);

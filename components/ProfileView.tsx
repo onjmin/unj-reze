@@ -125,7 +125,8 @@ function ProfilePostMenu({
 	const [showReportModal, setShowReportModal] = useState(false);
 	const [reportReason, setReportReason] = useState("");
 
-	const pAvatarInfo = getAvatarInfo(post.displayName);
+	const pAuthorId = post.bbsId || post.userId;
+	const pAvatarInfo = getAvatarInfo(pAuthorId, post.displayName);
 	const targetSlug = post.slug || post.displayName;
 	const isSelfPost = !!currentUserSlug && currentUserSlug === targetSlug;
 
@@ -655,7 +656,7 @@ export default function ProfileView({
 
 	const resolvedName =
 		profileDisplayName || displayName || myPosts[0]?.displayName || userId;
-	const avatarInfo = getAvatarInfo(resolvedName);
+	const avatarInfo = getAvatarInfo(cleanUserId, resolvedName);
 
 	// /user/[id] は currentUserId を渡さないため、セッションから解決した自分の表示名で補う。
 	// これが無いとフォロー/メッセージの導線がプロフィールページに一切出ない。
@@ -1387,7 +1388,8 @@ export default function ProfileView({
 					filteredPosts
 						.filter((p) => !deletedPostIds.has(p.id))
 						.map((p) => {
-							const pAvatarInfo = getAvatarInfo(p.displayName);
+							const pAuthorId = p.bbsId || p.userId;
+							const pAvatarInfo = getAvatarInfo(pAuthorId, p.displayName);
 							return (
 								<div
 									key={p.id}

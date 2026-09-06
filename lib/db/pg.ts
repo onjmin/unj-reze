@@ -426,13 +426,21 @@ async function orphanedManifestRefsOf(row: {
 // ============================================================================
 // row → DbPost
 // ============================================================================
+function resolveDisplayName(row: any): string {
+	const raw = (row.author_display_name || row.cc_user_name || "").trim();
+	if (raw && raw !== "名無し") return raw;
+	if (row.cc_user_id) return `名無し${row.cc_user_id}`;
+	return "名無し";
+}
+
 function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 	const postId = threadToPostId(Number(row.id));
 	const disp = deriveDisplay(row);
 	return {
 		id: postId,
-		displayName: row.author_display_name || row.cc_user_name || "名無し",
+		displayName: resolveDisplayName(row),
 		slug: String(row.user_id),
+		userId: String(row.user_id),
 		bbsId: row.cc_user_id || undefined,
 		datKey:
 			row.dat_key != null
@@ -485,8 +493,9 @@ function resRowToPost(row: any): DbPost {
 	const disp = deriveDisplay(row);
 	return {
 		id: postId,
-		displayName: row.author_display_name || row.cc_user_name || "名無し",
+		displayName: resolveDisplayName(row),
 		slug: String(row.user_id),
+		userId: String(row.user_id),
 		bbsId: row.cc_user_id || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
@@ -2455,6 +2464,7 @@ async function rowsToFollowUsers(
 		followingSet = new Set(fr.map((r) => Number(r.followed_user_id)));
 	}
 	return rows.map((r) => ({
+		userId: String(r.id),
 		slug: String(r.id),
 		displayName: r.display_name || "名無し",
 		avatarUrl: r.avatar_url ?? undefined,

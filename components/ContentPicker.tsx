@@ -1317,7 +1317,8 @@ export default function ContentPicker({
 																className="text-pink-400 shrink-0"
 															/>
 															<span className="text-[11px] text-gray-300 font-bold truncate">
-																{getAvatarInfo(p.displayName).username} #{p.id}
+																{getAvatarInfo(null, p.displayName).username}{" "}
+																#{p.id}
 															</span>
 															<span className="text-[9px] text-gray-500 font-mono shrink-0">
 																{sizeBytes !== undefined

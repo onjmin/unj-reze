@@ -76,6 +76,8 @@ export interface Post {
 	id: string;
 	displayName: string;
 	slug?: string;
+	/** 投稿者のユーザーID（users.id） */
+	userId?: string;
 	/** 掲示板モードの「ID:」表示専用の安定ハッシュ値（lib/cc-id.ts:genBbsId）。slugとは別物。 */
 	bbsId?: string;
 	createdAt: string;
@@ -288,6 +290,7 @@ export interface Obstacle {
 
 /** フォロワー/フォロー一覧の1行。表示に必要な最小限だけを返す（egress削減）。 */
 export interface FollowUser {
+	userId?: string;
 	slug: string;
 	displayName: string;
 	avatarUrl?: string;

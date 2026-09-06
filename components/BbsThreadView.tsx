@@ -174,6 +174,7 @@ export default function BbsThreadView({
 	const [selectedUser, setSelectedUser] = useState<{
 		displayName: string;
 		slug?: string;
+		userId?: string;
 	} | null>(null);
 	const [userMenuPos, setUserMenuPos] = useState<{
 		x: number;
@@ -588,6 +589,7 @@ export default function BbsThreadView({
 										setSelectedUser({
 											displayName: p.displayName,
 											slug: p.slug || undefined,
+											userId: p.bbsId || p.userId,
 										});
 										setUserMenuPos({ x: rect.left, y: rect.bottom });
 									}}
@@ -751,6 +753,7 @@ export default function BbsThreadView({
 					isOpen={true}
 					onClose={() => setSelectedUser(null)}
 					targetUserDisplayName={selectedUser.displayName}
+					targetUserId={selectedUser.userId}
 					targetUserSlug={selectedUser.slug}
 					currentUserId={userId}
 					currentUserSlug={userSlug}
