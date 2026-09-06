@@ -41,6 +41,7 @@ import {
 	drawFrames,
 	drawSpeedLines,
 	FocusLineConfig,
+	FrameBox,
 	FrameTemplate,
 	generateFrameBoxes,
 	SpeedLineConfig,
@@ -55,6 +56,54 @@ import { exportSinglePng } from "@/lib/export-drawing";
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 1130; // 約 1 : 1.414 (漫画用紙比率)
+
+// フキダシ/文字がコマ枠をはみ出さないよう位置を補正する（漫画の基本ルール：
+// 意図的な「ぶち抜き」演出以外は、フキダシ・セリフはコマ内に収める）。
+// anchor="center" は (x,y) が矩形中心（フキダシ）、"topLeft" は左上（文字）を表す。
+function clampRectToPanel(
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	boxes: FrameBox[],
+	anchor: "center" | "topLeft",
+): { x: number; y: number } {
+	if (boxes.length === 0) return { x, y };
+
+	const cx = anchor === "center" ? x : x + w / 2;
+	const cy = anchor === "center" ? y : y + h / 2;
+
+	// 中心点が属するコマを探す。見つからない場合（コマの溝や外側）は最も近いコマへ寄せる。
+	let panel = boxes.find(
+		(b) => cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h,
+	);
+	if (!panel) {
+		let bestDist = Number.POSITIVE_INFINITY;
+		for (const b of boxes) {
+			const pcx = b.x + b.w / 2;
+			const pcy = b.y + b.h / 2;
+			const dist = (pcx - cx) ** 2 + (pcy - cy) ** 2;
+			if (dist < bestDist) {
+				bestDist = dist;
+				panel = b;
+			}
+		}
+	}
+	if (!panel) return { x, y };
+
+	const pad = 8;
+	const minCx = panel.x + pad + w / 2;
+	const maxCx = panel.x + panel.w - pad - w / 2;
+	const minCy = panel.y + pad + h / 2;
+	const maxCy = panel.y + panel.h - pad - h / 2;
+
+	const clampedCx = maxCx >= minCx ? Math.min(Math.max(cx, minCx), maxCx) : panel.x + panel.w / 2;
+	const clampedCy = maxCy >= minCy ? Math.min(Math.max(cy, minCy), maxCy) : panel.y + panel.h / 2;
+
+	const outX = anchor === "center" ? clampedCx : clampedCx - w / 2;
+	const outY = anchor === "center" ? clampedCy : clampedCy - h / 2;
+	return { x: Math.round(outX), y: Math.round(outY) };
+}
 
 export interface MangaEditorProps {
 	onClose: () => void;
@@ -126,6 +175,8 @@ export default function MangaEditor({
 	// コマ枠状態
 	const [showFrameModal, setShowFrameModal] = useState(false);
 	const [frameBorderWidth, setFrameBorderWidth] = useState(4);
+	// 現在のコマ割り（フキダシ/文字をコマ内に収めるための当たり判定用データ）
+	const [frameBoxes, setFrameBoxes] = useState<FrameBox[]>([]);
 
 	// フキダシ状態
 	const [bubbles, setBubbles] = useState<MangaBubbleItem[]>([]);
@@ -165,12 +216,28 @@ export default function MangaEditor({
 	const [layerMetas, setLayerMetas] = useState<LayerMeta[]>([]);
 	const [activeLayerIndex, setActiveLayerIndex] = useState(3);
 	const [showLayersPanel, setShowLayersPanel] = useState(false);
+	// コマ枠は専用レイヤーに固定で描画する（アクティブレイヤーに依存しない）
+	const frameLayerIdRef = useRef<string | null>(null);
 
-	// 履歴 (Undo / Redo)
-	const undoStackRef = useRef<ImageData[][]>([]);
-	const redoStackRef = useRef<ImageData[][]>([]);
+	// 履歴 (Undo / Redo) — キャンバスのレイヤーだけでなく、フキダシ・文字の追加/削除/移動も対象にする
+	interface HistorySnapshot {
+		layers: ImageData[];
+		bubbles: MangaBubbleItem[];
+		texts: MangaTextItem[];
+	}
+	const undoStackRef = useRef<HistorySnapshot[]>([]);
+	const redoStackRef = useRef<HistorySnapshot[]>([]);
 	const [canUndo, setCanUndo] = useState(false);
 	const [canRedo, setCanRedo] = useState(false);
+	// bubbles/texts の最新値を非同期コールバック内からも参照できるようにするref
+	const bubblesRef = useRef<MangaBubbleItem[]>([]);
+	const textsRef = useRef<MangaTextItem[]>([]);
+	useEffect(() => {
+		bubblesRef.current = bubbles;
+	}, [bubbles]);
+	useEffect(() => {
+		textsRef.current = texts;
+	}, [texts]);
 
 	// ドラッグ・操作用
 	const isDrawingRef = useRef(false);
@@ -274,6 +341,8 @@ export default function MangaEditor({
 
 			const initialFrames = generateFrameBoxes("3rows", CANVAS_WIDTH, CANVAS_HEIGHT);
 			drawFrames(initialLayers[2].ctx, initialFrames, 4);
+			frameLayerIdRef.current = initialLayers[2].id;
+			setFrameBoxes(initialFrames);
 
 			if (initialImageUrl) {
 				const img = new Image();
@@ -303,80 +372,110 @@ export default function MangaEditor({
 		renderDisplay();
 	}, [renderDisplay]);
 
-	// 履歴保存 (Undo スナップショット)
+	// 現在の状態をスナップショットとして取得
+	const captureSnapshot = useCallback((): HistorySnapshot => ({
+		layers: layersRef.current.map((l) =>
+			l.ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT),
+		),
+		bubbles: bubblesRef.current,
+		texts: textsRef.current,
+	}), []);
+
+	// スナップショットを現在の状態へ復元
+	const applySnapshot = useCallback(
+		(snap: HistorySnapshot) => {
+			layersRef.current.forEach((l, idx) => {
+				if (snap.layers[idx]) {
+					l.ctx.putImageData(snap.layers[idx], 0, 0);
+				}
+			});
+			setBubbles(snap.bubbles);
+			setTexts(snap.texts);
+			renderDisplay();
+		},
+		[renderDisplay],
+	);
+
+	// 履歴保存 (Undo スナップショット) — ペン等の描画だけでなく、フキダシ/文字の追加・削除・移動の直前にも呼ぶ
 	const saveHistorySnapshot = useCallback(() => {
 		if (layersRef.current.length === 0) return;
-		const snapshot = layersRef.current.map((l) =>
-			l.ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT),
-		);
-		undoStackRef.current.push(snapshot);
+		undoStackRef.current.push(captureSnapshot());
 		if (undoStackRef.current.length > 25) {
 			undoStackRef.current.shift();
 		}
 		redoStackRef.current = [];
 		setCanUndo(true);
 		setCanRedo(false);
-	}, []);
+	}, [captureSnapshot]);
 
 	// Undo
 	const handleUndo = () => {
 		if (undoStackRef.current.length === 0) return;
-		const currentSnapshot = layersRef.current.map((l) =>
-			l.ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT),
-		);
-		redoStackRef.current.push(currentSnapshot);
+		redoStackRef.current.push(captureSnapshot());
 
 		const previous = undoStackRef.current.pop()!;
-		layersRef.current.forEach((l, idx) => {
-			if (previous[idx]) {
-				l.ctx.putImageData(previous[idx], 0, 0);
-			}
-		});
+		applySnapshot(previous);
 
 		setCanUndo(undoStackRef.current.length > 0);
 		setCanRedo(true);
-		renderDisplay();
 	};
 
 	// Redo
 	const handleRedo = () => {
 		if (redoStackRef.current.length === 0) return;
-		const currentSnapshot = layersRef.current.map((l) =>
-			l.ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT),
-		);
-		undoStackRef.current.push(currentSnapshot);
+		undoStackRef.current.push(captureSnapshot());
 
 		const next = redoStackRef.current.pop()!;
-		layersRef.current.forEach((l, idx) => {
-			if (next[idx]) {
-				l.ctx.putImageData(next[idx], 0, 0);
-			}
-		});
+		applySnapshot(next);
 
 		setCanUndo(true);
 		setCanRedo(redoStackRef.current.length > 0);
-		renderDisplay();
 	};
 
-	// マウス/タッチ座標をキャンバス実座標に変換
-	const getCanvasPoint = (e: React.MouseEvent | React.TouchEvent) => {
+	// Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) キーボードショートカット
+	// ボタンのtitleに表示しているのに未実装だった（押しても何も起きない状態だった）ため配線する
+	useEffect(() => {
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			const key = e.key.toLowerCase();
+			if (key === "z" && !e.shiftKey) {
+				e.preventDefault();
+				handleUndo();
+			} else if (key === "y" || (key === "z" && e.shiftKey)) {
+				e.preventDefault();
+				handleRedo();
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	});
+
+	// マウス/タッチ/ペン座標をキャンバス実座標に変換
+	const getCanvasPoint = (e: React.PointerEvent) => {
 		const display = displayCanvasRef.current;
 		if (!display) return null;
 		const rect = display.getBoundingClientRect();
-		const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-		const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
 		const scaleX = CANVAS_WIDTH / rect.width;
 		const scaleY = CANVAS_HEIGHT / rect.height;
 		return {
-			x: (clientX - rect.left) * scaleX,
-			y: (clientY - rect.top) * scaleY,
+			x: (e.clientX - rect.left) * scaleX,
+			y: (e.clientY - rect.top) * scaleY,
 		};
 	};
 
+	// 現在操作中のポインターID（スマホでの二本指同時操作による誤描画を防ぐため、
+	// 最初に触れた1本の指/ペン/マウスだけを追跡する）
+	const activePointerIdRef = useRef<number | null>(null);
+
 	// ポインターダウン (描画開始またはオブジェクト選択・移動開始)
-	const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+	const handlePointerDown = (e: React.PointerEvent) => {
+		// 既に別のポインター(指)で操作中なら無視する（二本指ドラッグでの誤描画防止）
+		if (activePointerIdRef.current !== null) return;
 		const pt = getCanvasPoint(e);
 		if (!pt) return;
+		activePointerIdRef.current = e.pointerId;
+		// キャンバス外に指が出てもドラッグ/描画を継続できるようにする
+		(e.target as Element).setPointerCapture?.(e.pointerId);
 
 		// 選択ツール・フキダシ・文字ツール時はオブジェクトのヒットテスト
 		if (activeTool === "select" || activeTool === "bubble" || activeTool === "text") {
@@ -392,6 +491,7 @@ export default function MangaEditor({
 				) {
 					setSelectedTextId(t.id);
 					setSelectedBubbleId(null);
+					saveHistorySnapshot();
 					isDraggingObjectRef.current = {
 						type: "text",
 						id: t.id,
@@ -417,6 +517,7 @@ export default function MangaEditor({
 				) {
 					setSelectedBubbleId(b.id);
 					setSelectedTextId(null);
+					saveHistorySnapshot();
 					isDraggingObjectRef.current = {
 						type: "bubble",
 						id: b.id,
@@ -485,7 +586,8 @@ export default function MangaEditor({
 	};
 
 	// ポインター移動
-	const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
+	const handlePointerMove = (e: React.PointerEvent) => {
+		if (e.pointerId !== activePointerIdRef.current) return;
 		const pt = getCanvasPoint(e);
 		if (!pt) return;
 
@@ -497,19 +599,34 @@ export default function MangaEditor({
 
 			if (drag.type === "bubble") {
 				setBubbles((prev) =>
-					prev.map((b) =>
-						b.id === drag.id
-							? { ...b, x: Math.round(drag.origX + dx), y: Math.round(drag.origY + dy) }
-							: b,
-					),
+					prev.map((b) => {
+						if (b.id !== drag.id) return b;
+						// フキダシはドラッグ中もコマ枠をはみ出さないよう位置を制限する
+						const c = clampRectToPanel(
+							drag.origX + dx,
+							drag.origY + dy,
+							b.w,
+							b.h,
+							frameBoxes,
+							"center",
+						);
+						return { ...b, x: c.x, y: c.y };
+					}),
 				);
 			} else if (drag.type === "text") {
 				setTexts((prev) =>
-					prev.map((t) =>
-						t.id === drag.id
-							? { ...t, x: Math.round(drag.origX + dx), y: Math.round(drag.origY + dy) }
-							: t,
-					),
+					prev.map((t) => {
+						if (t.id !== drag.id) return t;
+						const c = clampRectToPanel(
+							drag.origX + dx,
+							drag.origY + dy,
+							60,
+							200,
+							frameBoxes,
+							"topLeft",
+						);
+						return { ...t, x: c.x, y: c.y };
+					}),
 				);
 			}
 			return;
@@ -567,7 +684,9 @@ export default function MangaEditor({
 	};
 
 	// ポインターアップ
-	const handlePointerUp = () => {
+	const handlePointerUp = (e: React.PointerEvent) => {
+		if (e.pointerId !== activePointerIdRef.current) return;
+		activePointerIdRef.current = null;
 		isDrawingRef.current = false;
 		lastPointRef.current = null;
 		isDraggingObjectRef.current = null;
@@ -634,12 +753,23 @@ export default function MangaEditor({
 
 	// フキダシの追加
 	const handleAddBubble = () => {
+		saveHistorySnapshot();
+		const w = 220;
+		const h = 180;
+		const { x, y } = clampRectToPanel(
+			CANVAS_WIDTH / 2,
+			CANVAS_HEIGHT / 3,
+			w,
+			h,
+			frameBoxes,
+			"center",
+		);
 		const newBubble: MangaBubbleItem = {
 			id: Math.random().toString(36).slice(2),
-			x: CANVAS_WIDTH / 2,
-			y: CANVAS_HEIGHT / 3,
-			w: 220,
-			h: 180,
+			x,
+			y,
+			w,
+			h,
 			shape: bubbleShape,
 			tail: bubbleTail,
 			borderWidth: 3,
@@ -654,10 +784,19 @@ export default function MangaEditor({
 	// テキストの追加
 	const handleAddText = () => {
 		if (!editingTextStr.trim()) return;
+		saveHistorySnapshot();
+		const { x, y } = clampRectToPanel(
+			CANVAS_WIDTH / 2 - 20,
+			CANVAS_HEIGHT / 3 - 60,
+			60,
+			200,
+			frameBoxes,
+			"topLeft",
+		);
 		const newText: MangaTextItem = {
 			id: Math.random().toString(36).slice(2),
-			x: CANVAS_WIDTH / 2 - 20,
-			y: CANVAS_HEIGHT / 3 - 60,
+			x,
+			y,
 			text: editingTextStr,
 			direction: textDirection,
 			fontSize: textFontSize,
@@ -676,12 +815,30 @@ export default function MangaEditor({
 		saveHistorySnapshot();
 		const boxes = generateFrameBoxes(template, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-		// 現在のアクティブレイヤーに枠線を描画
-		const curLayer = layersRef.current[activeLayerIndex];
-		if (curLayer) {
-			drawFrames(curLayer.ctx, boxes, frameBorderWidth);
+		// コマ枠は専用レイヤーに描画する（アクティブレイヤーがどこであっても迷わない）
+		const frameLayer =
+			layersRef.current.find((l) => l.id === frameLayerIdRef.current) ??
+			layersRef.current[activeLayerIndex];
+		if (frameLayer) {
+			// 前回のコマ枠を消してから描画し直す（そうしないと古い枠が残る）
+			frameLayer.ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+			drawFrames(frameLayer.ctx, boxes, frameBorderWidth);
 			renderDisplay();
 		}
+		setFrameBoxes(boxes);
+		// コマ割りが変わったら、既存のフキダシ/文字が新しいコマ内に収まるよう位置を補正する
+		setBubbles((prev) =>
+			prev.map((b) => {
+				const c = clampRectToPanel(b.x, b.y, b.w, b.h, boxes, "center");
+				return { ...b, x: c.x, y: c.y };
+			}),
+		);
+		setTexts((prev) =>
+			prev.map((t) => {
+				const c = clampRectToPanel(t.x, t.y, 60, 200, boxes, "topLeft");
+				return { ...t, x: c.x, y: c.y };
+			}),
+		);
 		setShowFrameModal(false);
 	};
 
@@ -993,12 +1150,10 @@ export default function MangaEditor({
 							ref={displayCanvasRef}
 							width={CANVAS_WIDTH}
 							height={CANVAS_HEIGHT}
-							onMouseDown={handlePointerDown}
-							onMouseMove={handlePointerMove}
-							onMouseUp={handlePointerUp}
-							onTouchStart={handlePointerDown}
-							onTouchMove={handlePointerMove}
-							onTouchEnd={handlePointerUp}
+							onPointerDown={handlePointerDown}
+							onPointerMove={handlePointerMove}
+							onPointerUp={handlePointerUp}
+							onPointerCancel={handlePointerUp}
 							className="absolute inset-0 bg-white cursor-crosshair rounded shadow-lg touch-none"
 						/>
 					</div>
@@ -1012,6 +1167,7 @@ export default function MangaEditor({
 							<button
 								type="button"
 								onClick={() => {
+									saveHistorySnapshot();
 									if (selectedBubbleId) {
 										setBubbles((prev) => prev.filter((b) => b.id !== selectedBubbleId));
 										setSelectedBubbleId(null);
@@ -1065,10 +1221,10 @@ export default function MangaEditor({
 									setActiveLayerIndex(layersRef.current.length - 1);
 									renderDisplay();
 								}}
-								className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white"
+								className="grid place-items-center w-9 h-9 rounded-lg hover:bg-gray-700 active:bg-gray-700 text-gray-400 hover:text-white"
 								title="新規レイヤー追加"
 							>
-								<Plus size={14} />
+								<Plus size={16} />
 							</button>
 						</div>
 						<div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -1079,7 +1235,7 @@ export default function MangaEditor({
 									<div
 										key={layer.id}
 										onClick={() => setActiveLayerIndex(originalIdx)}
-										className={`flex items-center justify-between px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors ${isSelected ? "bg-blue-600/30 border border-blue-500 text-white font-bold" : "hover:bg-gray-800 text-gray-300"}`}
+										className={`flex items-center justify-between px-2.5 py-2 rounded text-xs cursor-pointer transition-colors ${isSelected ? "bg-blue-600/30 border border-blue-500 text-white font-bold" : "hover:bg-gray-800 text-gray-300"}`}
 									>
 										<span className="truncate flex-1">{layer.name}</span>
 										<div className="flex items-center gap-1.5">
@@ -1101,9 +1257,9 @@ export default function MangaEditor({
 													);
 													renderDisplay();
 												}}
-												className="p-1 text-gray-400 hover:text-white"
+												className="grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-white active:bg-gray-700/50"
 											>
-												{layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+												{layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
 											</button>
 										</div>
 									</div>
@@ -1114,9 +1270,9 @@ export default function MangaEditor({
 				)}
 			</div>
 
-			{/* 下部プロパティバー */}
-			<footer className="h-10 shrink-0 border-t border-gray-800 bg-[#131720] px-4 flex items-center justify-between text-xs text-gray-400">
-				<div className="flex items-center gap-4">
+			{/* 下部プロパティバー（スマホでは選択肢が増えると折り返す） */}
+			<footer className="min-h-10 shrink-0 border-t border-gray-800 bg-[#131720] px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 justify-between text-xs text-gray-400">
+				<div className="flex flex-wrap items-center gap-4">
 					{activeTool === "pen" && (
 						<div className="flex items-center gap-2">
 							<span>ペンの太さ:</span>
@@ -1129,14 +1285,14 @@ export default function MangaEditor({
 								className="w-24 accent-blue-500"
 							/>
 							<span className="font-mono w-6 text-gray-200">{penSize}px</span>
-							<div className="flex items-center gap-1 ml-2">
+							<div className="flex items-center gap-1.5 ml-2">
 								{(["#000000", "#ef4444", "#3b82f6", "#ffffff"] as const).map((c) => (
 									<button
 										key={c}
 										type="button"
 										onClick={() => setPenColor(c)}
 										style={{ backgroundColor: c }}
-										className={`w-4 h-4 rounded-full border ${penColor === c ? "border-blue-500 ring-2 ring-blue-400" : "border-gray-600"}`}
+										className={`w-7 h-7 rounded-full border ${penColor === c ? "border-blue-500 ring-2 ring-blue-400" : "border-gray-600"}`}
 										title={`色: ${c}`}
 									/>
 								))}
@@ -1172,7 +1328,7 @@ export default function MangaEditor({
 							<button
 								type="button"
 								onClick={() => setShowToneModal(true)}
-								className="ml-2 px-2 py-0.5 rounded bg-gray-800 text-blue-400 border border-gray-700 hover:bg-gray-700 font-bold"
+								className="ml-2 px-2.5 py-1.5 rounded-md bg-gray-800 text-blue-400 border border-gray-700 hover:bg-gray-700 active:bg-gray-700 font-bold"
 							>
 								トーン変更 ({TONE_DEFINITIONS.find((t) => t.id === activeTone)?.name})
 							</button>
@@ -1453,7 +1609,9 @@ export default function MangaEditor({
 			{showFrameModal && (
 				<ModalOverlay onClose={() => setShowFrameModal(false)} title="コマ枠の作成">
 					<div className="space-y-4 py-2 text-xs">
-						<p className="text-gray-400">現在選択中のレイヤーにコマ枠を描画します。</p>
+						<p className="text-gray-400">
+							「コマ枠」レイヤーに描画します。適用すると、それまでのコマ枠は消えて置き換わります。
+						</p>
 						<div>
 							<label className="block text-gray-400 font-bold mb-1">枠線の太さ</label>
 							<div className="flex gap-2">

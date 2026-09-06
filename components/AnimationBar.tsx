@@ -181,7 +181,7 @@ export default function AnimationBar({
 	const frameCount = frames.length;
 
 	return (
-		<div className="flex items-center space-x-2 px-3 py-2 bg-[#0f0f11] border-t border-gray-800 shrink-0">
+		<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2 bg-[#0f0f11] border-t border-gray-800 shrink-0">
 			<Film size={13} className="text-gray-500 shrink-0" />
 			<button
 				onClick={onTogglePlay}
@@ -190,7 +190,10 @@ export default function AnimationBar({
 			>
 				{isPlaying ? <Pause size={12} /> : <Play size={12} />}
 			</button>
-			<div className="flex items-center space-x-1 overflow-x-auto scrollbar-none flex-1 py-0.5">
+			{/* フレーム一覧: 他のボタン群と幅を奪い合うと極小画面(スマホ幅)でほぼ0pxまで潰れて
+			    見えなくなっていたため、狭い画面では単独で1行(w-full)を占有させ、
+			    残りの操作ボタンは次の行へ折り返す(flex-wrap)ようにする。 */}
+			<div className="flex items-center gap-1 overflow-x-auto scrollbar-none w-full sm:w-auto sm:flex-1 py-0.5">
 				{frames.map((frame, i) => {
 					const isTarget = dropTargetIndex === i;
 					const isCurrent = i === currentFrame;
@@ -210,7 +213,7 @@ export default function AnimationBar({
 									? "inset 0 0 0 2px #ffffff, inset 0 0 0 3px rgba(0, 0, 0, 0.4)"
 									: "inset 0 0 0 1px rgba(255, 255, 255, 0.2)",
 							}}
-							className={`shrink-0 w-8 h-8 rounded text-[11px] font-mono font-bold transition-all select-none relative flex items-center justify-center ${
+							className={`shrink-0 w-9 h-9 rounded text-[11px] font-mono font-bold transition-all select-none relative flex items-center justify-center ${
 								isCurrent
 									? "z-10 brightness-110"
 									: "opacity-85 hover:opacity-100 hover:brightness-125"
