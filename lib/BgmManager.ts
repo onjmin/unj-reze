@@ -1,10 +1,13 @@
 import type {
 	LoopConfig as DtmLoopConfig,
 	LoopPoint as DtmLoopPoint,
+	MmlPlayback as DtmMmlPlayback,
 } from "@onjmin/dtm";
 import type { AssetManifest, BgmAsset } from "./game-config";
 import { parseTimeToSeconds } from "./embed";
 import { applyMasterVolume, subscribeMasterVolume } from "./master-volume";
+import { getStudio } from "./dtm";
+import type { MvAudioMode } from "./mv-config";
 
 type LoopPointInput = { bar?: number; step?: number; seconds?: number };
 
@@ -122,9 +125,16 @@ class BgmManager {
 	private current: BgmHandle | null = null;
 	private currentKey: { type: string; src: string } | null = null;
 	private baseVolume = 50;
+	/** MML BGM/SFXの鳴らし方（"light"=内蔵シンセ／"soundfont"=外部音源／"soundfontKoe"=外部音源＋歌声）。
+	 *  ゲーム側から setMmlAudioMode() で切り替える。既定は軽量な内蔵シンセ。 */
+	private mmlAudioMode: MvAudioMode = "light";
 
 	constructor() {
 		subscribeMasterVolume(() => this.current?.setBaseVolume?.(this.baseVolume));
+	}
+
+	setMmlAudioMode(mode: MvAudioMode) {
+		this.mmlAudioMode = mode;
 	}
 
 	async play(manifest: AssetManifest) {
@@ -300,12 +310,17 @@ class BgmManager {
 		loop?: BgmAsset["loop"],
 		volume: number = 50,
 	) {
+		const loopOption = loop !== undefined ? toDtmLoopConfig(loop) : true;
+
+		if (this.mmlAudioMode !== "light") {
+			await this.playMmlViaStudio(mml, loopOption, volume);
+			return;
+		}
+
 		const { playMML } = await import("@onjmin/dtm");
 		const ctx = new (window.AudioContext || window.webkitAudioContext)!();
 		if (ctx.state === "suspended") await ctx.resume();
 		this.mmlCtx = ctx;
-
-		const loopOption = loop !== undefined ? toDtmLoopConfig(loop) : true;
 
 		try {
 			const bgm = playMML(mml, {
@@ -333,6 +348,52 @@ class BgmManager {
 		} catch (err) {
 			console.error("Error playing MML BGM:", err);
 			ctx.close();
+		}
+	}
+
+	/** soundfont / soundfontKoe: 共有 studio（lib/dtm.ts）の SoundFont 楽器（＋歌声）で鳴らす。
+	 *  studio 自体は独自の AudioContext を持つため、こちらは mmlCtx を作らない。 */
+	private async playMmlViaStudio(
+		mml: string,
+		loopOption: boolean | DtmLoopConfig | undefined,
+		volume: number,
+	) {
+		try {
+			const studio = await getStudio();
+			const opts = {
+				loop: loopOption,
+				volume: applyMasterVolume(volume),
+			};
+
+			let bgm: DtmMmlPlayback;
+			if (this.mmlAudioMode === "soundfontKoe") {
+				try {
+					bgm = await studio.playSingingMML(mml, opts);
+				} catch {
+					// 歌声モデルの読み込み等に失敗した場合は楽器のみでフォールバック再生する
+					bgm = studio.play(mml, opts);
+				}
+			} else {
+				bgm = studio.play(mml, opts);
+			}
+
+			this.current = {
+				stop: () => {
+					try {
+						bgm.stop();
+					} catch {}
+					try {
+						bgm.destroy();
+					} catch {}
+				},
+				setBaseVolume: (v) => {
+					try {
+						bgm.setVolume(applyMasterVolume(v));
+					} catch {}
+				},
+			};
+		} catch (err) {
+			console.error("Error playing MML BGM via studio:", err);
 		}
 	}
 

@@ -53,6 +53,7 @@ import {
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
   convertMapToLayout25D, convertLayout25DToMap,
+  type MvAudioMode,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit, EncounterGroup, EncounterEnemy } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -70,6 +71,7 @@ import GameThreadBoard from './GameThreadBoard';
 import type { Mmo3dRenderer, WeatherDef } from './game-presets/shared';
 import { ensureSessionId } from '@/lib/session';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/pixel-weather';
+import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv-config';
 
 export type { PresetId };
 
@@ -202,6 +204,8 @@ export interface GameManifestDraft {
   bgm: string;
   battleBgm?: string;
   bossBgm?: string;
+  /** MML BGMの鳴らし方（ゲーム全体で1つ）。省略時は軽量な内蔵シンセ（"light"）。 */
+  mmlAudioMode?: MvAudioMode;
   sfx: Partial<Record<SfxTrigger, string>>;
   mapBgRef?: string;
   scroll?: { worldCols: number; worldRows?: number };
@@ -642,6 +646,7 @@ const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId
     bgm: hydrateBgmFromRef(manifest.bgm),
     battleBgm: hydrateBgmFromRef(manifest.battleBgm),
     bossBgm: hydrateBgmFromRef(manifest.bossBgm),
+    mmlAudioMode: manifest.mmlAudioMode ?? base.mmlAudioMode,
     sfx: Object.fromEntries(
       Object.entries(manifest.sfx ?? {}).map(([k, v]) => [k, v ? { ref: v } : undefined])
     ) as PresetData['sfx'],
@@ -3176,6 +3181,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const gameDataRef = useRef(gameData);
   const lastTouchTimeMapRef = useRef<Map<string, number>>(new Map());
   gameDataRef.current = gameData;
+  // MML BGM/SFXの鳴らし方（内蔵シンセ/外部音源/外部音源+歌声）をゲーム全体の再生系(BgmManager)へ同期する。
+  useEffect(() => {
+    bgmManager.setMmlAudioMode(gameData.mmlAudioMode ?? 'light');
+  }, [gameData.mmlAudioMode]);
   /** プレイ開始時のマップ（地面／置物／天蓋・全シーンぶん）の控え。
    *  #CH_SP（changeTile）はプレイ中の地形差し替えを編集データにも直接書き込む
    *  （シーンを跨いでも差し替えが残るようにするため）ので、プレイをやめたら
@@ -6348,7 +6357,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return false;
   }, [findActivePage, runEventCommands]);
 
-  const previewMmlAsset = useCallback(async (_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => {
+  /** _key が 'bgm'/'battleBgm'/'bossBgm'/'cmdBgm' で始まるものはBGM試聴（gameData.mmlAudioMode に従う）、
+   *  それ以外（SFX試聴）は瞬発性を優先し常に内蔵シンセ("light")固定で鳴らす。 */
+  const isBgmPreviewKey = (key: string) => key === 'bgm' || key === 'battleBgm' || key === 'bossBgm' || key === 'cmdBgm';
+
+  const previewMmlAsset = useCallback(async (key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => {
     previewStopRef.current?.();
     previewStopRef.current = null;
     if (!asset?.src) return;
@@ -6365,6 +6378,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     if (asset.type !== 'mml') return;
+    if (isBgmPreviewKey(key)) {
+      // BGM試聴: 内蔵シンセ/外部音源(SoundFont)/外部音源+歌声のどれで鳴らすかは gameData.mmlAudioMode に従う
+      // （bgmManager.setMmlAudioMode 経由で同期済み）。bgmManager.play 経由にすることで本編再生と同じ経路を試聴できる。
+      bgmManager.play({ bgm: { type: 'mml', src: asset.src, volume: 100, loop: false }, tileset: {} });
+      previewStopRef.current = () => { bgmManager.stop(); };
+      return;
+    }
+    // SFX試聴: 効果音は瞬発再生が前提のため、SoundFontの読み込み遅延を避けて常に内蔵シンセで鳴らす。
     try {
       const { playMML } = await import('@onjmin/dtm');
       const bgm = playMML(asset.src, {
@@ -12224,6 +12245,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     bgm: gameData.bgm?.ref || 'none',
     battleBgm: gameData.battleBgm?.ref,
     bossBgm: gameData.bossBgm?.ref,
+    mmlAudioMode: gameData.mmlAudioMode,
     sfx: Object.fromEntries(Object.entries(gameData.sfx).map(([k, v]) => [k, v?.ref])) as Partial<Record<SfxTrigger, string>>,
     switches: gameData.switches,
     items: gameData.items,
@@ -18734,6 +18756,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── SOUND ── */}
                 {editorTab === 'sound' && (
                   <div className="space-y-4">
+                    {/* MML BGMの鳴らし方（ゲーム全体で1つ） */}
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">
+                        <Music size={12} />MML BGMの音の出し方
+                      </label>
+                      <div className="space-y-1.5">
+                        {(Object.keys(MV_AUDIO_MODE_LABELS) as MvAudioMode[]).map((mode) => {
+                          const active = (gameData.mmlAudioMode ?? 'light') === mode;
+                          return (
+                            <button
+                              key={mode}
+                              onClick={() => setGameData(p => ({ ...p, mmlAudioMode: mode }))}
+                              className={`w-full rounded-lg border p-2 text-left transition-colors ${active ? 'border-blue-500/70 bg-blue-500/10' : 'border-gray-700 bg-gray-800 hover:bg-gray-700'
+                                }`}
+                            >
+                              <p className="text-[11px] font-bold text-gray-100">
+                                {MV_AUDIO_MODE_LABELS[mode]}{active && ' ✓'}
+                              </p>
+                              <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">
+                                {MV_AUDIO_MODE_HINTS[mode]}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1 text-[10px] text-gray-500">
+                        効果音（SFX）は瞬発再生を優先し、常に内蔵シンセで鳴ります。
+                      </p>
+                    </div>
+
                     {/* 道中BGM */}
                     <div>
                       <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">

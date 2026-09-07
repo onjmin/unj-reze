@@ -2,7 +2,9 @@
 
 export type { WeatherConfig, WeatherKind } from "@/lib/pixel-weather";
 import type { WeatherConfig } from "@/lib/pixel-weather";
+import type { MvAudioMode } from "@/lib/mv-config";
 export type WeatherDef = WeatherConfig;
+export type { MvAudioMode };
 
 export const TILE_SIZE = 32;
 export const COLS = 20;
@@ -1248,6 +1250,8 @@ export interface PresetData {
 	bgm?: BgmState;
 	battleBgm?: BgmState;
 	bossBgm?: BgmState;
+	/** MML BGM/SFXの鳴らし方（ゲーム全体で1つ）。省略時は軽量な内蔵シンセ（"light"）。 */
+	mmlAudioMode?: MvAudioMode;
 	sfx: Partial<Record<SfxTrigger, SfxRef>>;
 	/** シーン切り替えモード。定義されていればマップ/オブジェクトは scenes[0] を初期シーンとして使う。 */
 	scenes?: SceneDef[];
