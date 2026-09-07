@@ -77,11 +77,23 @@ export function getUserIdLabel(
 	return match ? match[0] : displayName || "???";
 }
 
+/** 特殊用途の userId（1、空文字、空白のみ）かどうか判定 */
+function isSpecialUserId(userId: string | number | null | undefined): boolean {
+	if (userId === null || userId === undefined) return true;
+	const idStr = String(userId).trim();
+	return idStr === "" || idStr === "1";
+}
+
 export function getAvatarInfo(
-	userId: string | null | undefined,
+	userId: string | number | null | undefined,
 	displayName?: string | null,
+	userName?: string | null,
 ) {
-	if (!userId && !displayName) {
+	const trimmedName = displayName?.trim() || userName?.trim();
+	const trimmedId =
+		userId !== null && userId !== undefined ? String(userId).trim() : "";
+
+	if (!trimmedId && !trimmedName) {
 		return {
 			style: { backgroundColor: "#4b5563" },
 			Icon: User,
@@ -89,8 +101,10 @@ export function getAvatarInfo(
 		};
 	}
 
-	// ハッシュ計算のシードは投稿者識別子（userId）。無ければ displayName を使う
-	const seed = userId || displayName || "???";
+	// userId が 1 や空文字などの特殊用途の場合は displayName / userName を優先
+	const seed = isSpecialUserId(trimmedId)
+		? trimmedName || trimmedId || "???"
+		: trimmedId || trimmedName || "???";
 
 	let hash = 0;
 	for (let i = 0; i < seed.length; i++) {
@@ -109,6 +123,8 @@ export function getAvatarInfo(
 	let username = "";
 	if (displayName) {
 		username = displayName;
+	} else if (userName) {
+		username = userName;
 	} else if (/^[a-zA-Z0-9]{15}$/.test(seed)) {
 		const idPart = seed.substring(0, 3) || "???";
 		username = `名無し${idPart}`;
