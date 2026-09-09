@@ -29,6 +29,37 @@ class RealtimeClient {
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
 
+	constructor() {
+		if (typeof window === "undefined") return;
+		// スリープ復帰やタブのバックグラウンド復帰では、ソケットが死んでいても
+		// readyState が OPEN のまま & onclose が発火しないことがある（ブラウザ/OS依存）。
+		// 可視化/オンライン復帰のタイミングで強制的に張り直す。
+		const wake = () => this.reconnectIfStale();
+		window.addEventListener("visibilitychange", () => {
+			if (document.visibilityState === "visible") wake();
+		});
+		window.addEventListener("online", wake);
+	}
+
+	/** タブが前面に戻った／オンライン復帰したタイミングで、既存接続を捨てて張り直す。 */
+	private reconnectIfStale() {
+		if (!realtimeConfigured || this.disposed) return;
+		if (this.handlers.size === 0 && this.refCounts.size === 0) return;
+		if (this.ws) {
+			// readyState は信用しない（半死ソケットでも OPEN のことがある）。close させて
+			// onclose 経由の scheduleReconnect に任せる。CONNECTING 中はそのまま待つ。
+			if (this.ws.readyState === WebSocket.OPEN) {
+				try {
+					this.ws.close();
+				} catch {}
+				return;
+			}
+			if (this.ws.readyState === WebSocket.CONNECTING) return;
+		}
+		this.retries = 0;
+		this.connect();
+	}
+
 	private connect() {
 		if (!realtimeConfigured || this.disposed) return;
 		if (

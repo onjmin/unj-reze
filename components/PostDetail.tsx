@@ -25,6 +25,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import {
+	pollInterval,
+	useRealtimeSubscription,
+} from "@/lib/hooks/useRealtime";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import {
 	useOlderReplies,
@@ -40,6 +44,7 @@ import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { getDistinctTitle } from "@/lib/post-title";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed } from "@/lib/profile-cache";
+import { chThread } from "@/lib/realtime/channels";
 import { startMvRemix } from "@/lib/remix";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
@@ -269,6 +274,48 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		post.replies.length,
 		snsMode,
 	);
+
+	// 新着返信をrealtimeで受け取って追記する。ハブ未設定時／取りこぼし時
+	// （スリープ復帰でWebSocketが死んだままになる等）の保険として、
+	// 別途ポーリングでも同じ経路（重複はidで弾く）から追記する。
+	// app/page.tsx の実況コメント・LiveGameView.tsx と同じパターン。
+	const appendReply = useCallback((reply: Post) => {
+		setPost((p) => {
+			if (p.replies.some((r) => r.id === reply.id)) return p;
+			return {
+				...p,
+				repliesCount: p.repliesCount + 1,
+				replies: [...p.replies, reply],
+			};
+		});
+	}, []);
+
+	useRealtimeSubscription(
+		[chThread(post.id)],
+		useCallback(
+			(msg) => {
+				if (msg.t !== "event" || msg.event !== "reply.created") return;
+				appendReply(msg.data as Post);
+			},
+			[appendReply],
+		),
+	);
+
+	useEffect(() => {
+		const pid = post.id;
+		const poll = async () => {
+			try {
+				const latest = await api.posts.replies.list(pid, userSlug, {
+					limit: 20,
+				});
+				latest.forEach(appendReply);
+			} catch {}
+		};
+		poll();
+		// ハブがあれば push が来るので、保険としての再取得だけを長い間隔で回す。
+		const id = setInterval(poll, pollInterval(8000, 60000));
+		return () => clearInterval(id);
+	}, [post.id, userSlug, appendReply]);
 
 	useEffect(() => {
 		cachePost(initial);
@@ -615,6 +662,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								animFrames: updated.animFrames,
 								animFps: updated.animFps,
 								walkPreset: updated.walkPreset,
+								hasMml: updated.hasMml,
+								mmlUrl: updated.mmlUrl,
 								isEdited: true,
 							}
 						: r,
