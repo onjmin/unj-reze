@@ -459,6 +459,33 @@ body {
   animation-fill-mode: forwards;
 }
 
+@keyframes heart-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0;
+  }
+
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+
+  100% {
+    transform: translate(
+        calc(-50% + var(--heart-pop-x, 0px)),
+        calc(-50% + var(--heart-pop-y, 0px))
+      )
+      scale(0.8);
+    opacity: 0;
+  }
+}
+
+@utility animate-heart-pop {
+  animation-name: heart-pop;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}
+
 .unj-canvas-grid .upper-canvas {
   opacity: 0.4;
   background-image: linear-gradient(to right, gray 1px, transparent 1px),

@@ -47,3 +47,18 @@ export function subscribeHeartBurst(listener: HeartBurstListener) {
 export function triggerHeartBurst() {
 	heartBurstListeners.forEach((listener) => listener());
 }
+
+/** ハートボタンを自分でクリックしたときの、その場から弾け飛ぶ小さなハート演出。 */
+type HeartPopListener = (x: number, y: number) => void;
+const heartPopListeners = new Set<HeartPopListener>();
+
+export function subscribeHeartPop(listener: HeartPopListener) {
+	heartPopListeners.add(listener);
+	return () => {
+		heartPopListeners.delete(listener);
+	};
+}
+
+export function triggerHeartPop(x: number, y: number) {
+	heartPopListeners.forEach((listener) => listener(x, y));
+}

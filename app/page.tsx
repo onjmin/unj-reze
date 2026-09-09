@@ -13,6 +13,7 @@ import type { GameManifestDraft } from "@/components/GameMaker";
 import GameRankingView from "@/components/GameRankingView";
 import Header from "@/components/Header";
 import HeartBurst from "@/components/HeartBurst";
+import HeartPop from "@/components/HeartPop";
 import LeftSidebar from "@/components/LeftSidebar";
 import LiveGameView from "@/components/LiveGameView";
 import PostComposer from "@/components/PostComposer";
@@ -1691,6 +1692,7 @@ export default function App() {
 		<div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col select-none font-sans relative">
 			<ToastContainer />
 			<HeartBurst />
+			<HeartPop />
 
 			{activeScreen === "drawing" && (
 				<DrawingEditor
