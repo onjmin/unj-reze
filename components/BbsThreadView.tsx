@@ -8,19 +8,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getUserIdLabel } from "@/lib/avatar";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import { useCollabAutoOpen } from "@/lib/hooks/useCollabAutoOpen";
 import {
 	useOlderReplies,
 	useScrollToNewestReply,
 } from "@/lib/hooks/useOlderReplies";
 import { getDistinctTitle } from "@/lib/post-title";
-import { getDisplayContent, stripMmlLine } from "@/lib/mml";
+import {
+	extractMmlFromContent,
+	getDisplayContent,
+	stripMmlLine,
+} from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
 import { getThreadDisplayTime } from "@/lib/time";
 import { showToast } from "@/lib/toast";
-import { OriginType, Post } from "@/lib/types";
+import { isCollabAllowed, OriginType, Post } from "@/lib/types";
+import { fetchText } from "@/lib/uploader";
+import CollabSelector from "./CollabSelector";
 import type { GameManifestDraft } from "./GameMaker";
 import ImagePreview from "./ImagePreview";
 import PostComposer from "./PostComposer";
@@ -45,7 +52,6 @@ type ReplyGameDraft = {
 
 interface BbsThreadViewProps {
 	post: Post;
-	openCollab: (post: Post) => void;
 }
 
 function parseContent(text: string, onJumpToRes: (num: number) => void) {
@@ -123,7 +129,6 @@ function withSyntheticQuote(p: Post, indexMap: Map<string, number>): string {
 
 export default function BbsThreadView({
 	post: initial,
-	openCollab,
 }: BbsThreadViewProps) {
 	const router = useRouter();
 	const [post, setPost] = useState<Post>(initial);
@@ -169,6 +174,18 @@ export default function BbsThreadView({
 		"drawing" | "dotdrawing" | "manga" | "mml" | "gamemaker" | "mvmaker" | null
 	>(null);
 	const [submitting, setSubmitting] = useState(false);
+	/** コラボ元の画像。返信に添付済みの絵(replyImage)とは別枠で持つ。
+	 *  同じ変数に入れると「コラボを開いただけ」で元絵が自分の添付画像になってしまう。 */
+	const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(
+		undefined,
+	);
+	const [collabDotSize, setCollabDotSize] = useState<
+		{ w: number; h: number } | undefined
+	>(undefined);
+	const [showCollabSelector, setShowCollabSelector] = useState(false);
+	/** コラボ元のMML。replyMml に直接入れるとエディタをキャンセルしただけで
+	 *  元曲が自分の添付曲になってしまうので、保存されるまでは別枠で持つ。 */
+	const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
 	const [userId, setUserId] = useState("名無しvFZ");
 	const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
 	/** IDタップで開くユーザーメニュー（プロフ/ミュート/ブロック/DM/メンション）。 */
@@ -418,6 +435,7 @@ export default function BbsThreadView({
 			setReplyAnim(null);
 		}
 		setActiveScreen(null);
+		setCollabImageUrl(undefined);
 		setReplyText((prev) =>
 			prev.trim() ? prev : "#お絵描き 自作イラスト完成！",
 		);
@@ -436,6 +454,8 @@ export default function BbsThreadView({
 			setReplyDotSize(null);
 		}
 		setActiveScreen(null);
+		setCollabImageUrl(undefined);
+		setCollabDotSize(undefined);
 		setReplyText((prev) =>
 			prev.trim() ? prev : "#ドット絵 自作ドット絵完成！",
 		);
@@ -453,6 +473,7 @@ export default function BbsThreadView({
 
 	const handleSaveMml = (mml: string) => {
 		setReplyMml(mml);
+		setCollabMml(undefined);
 		setActiveScreen(null);
 	};
 
@@ -478,6 +499,90 @@ export default function BbsThreadView({
 			prev.trim() ? prev : `#MV 「${data.title}」を作ったよ！`,
 		);
 	};
+
+	/**
+	 * 掲示板モードのコラボ／改造。
+	 *
+	 * 以前は PostDetail の handleOpenCollab を prop で受けていたが、PostDetail は
+	 * 掲示板モードのとき `return <BbsThreadView/>` で早期リターンしており、
+	 * 親側のエディタもコンポーザも1つもレンダリングされない。つまり親の state を
+	 * 書き換えるだけで画面には何も出ず、投稿もされない（通信すら出ない）導線だった。
+	 * 掲示板モードは返信欄(PostComposer inline)が常時出ているので、ここで下書きへ
+	 * 取り込んでエディタを開けばそのまま送信ボタンまで繋がる。
+	 */
+	const handleOpenCollab = useCallback(async (p: Post) => {
+		// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
+		if (!isCollabAllowed(p.originType)) return;
+		if (p.hasGame && p.gameId) {
+			try {
+				// manifest はDBに無いのでR2から。loadGame が両方まとめて解決する
+				const loaded = await loadGame(p.gameId);
+				if (!loaded) throw new Error();
+				setReplyGameDraft({
+					manifest: loaded.manifest,
+					title: loaded.record.title,
+					preset: "action",
+				});
+				setActiveScreen("gamemaker");
+				return;
+			} catch {}
+		}
+		if (p.hasMv && p.mvId) {
+			try {
+				const loaded = await loadMv(p.mvId);
+				if (!loaded) throw new Error();
+				setReplyMvDraft({
+					manifest: loaded.manifest,
+					title: loaded.record.title,
+					preset: loaded.record.preset || "pianoRoll",
+				});
+				setActiveScreen("mvmaker");
+				return;
+			} catch {}
+		}
+		// MML本文はR2にある。content にはマーカーしか残っていないので、
+		// hasMml/mmlUrl を経由しないと(inline抽出は常に空文字になる)コラボ編集を開始できない
+		if (!p.hasImage && (p.hasMml || extractMmlFromContent(p.content))) {
+			const inline = extractMmlFromContent(p.content);
+			try {
+				const pMml = inline || (p.mmlUrl ? await fetchText(p.mmlUrl) : "");
+				if (pMml) {
+					setCollabMml(pMml);
+					setActiveScreen("mml");
+					return;
+				}
+			} catch {
+				showToast("error", "MMLの読み込みに失敗しました");
+				return;
+			}
+		}
+		setCollabDotSize(p.dotW && p.dotH ? { w: p.dotW, h: p.dotH } : undefined);
+		setCollabImageUrl(p.imageSrc);
+		setShowCollabSelector(true);
+	}, []);
+
+	// 一覧画面から ?collab=1 で飛んできたぶん（SNSモードは PostDetail 側が同じフックで受ける）
+	useCollabAutoOpen(post, handleOpenCollab, true);
+
+	const handleCollabSelectDrawing = useCallback(() => {
+		setShowCollabSelector(false);
+		setActiveScreen("drawing");
+	}, []);
+
+	const handleCollabSelectDotDrawing = useCallback(
+		(w?: number, h?: number) => {
+			setCollabDotSize(w && h ? { w, h } : undefined);
+			setShowCollabSelector(false);
+			setActiveScreen("dotdrawing");
+		},
+		[],
+	);
+
+	const handleCloseCollabSelector = useCallback(() => {
+		setShowCollabSelector(false);
+		setCollabImageUrl(undefined);
+		setCollabDotSize(undefined);
+	}, []);
 
 	const handleHeart = useCallback(
 		(targetPost: Post) => {
@@ -646,7 +751,7 @@ export default function BbsThreadView({
 							{/* Embeds (MML / Chord / URL埋め込み / 画像 / MV / ゲーム) */}
 							<PostEmbeds
 								post={p}
-								onOpenCollab={openCollab}
+								onOpenCollab={handleOpenCollab}
 								onPreviewImage={setPreviewImage}
 								userId={userId}
 								order="text-first"
@@ -723,16 +828,25 @@ export default function BbsThreadView({
 
 			{activeScreen === "drawing" && (
 				<DrawingEditor
-					onClose={() => setActiveScreen(null)}
+					onClose={() => {
+						setActiveScreen(null);
+						setCollabImageUrl(undefined);
+					}}
 					onSave={handleSaveDrawing}
-					collabImageUrl={replyImage ?? undefined}
+					collabImageUrl={collabImageUrl ?? replyImage ?? undefined}
 				/>
 			)}
 			{activeScreen === "dotdrawing" && (
 				<DotDrawingEditor
-					onClose={() => setActiveScreen(null)}
+					onClose={() => {
+						setActiveScreen(null);
+						setCollabImageUrl(undefined);
+						setCollabDotSize(undefined);
+					}}
 					onSave={handleSaveDotDrawing}
-					collabImageUrl={replyImage ?? undefined}
+					collabImageUrl={collabImageUrl ?? replyImage ?? undefined}
+					initialGridW={collabDotSize?.w}
+					initialGridH={collabDotSize?.h}
 				/>
 			)}
 			{activeScreen === "manga" && (
@@ -744,9 +858,12 @@ export default function BbsThreadView({
 			)}
 			{activeScreen === "mml" && (
 				<MmlEditor
-					onClose={() => setActiveScreen(null)}
+					onClose={() => {
+						setActiveScreen(null);
+						setCollabMml(undefined);
+					}}
 					onSave={handleSaveMml}
-					initialMml={replyMml ?? undefined}
+					initialMml={collabMml ?? replyMml ?? undefined}
 				/>
 			)}
 			{activeScreen === "gamemaker" && (
@@ -764,6 +881,15 @@ export default function BbsThreadView({
 					onSave={handleSaveMv}
 					initialManifest={replyMvDraft?.manifest}
 					isEditing={!!replyMvDraft}
+				/>
+			)}
+
+			{showCollabSelector && collabImageUrl && (
+				<CollabSelector
+					imageUrl={collabImageUrl}
+					onSelectDrawing={handleCollabSelectDrawing}
+					onSelectDotDrawing={handleCollabSelectDotDrawing}
+					onClose={handleCloseCollabSelector}
 				/>
 			)}
 

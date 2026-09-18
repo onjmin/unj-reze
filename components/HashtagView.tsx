@@ -1,8 +1,10 @@
 "use client";
 
 import { Hash } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { collabHref } from "@/lib/collab-link";
 import { mergePostCounters } from "@/lib/post-merge";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser, Post } from "@/lib/types";
@@ -15,6 +17,7 @@ interface HashtagViewProps {
 }
 
 export default function HashtagView({ tag }: HashtagViewProps) {
+	const router = useRouter();
 	const [posts, setPosts] = useState<Post[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [userId, setUserId] = useState("");
@@ -166,7 +169,8 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 								onAddReply={handleAddReply}
 								onQuickPost={() => {}}
 								openGame={() => {}}
-								openCollab={() => {}}
+								// コラボはコンポーザ＋エディタが要るのでポスト詳細に委譲する
+								openCollab={(p) => router.push(collabHref(p))}
 								openMml={() => {}}
 								currentUserSlug={currentUser?.slug}
 								currentUserDisplayName={currentUser?.displayName}

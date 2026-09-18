@@ -29,6 +29,7 @@ import {
 	pollInterval,
 	useRealtimeSubscription,
 } from "@/lib/hooks/useRealtime";
+import { useCollabAutoOpen } from "@/lib/hooks/useCollabAutoOpen";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import {
 	useOlderReplies,
@@ -92,14 +93,19 @@ interface PostDetailProps {
 export default function PostDetail({ post: initial }: PostDetailProps) {
 	const router = useRouter();
 	const [bbsMode, setBbsMode] = useState("SNSモード");
+	/** localStorage を読むまで掲示板/SNSの判定は確定しない。?collab=1 の自動オープンは
+	 *  確定してから走らせないと、掲示板モードなのにSNS側で開いてクエリだけ消費してしまう。 */
+	const [bbsModeReady, setBbsModeReady] = useState(false);
 
 	useEffect(() => {
-		if (typeof localStorage !== "undefined") {
-			const saved = localStorage.getItem("unj_bbs_mode");
-			if (saved) {
-				Promise.resolve().then(() => setBbsMode(saved));
-			}
-		}
+		const saved =
+			typeof localStorage !== "undefined"
+				? localStorage.getItem("unj_bbs_mode")
+				: null;
+		Promise.resolve().then(() => {
+			if (saved) setBbsMode(saved);
+			setBbsModeReady(true);
+		});
 	}, []);
 
 	const [post, setPost] = useState<Post>(initial);
@@ -699,9 +705,22 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		}
 	};
 
+	/**
+	 * コラボ／改造は「元ポストへの返信を新しく作る」導線。
+	 *
+	 * エディタを開く前に必ずコンポーザを開いておくこと。PostDetail の openScreen は
+	 * （app/page.tsx の openScreen と違い）コンポーザを閉じずにエディタをその上へ重ねる
+	 * 設計で、handleSaveMml / handleSaveDrawing / handleSaveGame 等は
+	 * 下書きを state に置いて setActiveScreen(null) するだけ ＝ 復帰先の用意はしない。
+	 * コンポーザを開かずにエディタへ入ると、保存しても下書き(replyMml など)が
+	 * state に溜まるだけで送信ボタンのある画面に戻れず、
+	 * 「MMLエディタの"投稿"を押したのに何も起きない・通信すら出ない」状態になる。
+	 */
 	const handleOpenCollab = useCallback(async (p: Post) => {
 		// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
 		if (!isCollabAllowed(p.originType)) return;
+		// スレ主ポスト自身へのコラボは >>1 を挿さない（「返信を書き込む...」と同じ扱い）
+		openComposer(p.id === post.id ? null : p);
 		if (p.hasGame && p.gameId) {
 			try {
 				// manifest はDBに無いのでR2から。loadGame が両方まとめて解決する
@@ -753,7 +772,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		}
 		setCollabImageUrl(p.imageSrc);
 		setShowCollabSelector(true);
-	}, []);
+	}, [openComposer, post.id]);
+
+	// 掲示板モードのときは BbsThreadView 側が同じフックで受ける（下の早期リターン参照）。
+	useCollabAutoOpen(
+		post,
+		handleOpenCollab,
+		bbsModeReady && bbsMode !== "掲示板モード",
+	);
 
 	const handleCollabSelectDrawing = useCallback(() => {
 		setShowCollabSelector(false);
@@ -1124,7 +1150,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const hasMmlContent = post.hasMml || !!extractMmlFromContent(post.content);
 
 	if (bbsMode === "掲示板モード") {
-		return <BbsThreadView post={initial} openCollab={handleOpenCollab} />;
+		// コラボ導線は BbsThreadView が自前で持つ（掲示板モードではこの早期リターンにより
+		// PostDetail 側のコンポーザもエディタも一切レンダリングされないため、
+		// ここで handleOpenCollab を渡しても画面に何も出ない）。
+		return <BbsThreadView post={initial} />;
 	}
 
 	return (

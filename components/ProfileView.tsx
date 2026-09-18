@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
 import { extractChordsFromContent } from "@/lib/chord";
+import { collabHref } from "@/lib/collab-link";
 import {
 	applyMasterVolume,
 	subscribeMasterVolume,
@@ -1545,7 +1546,14 @@ export default function ProfileView({
 
 											<PostEmbeds
 												post={p}
-												onOpenCollab={(post) => openCollab?.(post)}
+												// プロフィール単体ページ(app/user/[id])は openCollab を
+												// 持たない＝コンポーザもエディタも無いので、
+												// そのときはポスト詳細へ委譲する
+												onOpenCollab={(post) =>
+													openCollab
+														? openCollab(post)
+														: router.push(collabHref(post))
+												}
 												onPreviewImage={(img) => setPreviewImage(img)}
 												userId={viewerSlug}
 												mvClassName="mb-3"

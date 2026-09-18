@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import AppShell from "@/components/AppShell";
 import SearchView from "@/components/SearchView";
+import { collabHref } from "@/lib/collab-link";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 function SearchPageContent() {
@@ -27,7 +28,8 @@ function SearchPageContent() {
 				)
 			}
 			openGame={() => {}}
-			openCollab={() => {}}
+			// コラボはコンポーザ＋エディタが要るのでポスト詳細に委譲する
+			openCollab={(post) => router.push(collabHref(post))}
 			openMml={() => {}}
 			// 検索ページは各種エディタを載せていないので編集導線は非対応
 			onEditImage={null}
