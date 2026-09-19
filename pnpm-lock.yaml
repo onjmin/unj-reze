@@ -24,11 +24,14 @@ importers:
         specifier: 1.1.0
         version: 1.1.0
       '@onjmin/chord-parser':
-        specifier: 1.0.4
-        version: 1.0.4
+        specifier: 1.1.1
+        version: 1.1.1
       '@onjmin/dtm':
         specifier: 2.1.13
         version: 2.1.13
+      '@onjmin/koe':
+        specifier: 1.0.10
+        version: 1.0.10
       '@onjmin/oekaki':
         specifier: 1.0.64
         version: 1.0.64
@@ -1249,14 +1252,15 @@ packages:
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
 
-  '@onjmin/chord-parser@1.0.4':
-    resolution: {integrity: sha512-ne/enObhLJgtgQttFk1WrclfWeDxUIpyQDp1GRqvp73AD+IuVgm67XJS10aIR9+lCuGRIW+CPrxZlUmLI3D6Eg==}
-
   '@onjmin/chord-parser@1.1.1':
     resolution: {integrity: sha512-nKp+oXxWGSajNOH+H7LRwcLL24GkiBTzk/V3mXkCfXZWvuRMjJuWdrowSNjGXJTXeIeLQIMO1PUE9+lx7wxOhg==}
 
   '@onjmin/dtm@2.1.13':
     resolution: {integrity: sha512-MxBWR1lJs5gL+V8NKA60QuIzQAsjXSnjWTCFIr+/pT2OTRliDl3uj48hS89uvR2vfMTQAS4wZWDbFkkXJXYaJw==}
+
+  '@onjmin/koe@1.0.10':
+    resolution: {integrity: sha512-q+Gf+pVgV9A5H9trymEw7J3flXS9DlhSBnztUPO5JEf8ri9M5NaFx9UNAXrabW7NpML/EC9f+uMDDu8kkbI9LA==}
+    hasBin: true
 
   '@onjmin/koe@1.0.5':
     resolution: {integrity: sha512-LKC4OzZwXRkdVoW1PHrUysqjx0jxMUd+ZtsU/vvJ/d32OiFTaexA8WattxLLdMiuWXfZd3fB6vGsjXdoGG7aHQ==}
@@ -5133,8 +5137,6 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
-  '@onjmin/chord-parser@1.0.4': {}
-
   '@onjmin/chord-parser@1.1.1': {}
 
   '@onjmin/dtm@2.1.13':
@@ -5142,6 +5144,10 @@ snapshots:
       '@onjmin/chord-parser': 1.1.1
       '@onjmin/koe': 1.0.5
       midi-json-parser: 8.1.74
+
+  '@onjmin/koe@1.0.10':
+    dependencies:
+      fflate: 0.8.3
 
   '@onjmin/koe@1.0.5':
     dependencies:
