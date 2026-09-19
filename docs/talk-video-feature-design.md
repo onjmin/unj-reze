@@ -58,10 +58,12 @@ export interface TalkCharacter {
   scale: number;
   y: number;                       // 足元の位置（設計座標）
   /** 表情ごとの立ち絵。neutral は必須。無い表情は neutral にフォールバック */
-  faces: Partial<Record<TalkExpression, MvCharacterLayer["base"]>> & { neutral: MvCharacterLayer["base"] };
-  /** 瞬き・口パク（MV の character レイヤーと同じ型を使う） */
-  eyes?: MvCharacterLayer["eyes"];
-  mouth?: MvCharacterLayer["mouth"];
+  faces: Partial<Record<TalkExpression, MvAssetRef>> & { neutral: MvAssetRef };
+  flipH?: boolean;                 // 右側のキャラを向かい合わせにする等
+  /** 瞬き・口パク。MV の character レイヤーと同じ画像の持ち方だが、lipsync の
+   *  トラック指定は無い（口は読み上げのモーラ列から動かす）: TalkEyes / TalkMouth */
+  eyes?: TalkEyes;
+  mouth?: TalkMouth;
   voice: {
     model: string;                 // koe 音源キーワード（KOE_VOICEBANK_NAMES）
     pitchOffset?: number;          // 半音
@@ -85,7 +87,8 @@ export interface TalkCue {
 }
 ```
 
-- `MvAssetRef` と `MvCharacterLayer["eyes" | "mouth"]` は `lib/mv-config.ts` からそのまま使う。
+- `MvAssetRef` は `lib/mv-config.ts` からそのまま使う。`emoji:` 参照は絵文字を fillText で描く（内蔵イラストが
+  無い段階の代用と、開発用ページのサンプルに使う）。
   psd の目/口レイヤー割り当て UI（`CharacterLayerFields`）も流用対象。
 - 表情は「立ち絵の差し替え」（`faces`）と「声の感情」（`emotion`）の 2 系統。UI では
   `expression` 1 つを選ばせ、`emotion` は省略時に表情から導く。声だけ変えたい上級者向けに
