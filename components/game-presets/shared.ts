@@ -165,7 +165,16 @@ export interface MessageVoice {
 	model: string;
 	/** 素の声（音源の収録ピッチ）からの半音オフセット。-24〜24、省略時 0。 */
 	pitchOffset?: number;
+	/** 感情（HTS 音声モデルの差し替え。抑揚そのものが変わる）。省略時 neutral。 */
+	emotion?: MessageVoiceEmotion;
+	/** 話し方（話速・抑揚幅・ポーズの係数）。省略時 neutral。 */
+	style?: MessageVoiceStyle;
 }
+
+/** dtm の SpeechEmotion と同じ値。 */
+export type MessageVoiceEmotion = "neutral" | "happy" | "sad" | "angry";
+/** dtm / koe の SpeakingStyleName と同じ値。 */
+export type MessageVoiceStyle = "neutral" | "calm" | "lively";
 
 /** イベントコマンド（順次実行）。 */
 export type EventCommand =

@@ -8,7 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { wrapCorsProxyUrl, notifyCorsProxyUsed, handleImgError } from '@/lib/cors-proxy';
 import { applyMasterVolume } from '@/lib/master-volume';
-import { collectVoiceModels, prepareGameVoice, speakGameMessage, loadVoiceModelNames, DEFAULT_VOICE_MODEL, type SpeechHandle } from '@/lib/game-voice';
+import { collectVoiceNeeds, prepareGameVoice, speakGameMessage, loadVoiceModelNames, DEFAULT_VOICE_MODEL, VOICE_EMOTIONS, VOICE_STYLES, type SpeechHandle } from '@/lib/game-voice';
 import { tryCapturePointer } from '@/lib/pointer-capture';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
@@ -6901,11 +6901,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // 音源マニフェストを先に取っておく。最初のセリフで待たせないため。プレイ終了時は読み上げを止める。
   useEffect(() => {
     if (!isPlaying) { stopSpeech(); setVoicePrep(null); return; }
-    const models = collectVoiceModels(gameDataRef.current);
-    if (models.length === 0) return;
+    const needs = collectVoiceNeeds(gameDataRef.current);
+    if (needs.models.length === 0) return;
     let alive = true;
     setVoicePrep({ loaded: 0, total: 0 });
-    void prepareGameVoice(models, (loaded, total) => {
+    void prepareGameVoice(needs, (loaded, total) => {
       if (alive) setVoicePrep({ loaded, total });
     }).finally(() => { if (alive) setVoicePrep(null); });
     return () => { alive = false; };
@@ -19959,6 +19959,20 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                           onChange={e => onChange({ voice: { ...cv.voice, pitchOffset: Number(e.target.value) || 0 } } as Partial<EventCommand>)}
                           className="flex-1 accent-blue-500" />
                         <span className="text-[10px] text-gray-300 w-8 text-right tabular-nums">{(cv.voice.pitchOffset ?? 0) > 0 ? '+' : ''}{cv.voice.pitchOffset ?? 0}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400 w-10 shrink-0">感情</span>
+                        <select value={cv.voice.emotion ?? 'neutral'} className={inputCls}
+                          onChange={e => { stopPreviewSpeech(); onChange({ voice: { ...cv.voice, emotion: e.target.value === 'neutral' ? undefined : e.target.value } } as Partial<EventCommand>); }}>
+                          {VOICE_EMOTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400 w-10 shrink-0">話し方</span>
+                        <select value={cv.voice.style ?? 'neutral'} className={inputCls}
+                          onChange={e => { stopPreviewSpeech(); onChange({ voice: { ...cv.voice, style: e.target.value === 'neutral' ? undefined : e.target.value } } as Partial<EventCommand>); }}>
+                          {VOICE_STYLES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
                       </div>
                       <button type="button" onClick={previewSpeech} disabled={!cv.text?.trim()}
                         className="w-full flex items-center justify-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300 disabled:opacity-40 py-1 text-[11px]">

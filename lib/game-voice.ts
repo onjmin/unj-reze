@@ -10,6 +10,8 @@ import type {
 	EventCommand,
 	EventPage,
 	MessageVoice,
+	MessageVoiceEmotion,
+	MessageVoiceStyle,
 	PresetData,
 } from "@/components/game-presets/shared";
 import { getStudio } from "./dtm";
@@ -24,6 +26,33 @@ export const loadVoiceModelNames = async (): Promise<Record<string, string>> => 
 
 /** 既定の音源（dtm の DEFAULT_SPEECH_MODEL と同じ値。静的 import を避けるため文字列で持つ）。 */
 export const DEFAULT_VOICE_MODEL = "tsukuyomi";
+
+/** 感情の選択肢と表示名（dtm の SpeechEmotion）。 */
+export const VOICE_EMOTIONS: ReadonlyArray<{
+	value: MessageVoiceEmotion;
+	label: string;
+}> = [
+	{ value: "neutral", label: "ふつう" },
+	{ value: "happy", label: "うれしい" },
+	{ value: "sad", label: "かなしい" },
+	{ value: "angry", label: "おこり" },
+];
+
+/** 話し方の選択肢と表示名（koe の SpeakingStyleName）。 */
+export const VOICE_STYLES: ReadonlyArray<{
+	value: MessageVoiceStyle;
+	label: string;
+}> = [
+	{ value: "neutral", label: "ふつう" },
+	{ value: "calm", label: "おだやか（朗読調）" },
+	{ value: "lively", label: "いきいき" },
+];
+
+/** ゲームが読み上げに必要とするもの（先取り用）。 */
+export interface VoiceNeeds {
+	models: string[];
+	emotions: MessageVoiceEmotion[];
+}
 
 /** コマンド列を入れ子（選択肢・条件分岐）まで辿る。 */
 const forEachCommand = (
@@ -46,11 +75,16 @@ const forEachCommand = (
 	}
 };
 
-/** ゲーム全体（全シーン・全イベントページ・yume25d ビルボード）で使われている読み上げ音源のキーワード一覧。 */
-export const collectVoiceModels = (gameData: PresetData): string[] => {
+/** ゲーム全体（全シーン・全イベントページ・yume25d ビルボード）で使われている読み上げ音源と感情の一覧。 */
+export const collectVoiceNeeds = (gameData: PresetData): VoiceNeeds => {
 	const models = new Set<string>();
+	const emotions = new Set<MessageVoiceEmotion>();
 	const visit = (cmd: EventCommand) => {
-		if (cmd.type === "message" && cmd.voice?.model) models.add(cmd.voice.model);
+		if (cmd.type !== "message" || !cmd.voice?.model) return;
+		models.add(cmd.voice.model);
+		if (cmd.voice.emotion && cmd.voice.emotion !== "neutral") {
+			emotions.add(cmd.voice.emotion);
+		}
 	};
 	const scanPaged = (
 		items: ReadonlyArray<{ pages?: EventPage[] }> | undefined,
@@ -62,21 +96,24 @@ export const collectVoiceModels = (gameData: PresetData): string[] => {
 	scanPaged(gameData.objects);
 	for (const scene of gameData.scenes ?? []) scanPaged(scene.objects);
 	scanPaged(gameData.layout25d?.billboards);
-	return [...models];
+	return { models: [...models], emotions: [...emotions] };
 };
 
 /**
- * 読み上げに必要なもの（TTS アセット＋音源マニフェスト）を先に取る。
+ * 読み上げに必要なもの（TTS アセット＋音源マニフェスト＋感情モデル）を先に取る。
  * 失敗しても投げない（声が出ないだけでゲームは進む）。
  */
 export const prepareGameVoice = async (
-	models: string[],
+	needs: VoiceNeeds,
 	onProgress?: (loaded: number, total: number) => void,
 ): Promise<void> => {
-	if (models.length === 0) return;
+	if (needs.models.length === 0) return;
 	try {
 		const studio = await getStudio();
-		await studio.prepareSpeech(models, { onProgress });
+		await studio.prepareSpeech(needs.models, {
+			emotions: needs.emotions,
+			onProgress,
+		});
 	} catch (e) {
 		console.warn("[game-voice] 読み上げの準備に失敗しました", e);
 	}
@@ -98,6 +135,8 @@ export const speakGameMessage = async (
 		return await studio.speak(body, {
 			model: voice.model,
 			pitchOffset: voice.pitchOffset ?? 0,
+			emotion: voice.emotion ?? "neutral",
+			style: voice.style ?? "neutral",
 			signal,
 		});
 	} catch (e) {

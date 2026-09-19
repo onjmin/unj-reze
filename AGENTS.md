@@ -180,5 +180,6 @@ then run `pnpm typecheck` and `pnpm lint`.
 - [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding (`games` table).
 - [docs/mv-feature-design.md](docs/mv-feature-design.md) — music-video feature: layer/section model, audio modes,音→絵モジュレータ, `mvs` table.
 - [docs/mmo3d-feature-design.md](docs/mmo3d-feature-design.md) — 3D MMO preset (`mmo3d`): why it's separate from `yume25d`, realtime hub extension plan, phased rollout.
+- [docs/talk-video-feature-design.md](docs/talk-video-feature-design.md) — かけあい動画（`talk`）: 台本ベース時間軸の YMM 風解説動画、MV とは別種別、koe UtauTTS で読み上げ。
 - [README.md](README.md) — deploy and local-setup instructions.
 - `.agents/skills/rpgen-search.md` — rpgen-search API and auth (local-only, gitignored).

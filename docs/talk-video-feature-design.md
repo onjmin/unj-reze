@@ -1,0 +1,245 @@
+# かけあい動画（`talk`）設計ドキュメント
+
+2人（以上）のキャラクターが掛け合いで解説する「ゆっくりムービーメーカー風」の動画投稿。
+MV（[mv-feature-design.md](mv-feature-design.md)）とは**別の投稿種別**として新設し、描画部品と
+mp4 書き出しだけを MV から借りる。声は `@onjmin/dtm` の `studio.speak`（koe UtauTTS）。
+
+- 型定義: `lib/talk-config.ts`（新規）
+- 時間軸の組み立て: `lib/talk-timeline.ts`（新規）
+- 描画: `lib/talk-engine.ts`（新規。`lib/mv-engine.ts` の部品を import）
+- 音: `lib/talk-audio.ts`（新規。`lib/dtm.ts` の共有 studio）
+- 編集UI: `components/TalkMaker.tsx` / 再生: `components/TalkPlayer.tsx` / 埋め込み: `components/TalkBox.tsx`
+- 先行実装: ゲームのメッセージウィンドウ読み上げ `lib/game-voice.ts`（同じ `studio.speak` を使う）
+
+---
+
+## 0. 方針（決まっていること）
+
+- **素材はゆっくりの顔ではない。** キャラ画像は本 SNS に投稿された画像（`post:`）、psd の
+  レイヤー（`psd:`）、URL（`url:`）、または内蔵イラスト。ゆっくり顔素材は二次創作物なので
+  使わない（マリオ除去と同じ判断軸）。
+- **趣旨は「漫才形式の解説動画」。** ボケ/ツッコミの 2 人が交互に話す。台本を書けば動画になる、
+  が体験の核。AviUtl 的な自由タイムラインは持たない（MV と同じ思想）。
+- **時間軸は台本の行。** MV の「時間軸は MML だけ」は使わない。各行の長さは読み上げの長さで
+  決まる。BGM は任意で、時計にはならない（§2）。
+- **声は koe UtauTTS。** 音源ごとの利用規約と HTS モデル（tohoku-f01、CC BY 4.0）の表記が要る（§8）。
+
+---
+
+## 1. データモデル（`lib/talk-config.ts`）
+
+```ts
+export interface TalkManifest {
+  version: 1;
+  title: string;
+  credit?: string;                 // 音源・素材のクレジット（§8）
+  stage: TalkStage;                // 背景・字幕の見た目
+  characters: TalkCharacter[];     // 通常 2 人。id で cue から参照
+  cues: TalkCue[];                 // 台本。上から順に再生
+  bgm?: { mml: string; volume: number };  // 任意。ループ再生、時計にはしない
+}
+
+export interface TalkStage {
+  bg?: MvAssetRef;                 // 背景画像（無ければ単色）
+  bgColor: string;
+  subtitle: {
+    style: "window" | "band";     // 下部ウィンドウ / 帯
+    fontSize: number;
+    color: string;
+    outline: string;
+  };
+}
+
+export interface TalkCharacter {
+  id: string;
+  name: string;                    // 字幕の話者名
+  color: string;                   // 話者名と字幕縁の色
+  side: "left" | "right";
+  scale: number;
+  y: number;                       // 足元の位置（設計座標）
+  /** 表情ごとの立ち絵。neutral は必須。無い表情は neutral にフォールバック */
+  faces: Partial<Record<TalkExpression, MvCharacterLayer["base"]>> & { neutral: MvCharacterLayer["base"] };
+  /** 瞬き・口パク（MV の character レイヤーと同じ型を使う） */
+  eyes?: MvCharacterLayer["eyes"];
+  mouth?: MvCharacterLayer["mouth"];
+  voice: {
+    model: string;                 // koe 音源キーワード（KOE_VOICEBANK_NAMES）
+    pitchOffset?: number;          // 半音
+    style?: "neutral" | "calm" | "lively";
+  };
+}
+
+export type TalkExpression = "neutral" | "happy" | "sad" | "angry" | "surprised";
+
+export interface TalkCue {
+  id: string;
+  speaker: string;                 // TalkCharacter.id
+  text: string;                    // 読み上げ・字幕の本文（漢字可。読みは jpreprocess）
+  expression?: TalkExpression;     // 立ち絵の差し替え。省略時 neutral
+  /** 声の感情。省略時は expression から引く（surprised→happy、それ以外は同名） */
+  emotion?: "neutral" | "happy" | "sad" | "angry";
+  gapSec?: number;                 // この行の後の間。既定 0.35
+  subtitle?: string;               // 字幕だけ変えたいとき（読み上げは text）
+  /** 保存時に計った読み上げ長（秒）。再生前のプレビュー・サムネ・シークに使う。再生時は再計算 */
+  measuredSec?: number;
+}
+```
+
+- `MvAssetRef` と `MvCharacterLayer["eyes" | "mouth"]` は `lib/mv-config.ts` からそのまま使う。
+  psd の目/口レイヤー割り当て UI（`CharacterLayerFields`）も流用対象。
+- 表情は「立ち絵の差し替え」（`faces`）と「声の感情」（`emotion`）の 2 系統。UI では
+  `expression` 1 つを選ばせ、`emotion` は省略時に表情から導く。声だけ変えたい上級者向けに
+  `emotion` を残す。
+- `measuredSec` は**キャッシュであって真実ではない**。TTS のバージョンや音源が変わると
+  長さは変わるので、再生時は必ず計画し直す（§2）。
+
+---
+
+## 2. 時間軸（`lib/talk-timeline.ts`）
+
+MV と決定的に違う点。台本の各行の長さは**読み上げてみないと分からない**。
+
+```
+cues → (全行を計画+合成) → durations → timeline { cue, startSec, endSec }
+```
+
+1. 再生開始時に `studio.prepareSpeech(models, { emotions })` でアセットを取り、全行を
+   `studio.speak(text, { ..., at: <未来の絶対時刻>, awaitRender: true })` ではなく、まず
+   **計画だけ**を全行ぶん行って長さを得る。dtm の `singingVoices.planSpeech(model, text)` が
+   長さを返す（感情・話し方を含む版が要る → §7 のライブラリ改修 (a)）。
+2. `startSec[i] = startSec[i-1] + duration[i-1] + gap[i-1]` で並べる。
+3. 再生は AudioContext の時計 `t0 = ctx.currentTime + 0.3` を基準に、各行を
+   `studio.speak(text, { at: t0 + startSec[i] })` で**先にすべてスケジュール**する。
+   合成は届いた順に置かれるので（dtm の `scheduleSpeech` と同じ仕組み）、頭の数行が
+   合成できた時点で再生が始まり、後続は裏で追いつく。
+4. 描画側は `ctx.currentTime - t0` で現在秒を取り、timeline から現在の cue と経過割合を引く。
+   MV の `onTick(step)` に相当するものは無く、`timeSec` だけを渡す。
+
+- **一時停止**: 発話ハンドルをすべて `stop()` して、再開時は現在秒以降の行を再スケジュール
+  する（途中の行は頭から言い直す。行の途中から再開する精度は要らない）。
+- **シーク**: 行単位。行の頭へ飛ぶ。
+- **BGM**: `bgm.mml` があれば `playMML`（light モード）でループ再生し、音量だけ下げる。
+  時計には使わない。MV と違い拍同期の演出は持たない。
+- **読み上げが無い行**（音源ロード失敗・読みが取れない本文）は文字数 × 0.12 秒 + 0.6 秒で
+  代用し、字幕だけ出す。動画は必ず最後まで進む。
+
+---
+
+## 3. 描画（`lib/talk-engine.ts`）
+
+`lib/mv-engine.ts` から次を **export に昇格**して借りる（現状は module-private）:
+`drawCharacterLayer`、`resolveAssetRefImage`、`DrawCtx`。画像の事前ロードは既存の
+`preloadMvImages` / `collectMvPsdRefs` を manifest の型だけ差し替えて呼ぶ。
+
+1 フレーム = `drawTalkFrame(ctx, manifest, timeline, timeSec)`:
+
+1. 背景（`stage.bg` か `bgColor`）。
+2. キャラ 2 人。話している側は `expression` の立ち絵、聞いている側は `neutral`。
+   話者は少し前（scale ×1.03）・聞き手は少し暗く（alpha 0.85）して「誰が話しているか」を
+   画面だけで分からせる。
+3. 口パク。話者は「音の有無」で開閉させるのが第一段階。第二段階で読み上げ計画の
+   モーラ（`timeline.units[].alias` と `position_ms`）から母音を**推定なしで**引き、
+   `mouth.vowels` に流す（§7 (b)）。MV の `mv-vowel.ts` の推定より正確になる。
+4. 瞬きは MV の `resolveBlinkState` をそのまま使う（seed 決定論）。拍位置の代わりに秒を渡す。
+5. 字幕。`stage.subtitle.style` に従い下部に話者名＋本文。行の頭で全文を出す（YMM 風）。
+   1 行が長いときは自動改行、2 行まで。それ以上は台本側で分けることをエディタが促す。
+
+キャンバスは MV と同じ 640×360 の論理座標＋ `transform: scale`。
+
+---
+
+## 4. 音（`lib/talk-audio.ts`）
+
+- 共有 studio（`lib/dtm.ts` の `getStudio()`）を使う。**2 つ目の studio は作らない**
+  （音量がサイト共通の masterGain に乗る）。
+- `speakGameMessage` と同じく `studio.speak` を呼ぶが、`at` で絶対時刻を渡す点が違う。
+- 初回は TTS アセット約 43MB。`TalkBox` を開いた瞬間に `prepareSpeech` を始め、
+  進捗をサムネの上に出す（ゲームの「ボイス準備中」と同じ見た目）。
+- 感情モデルは使う分だけ（各約 2MB）。`cues` から集めて `prepareSpeech({ emotions })` に渡す。
+
+---
+
+## 5. 投稿への紐づけ（MV と同じ形）
+
+MV の実装を**そのまま複製**する。差分は名前だけ。
+
+| 層 | MV | talk |
+|---|---|---|
+| テーブル | `mvs` | `talks`（`id, title, manifest_url, manifest_delete_id, manifest_delete_hash, bg_url, created_at, creator_user_id, plays`）。`preset` 列は持たない |
+| 投稿側 FK | `threads.mv_id` / `res.mv_id` | `threads.talk_id` / `res.talk_id`（`ON DELETE SET NULL`、部分インデックス） |
+| DataStore | `createMv/getMv/getMvsByIds/updateMv/recordMvPlay` | 同名の talk 版を `interface.ts` / `mock.ts` / `pg.ts` の 3 つに |
+| 孤児 GC | `hasOtherPostRef("mv_id")` / `collectOrphanManifests` / `deletePost` の delete token | `talk_id` を追加 |
+| API | `app/api/mvs/…` 3 ルート | `app/api/talks/…` 3 ルート（GET は `withEdgeCache`） |
+| 種別の登録 | `UploadKind`、`isValidPayloadUrl`、`parseManifestRef`、`saveHistory` の type、`discardType` | それぞれに `"talk"` を追加 |
+| クライアント保存 | `lib/game-mv-client.ts` | `createTalk/updateTalk/loadTalk` を同ファイルへ |
+| ID | `encodeMv`、`encodePost` の id 変換 | `encodeTalk` を追加、`encodePost` に `talkId` |
+| 投稿 | `mvDraft` / `onOpenMvMaker` / チップ / 送信 2 箇所 | `talkDraft` 一式 |
+| フィード | `PostEmbeds` → `MvBox` → `MvPlayer` | `TalkBox` → `TalkPlayer`（`unj-game-box-open` の排他イベントも同じ） |
+| `DbPost` | `hasMv/mvId/mvTitle/mvThumbnail/mvPlays` | `hasTalk/talkId/talkTitle/talkThumbnail/talkPlays` |
+
+- manifest は **uploader-worker へ直接**上げる（サーバーを経由しない。[NEON_EGRESS.md](NEON_EGRESS.md)）。
+- `bg_url` は背景画像かキャラ 1 人目の立ち絵を非正規化して持ち、一覧では manifest を読まない。
+- スキーマは `docker/init.sql` に足し、`unj/wiki/init.sql` にも同じ変更を入れる（AGENTS.md）。
+
+---
+
+## 6. 編集UI（`components/TalkMaker.tsx`）
+
+MvMaker（8.6k 行）は流用せず、小さく作る。画面は 3 枚だけ。
+
+1. **キャラ**: 2 枠。立ち絵（表情ごと）・目/口（psd レイヤー割り当て UI を流用）・音源・
+   高さ・話し方。内蔵イラストを初期値に入れ、何も選ばなくても動くようにする。
+2. **台本**: 1 行 = 話者トグル（左/右）＋本文＋表情。行の追加は Enter、並べ替えは上下ボタン
+   （[[gamemaker-mobile-ui]] の規約）。各行に「試聴」。行の右に `measuredSec` を出す。
+3. **見た目と書き出し**: 背景・字幕スタイル・BGM（MML）・タイトル・クレジット。プレビュー再生と
+   mp4 書き出し（§7 (c)）。
+
+パネルの見た目は [[gamemaker-panel-design]] に従う（グレーセクション、青の参照ボタン、紫は使わない）。
+自動保存は `lib/history.ts` に `"talk"` を足して使う。
+
+---
+
+## 7. 段階とライブラリ側の改修
+
+### 段階
+
+1. **型・時間軸・プレイヤー**（DB なし）: 固定 manifest を `TalkPlayer` で再生できる。
+   計画→タイムライン→スケジュール→描画の一巡を確かめる。
+2. **エディタ**: 台本を書いて試聴できる。`saveHistory` で下書き保持。
+3. **投稿・DB・API・フィード**: §5 の複製。
+4. **mp4 書き出し**と**計画由来の口パク**。
+5. 余力: BGM、効果音行（`kind: "se"`）、キャラ 3 人目、字幕の縦書き。
+
+### ライブラリ側（先に dtm/koe へ入れるもの）
+
+(a) `singingVoices.planSpeech(model, text)` に `style` / `emotion` を受ける口を足し、
+    `studio.planSpeech(text, { model, style, emotion })` として公開する。今は本文だけの
+    長さしか引けない（感情で長さが変わる）。
+(b) `SpeechHandle`（または `planSpeech` の戻り値）に **モーラ列**
+    `{ startSec, endSec, alias }[]` を含める。口パクの母音を推定なしで引くため。
+(c) mp4 書き出しは `MvPlayer.startExportMp4` の中身（`canvas.captureStream(30)` +
+    `studio.getAudioStreamTrack()` + `MediaRecorder`）を `lib/mv-export.ts` へ切り出して
+    両プレイヤーから呼ぶ。reze 内の改修で、ライブラリは触らない。
+
+(a)(b) は dtm の publish を伴うので、段階 1 に入る前に済ませる。段階 1 は (a) が無くても
+`studio.speak(..., { awaitRender: true })` の `durationSec` で代用して始められる。
+
+---
+
+## 8. 権利表記
+
+- 音源ごとの利用規約（つくよみちゃん等）に従う。プレイヤーの下部に「声: <音源名>」を常時出し、
+  `credit` に台本作者が追記できる。
+- HTS 音声モデル tohoku-f01（東北大学 伊藤・能勢研究室、CC BY 4.0）の表記をプレイヤーの
+  クレジット欄に固定で入れる。mp4 書き出しにも末尾 2 秒のクレジット画面として焼く。
+- 投稿画像を立ち絵に使うときは MV と同じく `post:` 参照で元投稿へ辿れるようにする。
+
+---
+
+## 9. 転送量と CPU
+
+- manifest はサーバーを通らない。一覧は `bg_url` と `title` だけ。
+- TTS アセットは GitHub Pages から取り Cache API に残る。感情モデルは使う分だけ。
+- 合成は dtm の voice worker で行われ、メインスレッドは計画（1 行数十 ms）だけ。
+  長い台本（50 行超）でも、スケジュールは全行先にして合成は先読み順に流れるので、
+  再生開始が遅れない。
