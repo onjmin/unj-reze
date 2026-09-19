@@ -8,6 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { wrapCorsProxyUrl, notifyCorsProxyUsed, handleImgError } from '@/lib/cors-proxy';
 import { applyMasterVolume } from '@/lib/master-volume';
+import { collectVoiceModels, prepareGameVoice, speakGameMessage, loadVoiceModelNames, DEFAULT_VOICE_MODEL, type SpeechHandle } from '@/lib/game-voice';
 import { tryCapturePointer } from '@/lib/pointer-capture';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
@@ -2068,6 +2069,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const gameMsgReadyRef = useRef(false);
   const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 鳴っている（または計画中の）メッセージ読み上げ。ウィンドウを閉じたら止める。 */
+  const speechRef = useRef<{ abort: AbortController; handle: SpeechHandle | null } | null>(null);
+  /** 読み上げアセットの取得進捗（プレイ開始時のみ。取得済み・不要なら null）。 */
+  const [voicePrep, setVoicePrep] = useState<{ loaded: number; total: number } | null>(null);
   const previewStopRef = useRef<(() => void) | null>(null);
   const ghostPlayersRef = useRef(ghostPlayers || []);
   // 他プレイヤー（ghost）の描画用補間ステート。
@@ -5408,9 +5413,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   }, []);
 
+  /** メッセージ読み上げを止める（計画中なら中断、再生中ならその発話だけ停止）。 */
+  const stopSpeech = useCallback(() => {
+    const cur = speechRef.current;
+    if (!cur) return;
+    speechRef.current = null;
+    cur.abort.abort();
+    cur.handle?.stop();
+  }, []);
+
+  /** メッセージウィンドウの読み上げを始める。前の発話は必ず止めてから。 */
+  const startSpeech = useCallback((text: string, voice: NonNullable<Extract<EventCommand, { type: 'message' }>['voice']>) => {
+    stopSpeech();
+    const entry = { abort: new AbortController(), handle: null as SpeechHandle | null };
+    speechRef.current = entry;
+    void speakGameMessage(text, voice, entry.abort.signal).then(handle => {
+      // 待っている間にウィンドウが閉じられていたら（別の発話に替わっていたら）鳴らさない。
+      if (speechRef.current !== entry) { handle?.stop(); return; }
+      entry.handle = handle;
+      if (!handle) speechRef.current = null;
+    });
+  }, [stopSpeech]);
+
   const dismissGameMsg = useCallback(() => {
     if (!gameMsgReadyRef.current) return;
     playSfx(MSG_ADVANCE_SFX);
+    stopSpeech();
     if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
 
     // Call onDismiss outside of the state updater to avoid React Strict Mode calling it twice!
@@ -5421,7 +5449,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (onDismiss) {
       onDismiss();
     }
-  }, []);
+  }, [stopSpeech]);
 
   useEffect(() => () => { if (gameMsgTimerRef.current) clearTimeout(gameMsgTimerRef.current); }, []);
 
@@ -5611,6 +5639,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       switch (cmd.type) {
         case 'message':
           showGameMsg(cmd.text, 'instant', advance);
+          // 読み上げはウィンドウに付くオプション。文字表示とは同期させず、閉じたら止める。
+          if (cmd.voice?.model) startSpeech(cmd.text, cmd.voice);
+          else stopSpeech();
           break;
         case 'overheadMessage':
           itemGetRef.current = { text: cmd.text, startTime: performance.now() };
@@ -6330,6 +6361,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       clearTimeout(gameMsgTimerRef.current);
       gameMsgTimerRef.current = null;
     }
+    stopSpeech();
     setGameMsg(null);
     gameMsgReadyRef.current = false;
     setEventChoice(null);
@@ -6864,6 +6896,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       a.play().then(() => { a.pause(); a.src = ''; }).catch(() => { });
     });
   }, [isPlaying, gameData.sfx]);
+
+  // メッセージ読み上げ（koe UtauTTS）を使うゲームなら、プレイ開始時にアセット（初回のみ約45MB）と
+  // 音源マニフェストを先に取っておく。最初のセリフで待たせないため。プレイ終了時は読み上げを止める。
+  useEffect(() => {
+    if (!isPlaying) { stopSpeech(); setVoicePrep(null); return; }
+    const models = collectVoiceModels(gameDataRef.current);
+    if (models.length === 0) return;
+    let alive = true;
+    setVoicePrep({ loaded: 0, total: 0 });
+    void prepareGameVoice(models, (loaded, total) => {
+      if (alive) setVoicePrep({ loaded, total });
+    }).finally(() => { if (alive) setVoicePrep(null); });
+    return () => { alive = false; };
+  }, [isPlaying, stopSpeech]);
 
   // タイトル／エンディング画面の BGM（プレイ中の BGM とは独立）
   useEffect(() => {
@@ -13754,6 +13800,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </div>
             )}
 
+            {/* 読み上げアセットの取得中（プレイ開始直後・初回のみ長い） */}
+            {voicePrep && (
+              <div className="pointer-events-none" style={playOverlayFrame}>
+                <div className="absolute top-2 right-2 bg-black/60 border border-gray-600 rounded px-2 py-1 text-[11px] text-gray-200 font-pixel">
+                  ボイス準備中… {voicePrep.total > 0 ? `${Math.min(100, Math.floor(voicePrep.loaded / voicePrep.total * 100))}%` : ''}
+                </div>
+              </div>
+            )}
+
             {/* ゲーム内メッセージ（DQ風） */}
             {gameMsg && (
               <div className="pointer-events-none" style={playOverlayFrame}>
@@ -19762,6 +19817,38 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
   // コマンドごとに持つフィールドが違うため、詳細UIでは union を絞らずこの別名から読む。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cv = cmd as any;
+  // メッセージの読み上げ音源一覧（dtm の内蔵 koe 音源）。message のときだけ取りに行く。
+  const [voiceNames, setVoiceNames] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    if (type !== 'message' || voiceNames) return;
+    let alive = true;
+    loadVoiceModelNames().then(names => { if (alive) setVoiceNames(names); }).catch(() => { });
+    return () => { alive = false; };
+  }, [type, voiceNames]);
+  // 試聴中の読み上げ。もう一度押す／閉じるで止める。
+  const previewSpeechRef = useRef<{ abort: AbortController; handle: SpeechHandle | null } | null>(null);
+  const [previewSpeaking, setPreviewSpeaking] = useState(false);
+  const stopPreviewSpeech = useCallback(() => {
+    const cur = previewSpeechRef.current;
+    previewSpeechRef.current = null;
+    cur?.abort.abort();
+    cur?.handle?.stop();
+    setPreviewSpeaking(false);
+  }, []);
+  useEffect(() => stopPreviewSpeech, [stopPreviewSpeech]);
+  const previewSpeech = () => {
+    if (previewSpeechRef.current) { stopPreviewSpeech(); return; }
+    if (!cv.voice?.model || !cv.text?.trim()) return;
+    const entry = { abort: new AbortController(), handle: null as SpeechHandle | null };
+    previewSpeechRef.current = entry;
+    setPreviewSpeaking(true);
+    void speakGameMessage(cv.text, cv.voice, entry.abort.signal).then(handle => {
+      if (previewSpeechRef.current !== entry) { handle?.stop(); return; }
+      if (!handle) { previewSpeechRef.current = null; setPreviewSpeaking(false); return; }
+      entry.handle = handle;
+      void handle.ended.then(() => { if (previewSpeechRef.current === entry) { previewSpeechRef.current = null; setPreviewSpeaking(false); } });
+    });
+  };
   const setType = (t: EventCommand['type']) => {
     const base: EventCommand = (() => {
       switch (t) {
@@ -19842,8 +19929,49 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">設定項目</div>
 
             {type === 'message' && (
-              <textarea value={cv.text ?? ''} onChange={e => onChange({ text: e.target.value })}
-                rows={3} className={inputCls} placeholder="メッセージ" />
+              <div className="space-y-2">
+                <textarea value={cv.text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                  rows={3} className={inputCls} placeholder="メッセージ" />
+                <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={!!cv.voice}
+                      onChange={e => {
+                        stopPreviewSpeech();
+                        onChange({ voice: e.target.checked ? { model: DEFAULT_VOICE_MODEL } : undefined } as Partial<EventCommand>);
+                      }}
+                      className="accent-blue-500 w-3.5 h-3.5" />
+                    🔊 ボイスで読み上げる（UTAU音源）
+                  </label>
+                  {cv.voice && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400 w-10 shrink-0">音源</span>
+                        <select value={cv.voice.model} className={inputCls}
+                          onChange={e => { stopPreviewSpeech(); onChange({ voice: { ...cv.voice, model: e.target.value } } as Partial<EventCommand>); }}>
+                          {voiceNames
+                            ? Object.entries(voiceNames).map(([k, name]) => <option key={k} value={k}>{name}</option>)
+                            : <option value={cv.voice.model}>{cv.voice.model}</option>}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400 w-10 shrink-0">高さ</span>
+                        <input type="range" min={-12} max={12} step={1} value={cv.voice.pitchOffset ?? 0}
+                          onChange={e => onChange({ voice: { ...cv.voice, pitchOffset: Number(e.target.value) || 0 } } as Partial<EventCommand>)}
+                          className="flex-1 accent-blue-500" />
+                        <span className="text-[10px] text-gray-300 w-8 text-right tabular-nums">{(cv.voice.pitchOffset ?? 0) > 0 ? '+' : ''}{cv.voice.pitchOffset ?? 0}</span>
+                      </div>
+                      <button type="button" onClick={previewSpeech} disabled={!cv.text?.trim()}
+                        className="w-full flex items-center justify-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300 disabled:opacity-40 py-1 text-[11px]">
+                        {previewSpeaking ? <Pause size={12} /> : <Play size={12} />}
+                        {previewSpeaking ? '停止' : '試聴（初回はデータ取得に時間がかかります）'}
+                      </button>
+                      <p className="text-[10px] text-gray-500 leading-relaxed">
+                        漢字・数字はそのまま読みます。文字表示とは同期せず、ウィンドウを閉じると止まります。
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
             )}
             {type === 'choice' && (() => {
               const choices: { label: string; commands: EventCommand[] }[] = cv.choices ?? [];

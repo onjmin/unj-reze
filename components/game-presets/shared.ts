@@ -156,9 +156,20 @@ export interface EventCondition {
 	minGold?: number;
 }
 
+/**
+ * メッセージウィンドウの読み上げ設定（@onjmin/dtm の `studio.speak`＝koe UtauTTS）。
+ * 頭上メッセージ（overheadMessage）には付けない。ウィンドウが出るときだけのオプション。
+ */
+export interface MessageVoice {
+	/** 内蔵 koe 音源キーワード（dtm の KOE_VOICEBANKS のキー。例: "tsukuyomi"）。 */
+	model: string;
+	/** 素の声（音源の収録ピッチ）からの半音オフセット。-24〜24、省略時 0。 */
+	pitchOffset?: number;
+}
+
 /** イベントコマンド（順次実行）。 */
 export type EventCommand =
-	| { type: "message"; text: string }
+	| { type: "message"; text: string; voice?: MessageVoice }
 	| {
 			type: "choice";
 			text: string;
