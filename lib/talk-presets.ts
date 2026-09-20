@@ -33,6 +33,15 @@ const emojiFaces = (
 	...(rest.surprised ? { surprised: { ref: `emoji:${rest.surprised}` } } : {}),
 });
 
+// 既定の 2 人は「ねこ」と「ひと」。表情の絵文字が 5 種類そろっているのがこの 2 つだけで
+// （いぬは 🐶 と 🐕 の差が表情ではないので、うれしい・かなしいを描き分けられない）、
+// 表情を切り替える見本にちょうどいい。どれも lib/emoji-palette.ts の「顔」にある絵文字なので、
+// 利用者が同じものを選び直せる。
+/** ねこの表情一式。 */
+const CAT_FACES = emojiFaces("😺", { happy: "😸", sad: "😿", angry: "😾", surprised: "🙀" });
+/** ひとの表情一式。 */
+const PERSON_FACES = emojiFaces("🙂", { happy: "😄", sad: "😢", angry: "😠", surprised: "😲" });
+
 const leftChar = (id: string, name: string, color: string, faces: TalkCharacter["faces"], voice: TalkCharacter["voice"]): TalkCharacter => ({
 	id,
 	name,
@@ -60,8 +69,8 @@ export const createDefaultTalkManifest = (): TalkManifest => ({
 	title: "",
 	stage: createDefaultTalkStage(),
 	characters: [
-		leftChar("a", "ボケ", "#f9a8d4", emojiFaces("🐱", { happy: "😸", sad: "😿", angry: "😾", surprised: "🙀" }), { model: DEFAULT_VOICE_MODEL, style: "lively" }),
-		rightChar("b", "ツッコミ", "#93c5fd", emojiFaces("🐶", { happy: "🐕", angry: "🐺" }), { model: "teto", pitchOffset: -2, style: "calm" }),
+		leftChar("a", "ボケ", "#f9a8d4", CAT_FACES, { model: DEFAULT_VOICE_MODEL, style: "lively" }),
+		rightChar("b", "ツッコミ", "#93c5fd", PERSON_FACES, { model: "teto", pitchOffset: -2, style: "calm" }),
 	],
 	cues: [
 		{ id: newId("c"), speaker: "a", text: "" },
@@ -71,14 +80,14 @@ export const createDefaultTalkManifest = (): TalkManifest => ({
 
 const INTRO_PRESET: TalkPresetEntry = {
 	name: "うんｊレゼって なに？",
-	description: "このサイトの紹介。ねこが説明して、いぬが突っ込む基本の掛け合い。表情と間の付け方の見本。",
+	description: "このサイトの紹介。ねこが説明して、ひとが突っ込む基本の掛け合い。表情と間の付け方の見本。",
 	build: () => ({
 		version: 1,
 		title: "うんｊレゼって なに？",
 		stage: createDefaultTalkStage(),
 		characters: [
-			leftChar("boke", "ねこ", "#f9a8d4", emojiFaces("🐱", { happy: "😸", sad: "😿", angry: "😾", surprised: "🙀" }), { model: DEFAULT_VOICE_MODEL, style: "lively" }),
-			rightChar("tsukkomi", "いぬ", "#93c5fd", emojiFaces("🐶", { happy: "🐕", angry: "🐺" }), { model: "teto", pitchOffset: -2, style: "calm" }),
+			leftChar("boke", "ねこ", "#f9a8d4", CAT_FACES, { model: DEFAULT_VOICE_MODEL, style: "lively" }),
+			rightChar("tsukkomi", "ひと", "#93c5fd", PERSON_FACES, { model: "teto", pitchOffset: -2, style: "calm" }),
 		],
 		cues: cues([
 			["boke", "ねえねえ、うんｊレゼって知ってる？", { expression: "happy" }],
@@ -157,8 +166,8 @@ const MANZAI_PRESET: TalkPresetEntry = {
 		title: "きょうのおやつ",
 		stage: createDefaultTalkStage(),
 		characters: [
-			leftChar("a", "ボケ", "#f9a8d4", emojiFaces("🐱", { happy: "😸", sad: "😿", angry: "😾", surprised: "🙀" }), { model: DEFAULT_VOICE_MODEL, style: "lively" }),
-			rightChar("b", "ツッコミ", "#93c5fd", emojiFaces("🐶", { happy: "🐕", angry: "🐺" }), { model: "teto", pitchOffset: -2, style: "calm" }),
+			leftChar("a", "ボケ", "#f9a8d4", CAT_FACES, { model: DEFAULT_VOICE_MODEL, style: "lively" }),
+			rightChar("b", "ツッコミ", "#93c5fd", PERSON_FACES, { model: "teto", pitchOffset: -2, style: "calm" }),
 		],
 		cues: cues([
 			["a", "どうも、よろしくおねがいします。", { expression: "happy" }],
