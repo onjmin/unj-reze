@@ -8,7 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { wrapCorsProxyUrl, notifyCorsProxyUsed, handleImgError } from '@/lib/cors-proxy';
 import { applyMasterVolume } from '@/lib/master-volume';
-import { collectVoiceNeeds, prepareGameVoice, speakGameMessage, loadVoiceModelNames, DEFAULT_VOICE_MODEL, VOICE_EMOTIONS, VOICE_STYLES, type SpeechHandle } from '@/lib/game-voice';
+import { collectVoiceNeeds, prepareGameVoice, speakGameMessage, loadVoiceModelGroups, DEFAULT_VOICE_MODEL, VOICE_EMOTIONS, VOICE_STYLES, type SpeechHandle, type VoiceModelGroup } from '@/lib/game-voice';
 import { tryCapturePointer } from '@/lib/pointer-capture';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
@@ -19817,14 +19817,14 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
   // コマンドごとに持つフィールドが違うため、詳細UIでは union を絞らずこの別名から読む。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cv = cmd as any;
-  // メッセージの読み上げ音源一覧（dtm の内蔵 koe 音源）。message のときだけ取りに行く。
-  const [voiceNames, setVoiceNames] = useState<Record<string, string> | null>(null);
+  // メッセージの読み上げ音源一覧（dtm の内蔵 koe 音源。大分類つき）。message のときだけ取りに行く。
+  const [voiceGroups, setVoiceGroups] = useState<VoiceModelGroup[] | null>(null);
   useEffect(() => {
-    if (type !== 'message' || voiceNames) return;
+    if (type !== 'message' || voiceGroups) return;
     let alive = true;
-    loadVoiceModelNames().then(names => { if (alive) setVoiceNames(names); }).catch(() => { });
+    loadVoiceModelGroups().then(groups => { if (alive) setVoiceGroups(groups); }).catch(() => { });
     return () => { alive = false; };
-  }, [type, voiceNames]);
+  }, [type, voiceGroups]);
   // 試聴中の読み上げ。もう一度押す／閉じるで止める。
   const previewSpeechRef = useRef<{ abort: AbortController; handle: SpeechHandle | null } | null>(null);
   const [previewSpeaking, setPreviewSpeaking] = useState(false);
@@ -19948,8 +19948,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                         <span className="text-[10px] text-gray-400 w-10 shrink-0">音源</span>
                         <select value={cv.voice.model} className={inputCls}
                           onChange={e => { stopPreviewSpeech(); onChange({ voice: { ...cv.voice, model: e.target.value } } as Partial<EventCommand>); }}>
-                          {voiceNames
-                            ? Object.entries(voiceNames).map(([k, name]) => <option key={k} value={k}>{name}</option>)
+                          {voiceGroups
+                            ? voiceGroups.map(g => (
+                              <optgroup key={g.label} label={g.label}>
+                                {g.models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                              </optgroup>
+                            ))
                             : <option value={cv.voice.model}>{cv.voice.model}</option>}
                         </select>
                       </div>

@@ -65,9 +65,13 @@ export interface TalkCharacter {
   eyes?: TalkEyes;
   mouth?: TalkMouth;
   voice: {
-    model: string;                 // koe 音源キーワード（KOE_VOICEBANK_NAMES）
+    /** 音源キー。内蔵なら koe 音源キーワード（KOE_VOICEBANK_NAMES）、
+     *  持ち込みなら talkCustomVoiceKey() が作った `custom_` 始まりのキー */
+    model: string;
     pitchOffset?: number;          // 半音
     style?: "neutral" | "calm" | "lively";
+    /** 持ち込みの UTAU 音源（koe 形式 .koe の URL と表示名）。あるとき model はこの音源のキー */
+    custom?: { url: string; label: string };
   };
 }
 
@@ -95,6 +99,15 @@ export interface TalkCue {
   `emotion` を残す。
 - `measuredSec` は**キャッシュであって真実ではない**。TTS のバージョンや音源が変わると
   長さは変わるので、再生時は必ず計画し直す（§2）。
+- 音源の選択 UI は dtm の歌唱モデル選択と同じ大分類（kusaプリセット / おんJ / 一般 / クッキー☆）に
+  分ける。**分類表は dtm が持つ**（`VOICE_MODEL_CATEGORIES` / `groupVoiceModels`）——音源を増やすのは
+  dtm 側なので、こちらに写すと増えた音源が「その他」に落ちたまま放置される。reze は
+  `loadVoiceModelGroups()`（`lib/game-voice.ts`）で `KOE_VOICEBANK_NAMES` を渡すだけ
+  （語れない `klatt` はこの一覧に無いので自然に外れる）。
+- **カスタム音源**は `.koe` の URL を持つだけで、ファイルはこのアプリでは預からない（CORS 必須）。
+  キーは URL から決まる（`talkCustomVoiceKey`。日本語名で英数字が残らないため URL のハッシュを混ぜる）。
+  読み上げ・計画・先取りの前に `registerTalkVoicebanks()`（`lib/talk-audio.ts`）で
+  `studio.singingVoices.registerVoicebanks()` へ流し込む。権利表記は投稿者がクレジット欄に書く（§8）。
 
 ---
 
@@ -220,8 +233,10 @@ MvMaker（8.6k 行）は流用せず、小さく作る。画面は 3 枚だけ�
    高さ・話し方。内蔵イラストを初期値に入れ、何も選ばなくても動くようにする。
 2. **台本**: 1 行 = 話者トグル（左/右）＋本文＋表情。行の追加は Enter、並べ替えは上下ボタン
    （[[gamemaker-mobile-ui]] の規約）。各行に「試聴」。行の右に `measuredSec` を出す。
-3. **見た目と書き出し**: 背景・字幕スタイル・BGM（MML）・タイトル・クレジット。プレビュー再生と
-   mp4 書き出し（§7 (c)）。
+3. **見た目と書き出し**: 背景・字幕スタイル・BGM（MML）・タイトル・クレジット。mp4 書き出し（§7 (c)）。
+
+プレビューは MvMaker と同じく**ヘッダーの下に出しっぱなし**（タブを切り替えても消えない）。
+台本を編集すると `TalkPlayer` は計画済みの時間軸を捨てて idle に戻る（再生中・準備中は触らない）。
 
 パネルの見た目は [[gamemaker-panel-design]] に従う（グレーセクション、青の参照ボタン、紫は使わない）。
 自動保存は `lib/history.ts` に `"talk"` を足して使う。

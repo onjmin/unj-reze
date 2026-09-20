@@ -5,7 +5,7 @@
 //   取っておき、最初のセリフで待たせない（2 回目以降は Cache API から一瞬）。
 // - 頭上 1 文字ずつ表示との同期はしない。ウィンドウが出たら鳴らし、閉じたら止めるだけ。
 
-import type { SpeechHandle } from "@onjmin/dtm";
+import type { SpeechHandle, VoiceModelGroup } from "@onjmin/dtm";
 import type {
 	EventCommand,
 	EventPage,
@@ -18,10 +18,18 @@ import { getStudio } from "./dtm";
 
 export type { SpeechHandle };
 
-/** 音源選択 UI 用の一覧（キーワード → 表示名）。dtm の KOE_VOICEBANK_NAMES をそのまま返す。 */
-export const loadVoiceModelNames = async (): Promise<Record<string, string>> => {
-	const { KOE_VOICEBANK_NAMES } = await import("@onjmin/dtm");
-	return KOE_VOICEBANK_NAMES;
+/** 音源選択 UI の大分類（`<optgroup>` 1 つぶん）。dtm の型をそのまま使う。 */
+export type { VoiceModelGroup } from "@onjmin/dtm";
+
+/**
+ * 音源一覧を大分類（kusaプリセット / おんJ / 一般 / クッキー☆ …）に分けて返す。
+ * 分類表も分け方も dtm 側（`groupVoiceModels`）が持つ——音源を増やすのは dtm なので、
+ * こちらに写すと増えた音源が「その他」に落ちたきり誰も直さない。
+ * klatt（軽量ロボ声）は語れないので、読み上げ用の一覧には最初から入らない。
+ */
+export const loadVoiceModelGroups = async (): Promise<VoiceModelGroup[]> => {
+	const { KOE_VOICEBANK_NAMES, groupVoiceModels } = await import("@onjmin/dtm");
+	return groupVoiceModels(KOE_VOICEBANK_NAMES);
 };
 
 /** 既定の音源（dtm の DEFAULT_SPEECH_MODEL と同じ値。静的 import を避けるため文字列で持つ）。 */

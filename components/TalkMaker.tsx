@@ -11,19 +11,21 @@ import ContentPicker, { type PickResult } from "@/components/ContentPicker";
 import TalkPlayer from "@/components/TalkPlayer";
 import { buildPsdRef, imageRefToUrl, isPsdRef, parseRef, walkRefFrameCrop } from "@/lib/asset-ref";
 import { getStudio } from "@/lib/dtm";
-import { DEFAULT_VOICE_MODEL, loadVoiceModelNames, VOICE_STYLES } from "@/lib/game-voice";
+import { DEFAULT_VOICE_MODEL, loadVoiceModelGroups, VOICE_STYLES, type VoiceModelGroup } from "@/lib/game-voice";
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from "@/lib/history";
 import { DEFAULT_MV_BLINK } from "@/lib/mv-blink";
 import type { MvAssetRef, MvVowel } from "@/lib/mv-config";
 import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
-import { planTalkCues } from "@/lib/talk-audio";
+import { planTalkCues, registerTalkVoicebanks } from "@/lib/talk-audio";
 import {
 	createDefaultTalkStage,
 	DEFAULT_TALK_GAP_SEC,
 	emotionForExpression,
 	TALK_EXPRESSIONS,
+	TALK_W,
 	type TalkCharacter,
 	type TalkCue,
+	talkCustomVoiceKey,
 	type TalkExpression,
 	type TalkManifest,
 	type TalkStyle,
@@ -56,6 +58,9 @@ type PickTarget =
 	| { kind: "face"; charId: string; expression: TalkExpression }
 	| { kind: "eyes"; charId: string; which: "open" | "closed" }
 	| { kind: "mouth"; charId: string; which: "open" | "closed" | MvVowel };
+
+/** 音源の選択肢のうち「カスタム音源を追加…」を表す値（dtm の DAW と同じ見た目にする）。 */
+const CUSTOM_VOICE_ADD = "+custom";
 
 const newId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -124,9 +129,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 	const [manifest, setManifest] = useState<TalkManifest>(() => initialManifest ?? createDefaultTalkManifest());
 	const [tab, setTab] = useState<Tab>("script");
 	const [picker, setPicker] = useState<PickTarget | null>(null);
-	const [voiceNames, setVoiceNames] = useState<Record<string, string> | null>(null);
-	const [previewKey, setPreviewKey] = useState(0);
-	const [previewOpen, setPreviewOpen] = useState(false);
+	const [voiceGroups, setVoiceGroups] = useState<VoiceModelGroup[] | null>(null);
 	const [measuring, setMeasuring] = useState(false);
 	const [speakingCueId, setSpeakingCueId] = useState<string | null>(null);
 	const speakRef = useRef<{ stop: () => void } | null>(null);
@@ -136,7 +139,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 	// 音源名
 	useEffect(() => {
 		let alive = true;
-		loadVoiceModelNames().then((n) => { if (alive) setVoiceNames(n); }).catch(() => {});
+		loadVoiceModelGroups().then((g) => { if (alive) setVoiceGroups(g); }).catch(() => {});
 		return () => { alive = false; };
 	}, []);
 
@@ -227,6 +230,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		const abort = new AbortController();
 		speakRef.current = { stop: () => abort.abort() };
 		try {
+			await registerTalkVoicebanks(manifest);
 			const studio = await getStudio();
 			const h = await studio.speak(text, {
 				model: ch.voice.model,
@@ -278,18 +282,12 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		onSave({ manifest: finalManifest, title });
 	};
 
-	const openPreview = () => {
-		stopSpeak();
-		setPreviewKey((k) => k + 1);
-		setPreviewOpen(true);
-	};
-
 	const charById = (id: string) => manifest.characters.find((c) => c.id === id);
 
 	return (
 		<div className="fixed inset-0 z-[100] bg-gray-950 text-gray-100 flex flex-col">
 			{/* ヘッダー */}
-			<div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900/80">
+			<div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900/80">
 				<button type="button" onClick={onClose} className={BTN_ICON} title="閉じる"><X size={16} /></button>
 				<input
 					value={manifest.title}
@@ -297,28 +295,20 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 					placeholder="タイトル"
 					className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[13px] outline-none"
 				/>
-				<button type="button" onClick={openPreview} className={BTN_REF} title="通しで再生">
-					<Play size={12} /> プレビュー
-				</button>
 				<button type="button" onClick={handleSave} className="flex items-center gap-1 rounded bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 text-[12px] font-bold">
 					<Save size={13} /> {isEditing ? "更新" : "投稿に添付"}
 				</button>
 			</div>
 
-			{/* プレビュー */}
-			{previewOpen && (
-				<div className="px-3 pt-3">
-					<div className="max-w-xl mx-auto">
-						<TalkPlayer key={previewKey} manifest={manifest} />
-						<div className="flex justify-end mt-1">
-							<button type="button" onClick={() => setPreviewOpen(false)} className="text-[11px] text-gray-400 hover:text-white">プレビューを閉じる</button>
-						</div>
-					</div>
+			{/* プレビュー（MvMaker と同じく常時表示。編集した台本はそのまま映る） */}
+			<div className="shrink-0 border-b border-gray-800 bg-[#0a0c12] p-3">
+				<div className="mx-auto" style={{ maxWidth: TALK_W }}>
+					<TalkPlayer manifest={manifest} />
 				</div>
-			)}
+			</div>
 
 			{/* タブ */}
-			<div className="flex gap-1 px-3 pt-2">
+			<div className="shrink-0 flex gap-1 px-3 pt-2">
 				{([["script", "台本"], ["chars", "キャラ"], ["look", "見た目"]] as [Tab, string][]).map(([k, label]) => (
 					<button
 						key={k}
@@ -409,7 +399,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 							<CharacterPanel
 								key={c.id}
 								character={c}
-								voiceNames={voiceNames}
+								voiceGroups={voiceGroups}
 								onChange={(fn) => updateChar(c.id, fn)}
 								onPick={(target) => setPicker(target)}
 								onAssign={(target, asset) => applyAsset(target, asset)}
@@ -478,20 +468,36 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 
 function CharacterPanel({
 	character: c,
-	voiceNames,
+	voiceGroups,
 	onChange,
 	onPick,
 	onAssign,
 }: {
 	character: TalkCharacter;
-	voiceNames: Record<string, string> | null;
+	voiceGroups: VoiceModelGroup[] | null;
 	onChange: (fn: (c: TalkCharacter) => TalkCharacter) => void;
 	onPick: (target: PickTarget) => void;
 	onAssign: (target: PickTarget, asset: MvAssetRef) => void;
 }) {
 	const [emojiInput, setEmojiInput] = useState("");
 	const [emojiTarget, setEmojiTarget] = useState<TalkExpression>("neutral");
+	const [customOpen, setCustomOpen] = useState(false);
+	const [customUrl, setCustomUrl] = useState("");
+	const [customLabel, setCustomLabel] = useState("");
 	const set = (patch: Partial<TalkCharacter>) => onChange((prev) => ({ ...prev, ...patch }));
+
+	const openCustom = () => {
+		setCustomUrl(c.voice.custom?.url ?? "");
+		setCustomLabel(c.voice.custom?.label ?? "");
+		setCustomOpen(true);
+	};
+	const applyCustom = () => {
+		const url = customUrl.trim();
+		if (!url) return;
+		const label = customLabel.trim() || "カスタム音源";
+		set({ voice: { ...c.voice, model: talkCustomVoiceKey(url), custom: { url, label } } });
+		setCustomOpen(false);
+	};
 
 	return (
 		<div className={SECTION}>
@@ -584,10 +590,27 @@ function CharacterPanel({
 			<div className={SUBHEAD}>声</div>
 			<div className="grid grid-cols-2 gap-2">
 				<label className="text-[10px] text-gray-400">音源
-					<select value={c.voice.model} onChange={(e) => set({ voice: { ...c.voice, model: e.target.value } })} className={INPUT}>
-						{voiceNames
-							? Object.entries(voiceNames).map(([k, name]) => <option key={k} value={k}>{name}</option>)
+					<select
+						value={c.voice.model}
+						onChange={(e) => {
+							const v = e.target.value;
+							// 「追加…」は選択ではなく入力欄を開くだけ（音源は変えない）
+							if (v === CUSTOM_VOICE_ADD) { openCustom(); return; }
+							set({ voice: { ...c.voice, model: v, custom: undefined } });
+						}}
+						className={INPUT}
+					>
+						{voiceGroups
+							? voiceGroups.map((g) => (
+								<optgroup key={g.label} label={g.label}>
+									{g.models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+								</optgroup>
+							))
 							: <option value={c.voice.model}>{c.voice.model}</option>}
+						<optgroup label="カスタム音源">
+							{c.voice.custom && <option value={c.voice.model}>{c.voice.custom.label || c.voice.model}</option>}
+							<option value={CUSTOM_VOICE_ADD}>カスタム音源を追加…</option>
+						</optgroup>
 					</select>
 				</label>
 				<label className="text-[10px] text-gray-400">話し方
@@ -598,6 +621,33 @@ function CharacterPanel({
 				<label className="text-[10px] text-gray-400 col-span-2">高さ {(c.voice.pitchOffset ?? 0) > 0 ? "+" : ""}{c.voice.pitchOffset ?? 0}
 					<input type="range" min={-12} max={12} step={1} value={c.voice.pitchOffset ?? 0} onChange={(e) => set({ voice: { ...c.voice, pitchOffset: Number(e.target.value) || 0 } })} className="w-full accent-blue-500" />
 				</label>
+				{c.voice.custom && !customOpen && (
+					<div className="col-span-2 flex items-center gap-2 text-[10px] text-gray-400">
+						<span className="truncate">持ち込み音源: {c.voice.custom.label}</span>
+						<button type="button" onClick={openCustom} className="text-blue-400 hover:text-blue-300 shrink-0">変更</button>
+						<button
+							type="button"
+							onClick={() => set({ voice: { ...c.voice, model: DEFAULT_VOICE_MODEL, custom: undefined } })}
+							className="hover:text-white shrink-0"
+						>
+							解除
+						</button>
+					</div>
+				)}
+				{customOpen && (
+					<div className="col-span-2 space-y-1.5 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
+						<p className="text-[10px] text-gray-500 leading-relaxed">
+							UTAU 音源を koe 形式にした <code>.koe</code> ファイルの URL を入れます。別のサイトに置いたファイルは CORS の許可が要ります。
+							権利表記はクレジット欄に自分で書いてください。
+						</p>
+						<input value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} placeholder=".koe の URL" className={INPUT} />
+						<input value={customLabel} onChange={(e) => setCustomLabel(e.target.value)} placeholder="表示名（例: 自前の音源）" className={INPUT} />
+						<div className="flex gap-1">
+							<button type="button" onClick={applyCustom} disabled={!customUrl.trim()} className={BTN_REF}>設定</button>
+							<button type="button" onClick={() => setCustomOpen(false)} className="text-[11px] text-gray-400 hover:text-white px-2">やめる</button>
+						</div>
+					</div>
+				)}
 			</div>
 		</div>
 	);

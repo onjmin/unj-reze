@@ -73,12 +73,25 @@ export interface TalkMouth {
 	vowels?: Partial<Record<MvVowel, MvAssetRef>>;
 }
 
+/** 持ち込みの UTAU 音源（koe 形式 .koe のファイル）。 */
+export interface TalkCustomVoice {
+	/** .koe ファイルの URL。別オリジンなら CORS の許可が要る。 */
+	url: string;
+	/** 選択 UI に出す名前。 */
+	label: string;
+}
+
 export interface TalkVoice {
-	/** koe 音源キーワード（dtm の KOE_VOICEBANK_NAMES のキー）。 */
+	/**
+	 * 音源のキー。内蔵音源なら koe 音源キーワード（dtm の KOE_VOICEBANK_NAMES のキー）、
+	 * カスタム音源なら {@link talkCustomVoiceKey} が作ったキー（`custom_` 始まり）。
+	 */
 	model: string;
 	/** 素の声からの半音オフセット。 */
 	pitchOffset?: number;
 	style?: TalkStyle;
+	/** カスタム音源。あるときは model がこの音源のキー。再生前にカタログへ登録する。 */
+	custom?: TalkCustomVoice;
 }
 
 export interface TalkCharacter {
@@ -149,3 +162,41 @@ export const talkCharacterOf = (
 	manifest: TalkManifest,
 	id: string,
 ): TalkCharacter | undefined => manifest.characters.find((c) => c.id === id);
+
+/**
+ * カスタム音源のキー（内蔵キーワードと衝突しないよう `custom_` を付ける）。
+ * ファイル名は日本語だと英数字が残らない（残っても版数だけ）ので、URL のハッシュを必ず混ぜて
+ * 別の音源が同じキーにならないようにする。同じ URL なら必ず同じキーになる。
+ */
+export const talkCustomVoiceKey = (url: string): string => {
+	let name = "";
+	try {
+		const path = new URL(url).pathname;
+		name = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+	} catch {
+		name = "";
+	}
+	name = name
+		.replace(/\.[^.]*$/, "")
+		.normalize("NFKC")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "")
+		.slice(0, 24);
+	let h = 0;
+	for (let i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) | 0;
+	const hash = Math.abs(h).toString(36);
+	return `custom_${name ? `${name}_` : ""}${hash}`;
+};
+
+/** 台本で使われているカスタム音源（音源キー → .koe の URL）。 */
+export const collectTalkCustomVoices = (
+	manifest: TalkManifest,
+): Record<string, string> => {
+	const out: Record<string, string> = {};
+	for (const c of manifest.characters) {
+		const url = c.voice.custom?.url.trim();
+		if (url) out[c.voice.model] = url;
+	}
+	return out;
+};

@@ -100,6 +100,22 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 		rt.current.session = null;
 	}, []);
 
+	// 台本が編集されたら計画（時間軸）を捨てる。エディタはプレビューを出しっぱなしにするので、
+	// これが無いと最初に計画した台本のまま鳴り続ける。再生中・準備中は触らない
+	// （鳴っている発話と時間軸がずれる）。
+	const shownManifest = useRef(manifest);
+	useEffect(() => {
+		if (shownManifest.current === manifest) return;
+		shownManifest.current = manifest;
+		const r = rt.current;
+		if (r.status === "playing" || r.status === "preparing") return;
+		r.timeline = null;
+		r.pausedAt = 0;
+		setTimeline(null);
+		setProgressSec(0);
+		if (r.status !== "idle") setStatusSync("idle");
+	}, [manifest, setStatusSync]);
+
 	// 画像の先読み（声とは独立）
 	useEffect(() => {
 		let alive = true;

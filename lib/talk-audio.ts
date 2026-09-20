@@ -8,6 +8,7 @@
 import type { SpeechHandle } from "@onjmin/dtm";
 import { getStudio } from "./dtm";
 import {
+	collectTalkCustomVoices,
 	emotionForExpression,
 	type TalkEmotion,
 	type TalkManifest,
@@ -34,6 +35,24 @@ export const collectTalkVoiceNeeds = (manifest: TalkManifest): TalkVoiceNeeds =>
 	return { models: [...models], emotions: [...emotions] };
 };
 
+/**
+ * 台本のカスタム音源（持ち込みの .koe）を studio のカタログへ登録する。
+ * 読み上げ・計画・先取りはどれもカタログを引くので、その前に必ず通すこと。
+ * 内蔵音源しか使っていなければ何もしない。
+ */
+export async function registerTalkVoicebanks(
+	manifest: TalkManifest,
+): Promise<void> {
+	const banks = collectTalkCustomVoices(manifest);
+	if (Object.keys(banks).length === 0) return;
+	try {
+		const studio = await getStudio();
+		studio.singingVoices.registerVoicebanks?.(banks);
+	} catch (e) {
+		console.warn("[talk] カスタム音源の登録に失敗しました", e);
+	}
+}
+
 /** TTS アセット（初回約 43MB）・音源マニフェスト・感情モデルを先に取る。失敗しても投げない。 */
 export async function prepareTalkVoice(
 	manifest: TalkManifest,
@@ -41,6 +60,7 @@ export async function prepareTalkVoice(
 ): Promise<void> {
 	const needs = collectTalkVoiceNeeds(manifest);
 	if (needs.models.length === 0) return;
+	await registerTalkVoicebanks(manifest);
 	try {
 		const studio = await getStudio();
 		await studio.prepareSpeech(needs.models, {
@@ -61,6 +81,7 @@ export async function planTalkCues(
 	onProgress?: (done: number, total: number) => void,
 ): Promise<Map<string, TalkCuePlan | null>> {
 	const out = new Map<string, TalkCuePlan | null>();
+	await registerTalkVoicebanks(manifest);
 	let studio: Awaited<ReturnType<typeof getStudio>> | null = null;
 	try {
 		studio = await getStudio();
@@ -108,6 +129,7 @@ export async function scheduleTalkSpeech(
 	fromIndex: number,
 	leadSec = 0.3,
 ): Promise<TalkSpeechSession> {
+	await registerTalkVoicebanks(manifest);
 	const studio = await getStudio();
 	const ctx = studio.audioContext;
 	if (ctx.state === "suspended") {
