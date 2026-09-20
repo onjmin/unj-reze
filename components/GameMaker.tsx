@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2, FlaskConical, Brush, Globe, Grid3x3, Wrench, Palette, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil, Gamepad2, SquarePen } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2, FlaskConical, Brush, Globe, Grid3x3, Wrench, Palette, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil, Gamepad2, SquarePen, SmilePlus } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -1410,7 +1410,30 @@ type PickTarget =
   | { t: 'cmdChangeSprite' }
   | { t: 'cmdImage' }
   | { t: 'cmdBgm' }
-  | { t: 'cmdSfx' };
+  | { t: 'cmdSfx' }
+  /** 絵文字しか持てない欄（アイテム・装備・敵・パーティ・セリフ行）。結果は emojiPickCallbackRef に渡す。 */
+  | { t: 'emojiField' };
+
+/** 絵文字1文字の入力欄＋「絵文字を選ぶ」ボタン。ボタンは ContentPicker を絵文字専用（emojiOnly）で開き、
+ *  選ばれた絵文字を onChange と同じ経路で書き込む（入力欄に打ち込む導線はそのまま残す）。 */
+const EmojiInput = ({
+  value, onChange, openPicker, className, placeholder, onFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  openPicker: (apply: (emoji: string) => void) => void;
+  className: string;
+  placeholder?: string;
+  onFocus?: () => void;
+}) => (
+  <div className="flex items-center shrink-0">
+    <input value={value} placeholder={placeholder} onFocus={onFocus} onChange={e => onChange(e.target.value)} className={className} />
+    <button type="button" onClick={() => { onFocus?.(); openPicker(onChange); }} title="絵文字を選ぶ"
+      className="grid place-items-center w-7 h-7 rounded text-gray-400 hover:text-blue-400 hover:bg-gray-100/10 shrink-0">
+      <SmilePlus size={13} />
+    </button>
+  </div>
+);
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -2018,6 +2041,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
   const cmdPickCallbackRef = useRef<((res: PickResult) => void) | null>(null);
+  // 絵文字専用欄（EmojiInput）から開いたピッカーの書き込み先。cmdPickCallbackRef と同じ流儀。
+  const emojiPickCallbackRef = useRef<((emoji: string) => void) | null>(null);
+  const openEmojiPicker = (apply: (emoji: string) => void) => {
+    emojiPickCallbackRef.current = apply;
+    setPicker({ mode: 'image', target: { t: 'emojiField' } });
+  };
   const [showControlGuide, setShowControlGuide] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
@@ -12098,6 +12127,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, emoji, spriteRef: undefined, spriteUrl: undefined } }));
       else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, emoji, spriteRef: undefined, spriteUrl: undefined } : o) })); }
       else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, emoji, spriteRef: undefined, spriteUrl: undefined }));
+      else if (target.t === 'emojiField') { emojiPickCallbackRef.current?.(emoji); emojiPickCallbackRef.current = null; }
       else if (target.t === 'yumeTex') {
         setGameData(p => {
           if (!p.layout25d) return p;
@@ -15812,8 +15842,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-blue-500 bg-blue-950/30' : 'border-gray-600 bg-gray-800'}`}>
                                   {/* 1行目：絵文字・話者・削除 */}
                                   <div className="flex gap-1 items-center">
-                                    <input value={dl.emoji ?? ''} placeholder="🎀"
-                                      onChange={e => updDl({ emoji: e.target.value })}
+                                    <EmojiInput value={dl.emoji ?? ''} placeholder="🎀"
+                                      onChange={v => updDl({ emoji: v })} openPicker={openEmojiPicker}
                                       onFocus={activatePreview}
                                       className="w-8 bg-gray-700 rounded px-1 py-1.5 text-base text-center text-white outline-none" />
                                     <input value={dl.speaker}
@@ -15897,8 +15927,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <div key={di}
                                   className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
                                   <div className="flex gap-1 items-center">
-                                    <input value={dl.emoji ?? ''} placeholder="🎀"
-                                      onChange={e => updODl({ emoji: e.target.value })}
+                                    <EmojiInput value={dl.emoji ?? ''} placeholder="🎀"
+                                      onChange={v => updODl({ emoji: v })} openPicker={openEmojiPicker}
                                       onFocus={activatePreview}
                                       className="w-8 bg-gray-700 rounded px-1 py-1.5 text-base text-center text-white outline-none" />
                                     <input value={dl.speaker}
@@ -16976,8 +17006,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   return (
                                     <div key={di} className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
                                       <div className="flex gap-1 items-center">
-                                        <input value={dl.emoji ?? ''} placeholder="🎀"
-                                          onChange={e => updBODl({ emoji: e.target.value })} onFocus={activatePv}
+                                        <EmojiInput value={dl.emoji ?? ''} placeholder="🎀"
+                                          onChange={v => updBODl({ emoji: v })} openPicker={openEmojiPicker} onFocus={activatePv}
                                           className="w-8 bg-gray-700 rounded px-1 py-1.5 text-base text-center text-white outline-none" />
                                         <input value={dl.speaker} onChange={e => updBODl({ speaker: e.target.value })} onFocus={activatePv}
                                           placeholder="話者名" className="flex-1 bg-gray-700 rounded px-2 py-1.5 text-[12px] text-white outline-none" />
@@ -17046,8 +17076,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                             onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, speaker: e.target.value } : l) } : c) })}
                                             placeholder="話者名"
                                             className="w-20 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                          <input value={line.emoji ?? ''}
-                                            onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: e.target.value || undefined } : l) } : c) })}
+                                          <EmojiInput value={line.emoji ?? ''}
+                                            onChange={v => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: v || undefined } : l) } : c) })}
+                                            openPicker={openEmojiPicker}
                                             placeholder="😊"
                                             className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                           <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).filter((_, k) => k !== li) } : c) })}
@@ -17630,11 +17661,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             {(gameData.battle.party ?? []).map((m, i) => (
                               <div key={m.id} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
                                 <div className="flex gap-1.5 items-center">
-                                  <input value={m.emoji} onChange={e => setGameData(p => {
+                                  <EmojiInput value={m.emoji} onChange={v => setGameData(p => {
                                     const b = p.battle!; const next = [...(b.party ?? [])];
-                                    next[i] = { ...next[i], emoji: e.target.value.slice(0, 2) };
+                                    next[i] = { ...next[i], emoji: v.slice(0, 2) };
                                     return { ...p, battle: { ...b, party: next } };
-                                  })} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
+                                  })} openPicker={openEmojiPicker} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
                                   <input value={m.name} placeholder="名前" onChange={e => setGameData(p => {
                                     const b = p.battle!; const next = [...(b.party ?? [])];
                                     next[i] = { ...next[i], name: e.target.value };
@@ -18213,7 +18244,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     return (
                                       <div key={di} className={`rounded-lg border p-2 space-y-1.5 ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
                                         <div className="flex gap-1 items-center">
-                                          <input value={dl.emoji ?? ''} placeholder="🎀" onChange={e => updBODl({ emoji: e.target.value })} onFocus={activatePv} className="w-8 bg-gray-700 rounded px-1 py-1.5 text-base text-center text-white outline-none" />
+                                          <EmojiInput value={dl.emoji ?? ''} placeholder="🎀" onChange={v => updBODl({ emoji: v })} openPicker={openEmojiPicker} onFocus={activatePv} className="w-8 bg-gray-700 rounded px-1 py-1.5 text-base text-center text-white outline-none" />
                                           <input value={dl.speaker} onChange={e => updBODl({ speaker: e.target.value })} onFocus={activatePv} placeholder="話者名" className="flex-1 bg-gray-700 rounded px-2 py-1.5 text-[12px] text-white outline-none" />
                                           <button onClick={() => { if (isActive) setActivePreviewKey(null); updObj({ outroDialogue: (curList[0].outroDialogue ?? []).filter((_, j) => j !== di) }); }} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-red-400 hover:text-red-300 active:bg-red-500/20 text-sm">✕</button>
                                         </div>
@@ -18247,7 +18278,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                         <div key={li} className="rounded border border-gray-700 bg-gray-900 p-1.5 space-y-1">
                                           <div className="flex gap-1">
                                             <input value={line.speaker} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, speaker: e.target.value } : l) } : c) })} placeholder="話者名" className="w-20 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                            <input value={line.emoji ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: e.target.value || undefined } : l) } : c) })} placeholder="😊" className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                            <EmojiInput value={line.emoji ?? ''} onChange={v => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: v || undefined } : l) } : c) })} openPicker={openEmojiPicker} placeholder="😊" className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).filter((_, k) => k !== li) } : c) })} className="ml-auto text-red-500 text-[9px] px-0.5">✕</button>
                                           </div>
                                           <input value={line.imageSrc ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, imageSrc: e.target.value || undefined } : l) } : c) })} placeholder="立ち絵URL（省略可）" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
@@ -18485,9 +18516,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         {(gameData.items ?? []).map((it, i) => (
                           <div key={it.id} className="bg-gray-900 rounded-lg border border-gray-800 p-2.5 space-y-2">
                             <div className="flex items-center gap-1.5">
-                              <input value={it.emoji} onChange={e => setGameData(p => {
-                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], emoji: e.target.value.slice(0, 2) }; return { ...p, items: copy };
-                              })} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
+                              <EmojiInput value={it.emoji} onChange={v => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], emoji: v.slice(0, 2) }; return { ...p, items: copy };
+                              })} openPicker={openEmojiPicker} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
                               <input value={it.name} onChange={e => setGameData(p => {
                                 const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, items: copy };
                               })} placeholder="アイテム名" className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
@@ -18657,9 +18688,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {list.map((it, i) => (
                             <div key={it.id} className="bg-gray-900 rounded-lg border border-gray-800 p-2.5 space-y-2">
                               <div className="flex items-center gap-1.5">
-                                <input value={it.emoji} onChange={e => setGameData(p => {
-                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], emoji: e.target.value.slice(0, 2) }; return { ...p, [key]: copy };
-                                })} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
+                                <EmojiInput value={it.emoji} onChange={v => setGameData(p => {
+                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], emoji: v.slice(0, 2) }; return { ...p, [key]: copy };
+                                })} openPicker={openEmojiPicker} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
                                 <input value={it.name} onChange={e => setGameData(p => {
                                   const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, [key]: copy };
                                 })} placeholder="名前" className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
@@ -19205,7 +19236,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   <div className="space-y-1">
                                     {g.enemies.map((en, ei) => (
                                       <div key={ei} className="flex items-center gap-1 flex-wrap bg-gray-950/60 rounded px-1.5 py-1">
-                                        <input value={en.emoji} onChange={e => updateEncounterEnemy(idx, g.id, ei, { emoji: e.target.value })}
+                                        <EmojiInput value={en.emoji} onChange={v => updateEncounterEnemy(idx, g.id, ei, { emoji: v })} openPicker={openEmojiPicker}
                                           className="w-8 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none text-center" />
                                         <input value={en.name} onChange={e => updateEncounterEnemy(idx, g.id, ei, { name: e.target.value })} placeholder="名前"
                                           className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
@@ -19345,6 +19376,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             userId={userId}
             usedAssets={usedImageAssets}
             allowEmoji={allowEmoji}
+            emojiOnly={t.t === 'emojiField'}
             onPick={applyPick}
             onClose={() => setPicker(null)}
           />

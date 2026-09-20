@@ -70,6 +70,9 @@ interface ContentPickerProps {
 	/** mode==='image' のときのみ有効。対象が絵文字（描画側で fillText する仮置き素材）を受け付けるときに
 	 *  true にすると「絵文字」タブが出る。背景・タイル・目/口のように画像しか描けない対象では出さない。 */
 	allowEmoji?: boolean;
+	/** mode==='image' のときのみ有効。絵文字しか受け付けない欄（アイテム・敵・セリフ行の絵文字など）向けに、
+	 *  絵文字タブだけを出す（タブ列は隠し、前回タブの記憶も更新しない）。 */
+	emojiOnly?: boolean;
 	onPick: (result: PickResult) => void;
 	onClose: () => void;
 }
@@ -155,9 +158,11 @@ export default function ContentPicker({
 	usedAssets = [],
 	currentRef,
 	allowEmoji = false,
+	emojiOnly = false,
 	onPick,
 	onClose,
 }: ContentPickerProps) {
+	const emojiEnabled = allowEmoji || emojiOnly;
 	const [posts, setPosts] = useState<MediaSearchPost[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [loadingMore, setLoadingMore] = useState(false);
@@ -174,17 +179,19 @@ export default function ContentPicker({
 	// 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
 	// 「絵文字」タブは対象によって出ないので、出ない対象で前回のタブが emoji のままなら mySheet へ振り替える。
 	const [imageTab, setImageTab] = useState<ImageTab>(
-		REMOVED_IMAGE_TABS.has(lastImageTab) ||
-			(lastImageTab === "emoji" && !allowEmoji)
-			? "mySheet"
-			: lastImageTab,
+		emojiOnly
+			? "emoji"
+			: REMOVED_IMAGE_TABS.has(lastImageTab) ||
+					(lastImageTab === "emoji" && !allowEmoji)
+				? "mySheet"
+				: lastImageTab,
 	);
 	// 「絵文字」タブ用。カテゴリ選択・自由入力・最近使った絵文字（localStorage）。
 	const [emojiCategory, setEmojiCategory] = useState(EMOJI_CATEGORIES[0].id);
 	const [emojiInput, setEmojiInput] = useState("");
 	// モーダルはクリックで開くのでクライアントでしか初期化されない（localStorage が無くても空配列）。
 	const [recentEmojis] = useState<string[]>(() =>
-		mode === "image" && allowEmoji ? loadRecentEmojis() : [],
+		mode === "image" && emojiEnabled ? loadRecentEmojis() : [],
 	);
 	const pickEmoji = (raw: string) => {
 		const emoji = raw.trim();
@@ -682,7 +689,9 @@ export default function ContentPicker({
 				<div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
 					<span className="text-xs font-bold text-gray-200">
 						{mode === "image"
-							? "画像を参照"
+							? emojiOnly
+								? "絵文字を選ぶ"
+								: "画像を参照"
 							: bgmKind === "sfx"
 								? "効果音を参照"
 								: bgmKind === "mml"
@@ -700,7 +709,8 @@ export default function ContentPicker({
 					</button>
 				</div>
 
-				{/* Tabs */}
+				{/* Tabs（絵文字専用のときはタブ列ごと隠す） */}
+				{!emojiOnly && (
 				<div className="flex flex-wrap gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
 					{mode === "image" ? (
 						<>
@@ -737,7 +747,7 @@ export default function ContentPicker({
 							>
 								単色カラー
 							</button>
-							{allowEmoji && (
+							{emojiEnabled && (
 								<button
 									className={tabBtn(imageTab === "emoji")}
 									onClick={() => changeImageTab("emoji")}
@@ -842,6 +852,7 @@ export default function ContentPicker({
 						</>
 					)}
 				</div>
+				)}
 
 				<div
 					ref={scrollRef}
@@ -1203,10 +1214,12 @@ export default function ContentPicker({
 					)}
 
 					{/* Image: 絵文字（仮置き素材を別の絵文字に選び直す） */}
-					{mode === "image" && allowEmoji && imageTab === "emoji" && (
+					{mode === "image" && emojiEnabled && imageTab === "emoji" && (
 						<div className="space-y-3 p-1">
 							<p className="text-[10px] text-gray-500">
-								画像の代わりに絵文字1文字をそのまま表示します。あとから「画像を参照」で画像に差し替えられます。
+								{emojiOnly
+									? "この欄は絵文字1文字で表示します。"
+									: "画像の代わりに絵文字1文字をそのまま表示します。あとから「画像を参照」で画像に差し替えられます。"}
 							</p>
 							<div className="flex items-center gap-1.5">
 								<input
