@@ -129,6 +129,13 @@ export interface Post {
 	mvPreset?: MvPresetKind;
 	/** MVの累計再生数 */
 	mvPlays?: number;
+	hasTalk?: boolean;
+	talkId?: string;
+	talkTitle?: string;
+	/** かけあい動画のサムネイル（背景画像かキャラのURL。無ければ色で描く） */
+	talkThumbnail?: string;
+	/** かけあい動画の累計再生数 */
+	talkPlays?: number;
 	/** 自己申告の権利表記。未設定(申告なし)なら undefined */
 	originType?: OriginType;
 	/** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
@@ -200,6 +207,21 @@ export interface GameRecord {
 	bestScore?: number;
 	/** ハイスコア保持者の表示名 */
 	bestScoreBy?: string;
+}
+
+export interface TalkRecord {
+	id: string;
+	title: string;
+	/** manifest 本体の保存先URL（R2）。MvRecord.manifestUrl と同じ扱い */
+	manifestUrl: string;
+	manifestDeleteId?: string;
+	manifestDeleteHash?: string;
+	/** サムネイル用。背景画像かキャラ1人目の立ち絵URLの非正規化 */
+	bgUrl?: string;
+	createdAt: string;
+	creatorSlug?: string;
+	/** 累計再生回数 */
+	plays?: number;
 }
 
 export interface MvRecord {

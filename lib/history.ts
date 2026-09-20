@@ -209,12 +209,14 @@ export const isSimilarMml = (a: string, b: string): boolean => {
 };
 
 export const getStorageKey = (
-	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv",
+	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk",
 	idSuffix?: string,
 ): string => {
 	switch (type) {
 		case "mv":
 			return `unj-mvmaker-history-${idSuffix || "new"}`;
+		case "talk":
+			return `unj-talkmaker-history-${idSuffix || "new"}`;
 		case "mml":
 			return `dtm-work-history-${idSuffix || "new"}`;
 		case "drawing":
@@ -290,7 +292,7 @@ export type SaveHistoryResult =
 export const saveHistory = async <T = unknown>(
 	key: string,
 	data: T,
-	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv",
+	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk",
 	maxItems = 50,
 ): Promise<SaveHistoryResult> => {
 	const store = getStore();

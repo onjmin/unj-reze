@@ -179,6 +179,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 								onEditImage={null}
 								onEditMml={null}
 								onEditMv={null}
+								onEditTalk={null}
 							/>
 						</VirtualizedItem>
 					))

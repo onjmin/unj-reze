@@ -229,8 +229,10 @@ function drawCharacter(
 		ctx.restore();
 		return;
 	}
-	const scale = baseH / size.h;
-	const dw = size.w * scale;
+	// 切り出し矩形（walk: シートの 1 コマ等）があればその範囲だけを使う。
+	const src = faceRef?.crop ?? [0, 0, size.w, size.h];
+	const scale = baseH / src[3];
+	const dw = src[2] * scale;
 	const dh = baseH;
 	const dx = cx - dw / 2;
 	const dy = bottom - dh;
@@ -240,19 +242,34 @@ function drawCharacter(
 		ctx.translate(-cx, 0);
 	}
 	ctx.imageSmoothingEnabled = true;
-	ctx.drawImage(img as CanvasImageSource, dx, dy, dw, dh);
+	drawCropped(ctx, img as CanvasImageSource, src, dx, dy, dw, dh);
 	// 目（瞬き）と口は土台と同じ矩形へ重ねる（MV の character レイヤーと同じ前提）。
 	if (ch.eyes) {
 		const closed = resolveBlinkState(ch.eyes.blink, s.timeSec * BLINK_BEATS_PER_SEC) === "closed";
-		const eye = resolveRefImage(closed ? ch.eyes.closed : ch.eyes.open);
-		if (eye) ctx.drawImage(eye, dx, dy, dw, dh);
+		const ref = closed ? ch.eyes.closed : ch.eyes.open;
+		const eye = resolveRefImage(ref);
+		if (eye) drawCropped(ctx, eye, ref.crop, dx, dy, dw, dh);
 	}
 	const mRef = mouthRef(ch, s);
 	if (mRef) {
 		const m = resolveRefImage(mRef);
-		if (m) ctx.drawImage(m, dx, dy, dw, dh);
+		if (m) drawCropped(ctx, m, mRef.crop, dx, dy, dw, dh);
 	}
 	ctx.restore();
+}
+
+/** crop があれば元画像のその範囲だけを、無ければ全体を dx,dy,dw,dh へ描く。 */
+function drawCropped(
+	ctx: CanvasRenderingContext2D,
+	img: CanvasImageSource,
+	crop: [number, number, number, number] | undefined,
+	dx: number,
+	dy: number,
+	dw: number,
+	dh: number,
+): void {
+	if (crop) ctx.drawImage(img, crop[0], crop[1], crop[2], crop[3], dx, dy, dw, dh);
+	else ctx.drawImage(img, dx, dy, dw, dh);
 }
 
 /** 字幕。行の頭で全文を出す（YMM 風）。2 行まで自動改行。 */

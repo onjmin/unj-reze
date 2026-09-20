@@ -56,6 +56,7 @@ import type {
 	DbGameRecord,
 	DbMediaSearchPost,
 	DbMvRecord,
+	DbTalkRecord,
 	DbNotification,
 	DbOshiItem,
 	DbPost,
@@ -65,6 +66,7 @@ import type {
 	AddOshiItemParams,
 	CreateGameParams,
 	CreateMvParams,
+	CreateTalkParams,
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
@@ -76,6 +78,7 @@ import type {
 	ReportParams,
 	UpdateGameParams,
 	UpdateMvParams,
+	UpdateTalkParams,
 } from "./interface";
 import { REPLIES_PAGE_SIZE } from "./interface";
 
@@ -361,7 +364,7 @@ function mmlDeleteRefOf(row: {
  * 「参照している」扱いから除外する（MMLの後始末と同じ「非表示＝もう消してよい」判断）。
  */
 async function hasOtherPostRef(
-	column: "game_id" | "mv_id",
+	column: "game_id" | "mv_id" | "talk_id",
 	id: number,
 ): Promise<boolean> {
 	const { rows } = await q(
@@ -384,17 +387,22 @@ async function hasOtherPostRef(
 async function orphanedManifestRefsOf(row: {
 	game_id?: number | string | null;
 	mv_id?: number | string | null;
+	talk_id?: number | string | null;
 }): Promise<{
 	gameManifestDeleteId?: string;
 	gameManifestDeleteHash?: string;
 	mvManifestDeleteId?: string;
 	mvManifestDeleteHash?: string;
+	talkManifestDeleteId?: string;
+	talkManifestDeleteHash?: string;
 }> {
 	const out: {
 		gameManifestDeleteId?: string;
 		gameManifestDeleteHash?: string;
 		mvManifestDeleteId?: string;
 		mvManifestDeleteHash?: string;
+		talkManifestDeleteId?: string;
+		talkManifestDeleteHash?: string;
 	} = {};
 	const gameId = row.game_id != null ? Number(row.game_id) : null;
 	if (gameId != null && !(await hasOtherPostRef("game_id", gameId))) {
@@ -418,6 +426,17 @@ async function orphanedManifestRefsOf(row: {
 		if (rows[0]?.manifest_delete_id) {
 			out.mvManifestDeleteId = rows[0].manifest_delete_id;
 			out.mvManifestDeleteHash = rows[0].manifest_delete_hash ?? undefined;
+		}
+	}
+	const talkId = row.talk_id != null ? Number(row.talk_id) : null;
+	if (talkId != null && !(await hasOtherPostRef("talk_id", talkId))) {
+		const { rows } = await q(
+			`DELETE FROM talks WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
+			[talkId],
+		);
+		if (rows[0]?.manifest_delete_id) {
+			out.talkManifestDeleteId = rows[0].manifest_delete_id;
+			out.talkManifestDeleteHash = rows[0].manifest_delete_hash ?? undefined;
 		}
 	}
 	return out;
@@ -467,6 +486,8 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		gameId: row.game_id != null ? Number(row.game_id) : undefined,
 		hasMv: !!row.mv_id,
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
+		hasTalk: !!row.talk_id,
+		talkId: row.talk_id != null ? Number(row.talk_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
 		mmlDeleteId: row.mml_delete_id ?? undefined,
@@ -517,6 +538,8 @@ function resRowToPost(row: any): DbPost {
 		gameId: row.game_id != null ? Number(row.game_id) : undefined,
 		hasMv: !!row.mv_id,
 		mvId: row.mv_id != null ? Number(row.mv_id) : undefined,
+		hasTalk: !!row.talk_id,
+		talkId: row.talk_id != null ? Number(row.talk_id) : undefined,
 		hasMml: disp.hasMml,
 		mmlUrl: disp.mmlUrl,
 		mmlDeleteId: row.mml_delete_id ?? undefined,
@@ -713,6 +736,8 @@ export const pgStore: DataStore = {
 			where.push(`t.game_id IS ${options.hasGame ? "NOT NULL" : "NULL"}`);
 		if (options.hasMv !== undefined)
 			where.push(`t.mv_id IS ${options.hasMv ? "NOT NULL" : "NULL"}`);
+		if (options.hasTalk !== undefined)
+			where.push(`t.talk_id IS ${options.hasTalk ? "NOT NULL" : "NULL"}`);
 		if (hidden.size > 0) {
 			params.push(Array.from(hidden));
 			where.push(`t.user_id <> ALL($${params.length})`);
@@ -880,6 +905,7 @@ export const pgStore: DataStore = {
 							!!(
 								data.gameId ||
 								data.mvId ||
+								data.talkId ||
 								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 								c.contentType === CT.Dtm
 							),
@@ -887,6 +913,7 @@ export const pgStore: DataStore = {
 					],
 					["game_id", val(data.gameId ?? null)],
 					["mv_id", val(data.mvId ?? null)],
+					["talk_id", val(data.talkId ?? null)],
 					["origin_type", val(data.originType ?? null)],
 					["dot_w", val(data.dotW ?? null)],
 					["dot_h", val(data.dotH ?? null)],
@@ -1074,6 +1101,7 @@ export const pgStore: DataStore = {
 							!!(
 								data.gameId ||
 								data.mvId ||
+								data.talkId ||
 								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 								c.contentType === CT.Dtm
 							),
@@ -1081,6 +1109,7 @@ export const pgStore: DataStore = {
 					],
 					["game_id", val(data.gameId ?? null)],
 					["mv_id", val(data.mvId ?? null)],
+					["talk_id", val(data.talkId ?? null)],
 					["parent_num", val(parentNum)],
 					["origin_type", val(data.originType ?? null)],
 					["dot_w", val(data.dotW ?? null)],
@@ -1285,7 +1314,7 @@ export const pgStore: DataStore = {
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
 			const { rows } = await q(
-				`SELECT thread_id, user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id FROM res WHERE id = $1`,
+				`SELECT thread_id, user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, talk_id FROM res WHERE id = $1`,
 				[resId],
 			);
 			if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
@@ -1306,7 +1335,7 @@ export const pgStore: DataStore = {
 		}
 		const threadId = postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, res_count FROM threads WHERE id = $1`,
+			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, talk_id, res_count FROM threads WHERE id = $1`,
 			[threadId],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
@@ -1324,7 +1353,7 @@ export const pgStore: DataStore = {
 			await q(
 				`UPDATE threads SET content_text = $1, content_url = '', content_type = $2,
          content_data_url = '', mml_delete_id = NULL, mml_delete_hash = NULL,
-         game_id = NULL, mv_id = NULL, dot_w = NULL, dot_h = NULL,
+         game_id = NULL, mv_id = NULL, talk_id = NULL, dot_w = NULL, dot_h = NULL,
          anim_frames = NULL, anim_fps = NULL, walk_preset = NULL
        WHERE id = $3`,
 				["(削除されました)", CT.Text, threadId],
@@ -2190,6 +2219,66 @@ export const pgStore: DataStore = {
 		await q(`UPDATE mvs SET plays = COALESCE(plays,0)+1 WHERE id = $1`, [id]);
 	},
 
+	// かけあい動画（talks）。mvs と同じ形（docs/talk-video-feature-design.md §5）
+	async createTalk(data: CreateTalkParams) {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
+		const { rows } = await q(
+			`INSERT INTO talks (id,title,manifest_url,manifest_delete_id,manifest_delete_hash,bg_url,creator_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+			[
+				id,
+				data.title,
+				data.manifestUrl,
+				data.manifestDeleteId ?? null,
+				data.manifestDeleteHash ?? null,
+				data.bgUrl ?? null,
+				toUid(data.creatorSlug),
+			],
+		);
+		return rowToTalk(rows[0]);
+	},
+	async getTalk(id: number) {
+		const { rows } = await q(`SELECT * FROM talks WHERE id = $1`, [id]);
+		return rows.length ? rowToTalk(rows[0]) : null;
+	},
+	async getTalksByIds(ids: number[]) {
+		if (!ids.length) return [];
+		const { rows } = await q(
+			`SELECT * FROM talks WHERE id = ANY($1::bigint[])`,
+			[ids],
+		);
+		return rows.map(rowToTalk);
+	},
+	async updateTalk(id: number, data: UpdateTalkParams) {
+		const { rows: prev } = await q(
+			`SELECT manifest_delete_id, manifest_delete_hash FROM talks WHERE id=$1`,
+			[id],
+		);
+		const { rows } = await q(
+			`UPDATE talks SET title=$1, manifest_url=$2, manifest_delete_id=$3, manifest_delete_hash=$4, bg_url=$5 WHERE id=$6 RETURNING *`,
+			[
+				data.title,
+				data.manifestUrl,
+				data.manifestDeleteId ?? null,
+				data.manifestDeleteHash ?? null,
+				data.bgUrl ?? null,
+				id,
+			],
+		);
+		if (!rows.length) return null;
+		const result = rowToTalk(rows[0]);
+		(result as any).previousManifest = prev[0]?.manifest_delete_id
+			? {
+					deleteId: prev[0].manifest_delete_id,
+					deleteHash: prev[0].manifest_delete_hash,
+				}
+			: undefined;
+		return result;
+	},
+	async recordTalkPlay(id: number) {
+		await q(`UPDATE talks SET plays = COALESCE(plays,0)+1 WHERE id = $1`, [id]);
+	},
+
 	async recordGamePlay(gameId: number, data: RecordGamePlayParams) {
 		const score = Number(data.score) || 0;
 		const { rows } = await q(
@@ -2437,6 +2526,21 @@ function rowToGame(row: any): DbGameRecord {
 		clears: Number(row.clears ?? 0),
 		bestScore: Number(row.best_score ?? 0),
 		bestScoreBy: row.best_score_by ?? undefined,
+	};
+}
+
+function rowToTalk(row: any): DbTalkRecord {
+	return {
+		id: Number(row.id),
+		title: row.title,
+		manifestUrl: row.manifest_url ?? "",
+		manifestDeleteId: row.manifest_delete_id ?? undefined,
+		manifestDeleteHash: row.manifest_delete_hash ?? undefined,
+		bgUrl: row.bg_url ?? undefined,
+		createdAt: toIso(row.created_at),
+		creatorSlug:
+			row.creator_user_id != null ? String(row.creator_user_id) : undefined,
+		plays: Number(row.plays ?? 0),
 	};
 }
 

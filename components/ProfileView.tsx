@@ -84,6 +84,7 @@ interface ProfileViewProps {
 	onEditImage?: (post: Post) => void;
 	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
+	onEditTalk?: (post: Post) => void;
 	onEditPost?: (post: Post) => void;
 	onModerationChange?: () => void;
 }
@@ -98,6 +99,7 @@ function ProfilePostMenu({
 	onEditImage,
 	onEditMml,
 	onEditMv,
+	onEditTalk,
 	openGame,
 	onOptimisticDelete,
 	onUndoDelete,
@@ -110,6 +112,7 @@ function ProfilePostMenu({
 	onEditImage?: (post: Post) => void;
 	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
+	onEditTalk?: (post: Post) => void;
 	openGame?: (gameId?: string, postId?: string) => void;
 	onOptimisticDelete?: (postId: string) => void;
 	onUndoDelete?: (postId: string) => void;
@@ -475,6 +478,12 @@ function ProfilePostMenu({
 									setShowEditModal(false);
 								}
 							: null,
+						editTalk: onEditTalk
+							? () => {
+									onEditTalk(post);
+									setShowEditModal(false);
+								}
+							: null,
 					}}
 				/>
 			)}
@@ -559,6 +568,7 @@ export default function ProfileView({
 	onEditImage,
 	onEditMml,
 	onEditMv,
+	onEditTalk,
 	onEditPost,
 	onModerationChange,
 }: ProfileViewProps) {
@@ -1474,6 +1484,7 @@ export default function ProfileView({
 													onEditImage={onEditImage}
 													onEditMml={onEditMml}
 													onEditMv={onEditMv}
+													onEditTalk={onEditTalk}
 													openGame={openGame}
 													onOptimisticDelete={handleOptimisticDelete}
 													onUndoDelete={handleUndoDelete}

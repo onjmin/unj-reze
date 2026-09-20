@@ -12,6 +12,7 @@ import {
 	DbGameRecord,
 	DbMediaSearchPost,
 	DbMvRecord,
+	DbTalkRecord,
 	DbNotification,
 	DbOshiItem,
 	DbPost,
@@ -48,6 +49,17 @@ export interface UpdateGameParams extends ManifestRef {
 }
 
 export interface UpdateMvParams extends ManifestRef {
+	title: string;
+	bgUrl?: string;
+}
+
+export interface CreateTalkParams extends ManifestRef {
+	title: string;
+	bgUrl?: string;
+	creatorSlug?: string;
+}
+
+export interface UpdateTalkParams extends ManifestRef {
 	title: string;
 	bgUrl?: string;
 }
@@ -102,6 +114,7 @@ export interface CreatePostParams extends MmlRef {
 	slug?: string;
 	gameId?: number;
 	mvId?: number;
+	talkId?: number;
 	/** ドット絵コラボ用のグリッド横解像度 */
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
@@ -150,6 +163,7 @@ export interface ReplyParams extends MmlRef {
 	avatarColor?: string;
 	gameId?: number;
 	mvId?: number;
+	talkId?: number;
 	/** ドット絵コラボ用のグリッド横解像度 */
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
@@ -183,6 +197,7 @@ export interface GetPostsOptions {
 	hasImage?: boolean;
 	hasGame?: boolean;
 	hasMv?: boolean;
+	hasTalk?: boolean;
 	/**
 	 * 各スレッドに直近の返信を埋めるか（既定 true）。
 	 * 返信本文を一切使わない一覧——専ブラの subject.txt や sitemap——は false にする。
@@ -288,6 +303,8 @@ export interface DataStore {
 				gameManifestDeleteHash?: string;
 				mvManifestDeleteId?: string;
 				mvManifestDeleteHash?: string;
+				talkManifestDeleteId?: string;
+				talkManifestDeleteHash?: string;
 		  }
 		| false
 	>;
@@ -427,6 +444,13 @@ export interface DataStore {
 	updateMv(id: number, data: UpdateMvParams): Promise<DbMvRecord | null>;
 	/** MVの再生数を1加算する。 */
 	recordMvPlay(id: number): Promise<void>;
+	createTalk(data: CreateTalkParams): Promise<DbTalkRecord>;
+	getTalk(id: number): Promise<DbTalkRecord | null>;
+	/** 投稿一覧に埋めるかけあい動画の情報をまとめて引く（manifest 本体は載らない）。 */
+	getTalksByIds(ids: number[]): Promise<DbTalkRecord[]>;
+	updateTalk(id: number, data: UpdateTalkParams): Promise<DbTalkRecord | null>;
+	/** かけあい動画の再生数を1加算する。 */
+	recordTalkPlay(id: number): Promise<void>;
 	/** プレイ結果を記録する。plays/clears を加算し、スコアが上回っていればハイスコアを更新する。 */
 	recordGamePlay(
 		gameId: number,

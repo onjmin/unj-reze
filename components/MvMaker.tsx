@@ -39,7 +39,12 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildPsdRef, parseWalkRef, refLabel } from "@/lib/asset-ref";
+import {
+	buildPsdRef,
+	parseWalkRef,
+	refLabel,
+	walkRefFrameCrop,
+} from "@/lib/asset-ref";
 import { handleImgError } from "@/lib/cors-proxy";
 import {
 	clearAutosave,
@@ -1162,25 +1167,6 @@ function walkRefFrameCount(ref: string): number {
 	return Math.max(1, wr.frames ?? 1);
 }
 
-/**
- * row_anim系のwalk参照から、指定コマ目だけの静止画切り出し矩形を求める。
- * キャラクターレイヤーの目/口は瞬き/口パクの開閉状態が既にアニメーションなので、
- * パーツ画像そのものはアニメさせず1コマぶんの静止画として使う（`MvAssetRef.crop`）。
- */
-function walkRefFrameCrop(
-	ref: string,
-	frameIndex: number,
-): [number, number, number, number] | undefined {
-	const wr = parseWalkRef(ref);
-	if (!wr || wr.stdId !== "row_anim" || !wr.crop) return undefined;
-	const frames = Math.max(1, wr.frames ?? 1);
-	const [csx, csy, csw, csh] = wr.crop;
-	const cw = csw / frames;
-	const ch = csh;
-	const row = wr.row ?? 0;
-	const idx = ((Math.round(frameIndex) % frames) + frames) % frames;
-	return [csx + idx * cw, csy + row * ch, cw, ch];
-}
 
 /** `MvAssetRef.crop` から、いま何コマ目を指しているかを逆算する（無ければ0）。 */
 function assetRefFrameIndex(asset: MvAssetRef | undefined): number {

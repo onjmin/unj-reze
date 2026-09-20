@@ -184,6 +184,32 @@ MV の実装を**そのまま複製**する。差分は名前だけ。
 - `bg_url` は背景画像かキャラ 1 人目の立ち絵を非正規化して持ち、一覧では manifest を読まない。
 - スキーマは `docker/init.sql` に足し、`unj/wiki/init.sql` にも同じ変更を入れる（AGENTS.md）。
 
+### 本番（Neon）への移行 SQL（手で当てる。`docker/init.sql` と同じ内容）
+
+```sql
+CREATE TABLE talks (
+    id BIGINT PRIMARY KEY,
+    title TEXT NOT NULL,
+    manifest_url TEXT NOT NULL,
+    manifest_delete_id TEXT,
+    manifest_delete_hash TEXT,
+    bg_url TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    plays BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_talks_plays ON talks (plays DESC);
+CREATE INDEX idx_talks_creator_user_id ON talks (creator_user_id);
+ALTER TABLE threads ADD COLUMN talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL;
+ALTER TABLE res ADD COLUMN talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL;
+CREATE INDEX idx_res_talk_id ON res (talk_id) WHERE talk_id IS NOT NULL;
+```
+
+uploader-worker 側にも `talk` 種別（prefix `talk`、gzip JSON）を足してデプロイする
+（`uploader/src/index.ts` の `TEXT_KINDS`）。デプロイ前は `uploadJson("talk", …)` が
+`Unsupported 'kind'` で失敗するので、投稿はできない。
+
+
 ---
 
 ## 6. 編集UI（`components/TalkMaker.tsx`）

@@ -86,6 +86,12 @@ export interface DbPost {
 	mvPreset?: MvPresetKind;
 	/** MVの累計再生数 */
 	mvPlays?: number;
+	hasTalk?: boolean;
+	talkId?: number;
+	talkTitle?: string;
+	talkThumbnail?: string;
+	/** かけあい動画の累計再生数 */
+	talkPlays?: number;
 	hasMml?: boolean;
 	/**
 	 * MML本文の保存先URL（R2）。content にはマーカー（`#mml`）だけが残る。
@@ -155,6 +161,21 @@ export interface DbGameRecord {
 	bestScoreBy?: string;
 	/** ひもづく投稿ID（ランキングからコメントへ飛ぶ用） */
 	postId?: number;
+}
+
+export interface DbTalkRecord {
+	id: number;
+	title: string;
+	/** manifest 本体の保存先URL（R2）。DbMvRecord.manifestUrl と同じ扱い */
+	manifestUrl: string;
+	manifestDeleteId?: string;
+	manifestDeleteHash?: string;
+	/** サムネイル用。背景画像かキャラ1人目の立ち絵URLの非正規化 */
+	bgUrl?: string;
+	createdAt: string;
+	creatorSlug?: string;
+	/** 累計再生回数 */
+	plays?: number;
 }
 
 export interface DbMvRecord {

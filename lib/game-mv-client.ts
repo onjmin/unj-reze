@@ -2,7 +2,8 @@
 
 import type { GameManifestDraft } from "@/components/GameMaker";
 import type { MvManifest, MvPresetKind } from "./mv-config";
-import type { GameRecord, MvRecord } from "./types";
+import type { TalkManifest } from "./talk-config";
+import type { GameRecord, MvRecord, TalkRecord } from "./types";
 import { deleteObject, fetchJson, uploadJson } from "./uploader";
 
 /**
@@ -23,6 +24,14 @@ function bgRefOf(manifest: GameManifestDraft): string | undefined {
 function bgUrlOf(manifest: MvManifest): string | undefined {
 	const url = (manifest as { stage?: { bgUrl?: string } })?.stage?.bgUrl;
 	return typeof url === "string" && url.startsWith("http") ? url : undefined;
+}
+
+/** かけあい動画のサムネ用URL。背景画像か、キャラ1人目の立ち絵（http のときだけ） */
+function talkBgUrlOf(manifest: TalkManifest): string | undefined {
+	const bg = manifest.stage?.bg?.url;
+	if (typeof bg === "string" && bg.startsWith("http")) return bg;
+	const face = manifest.characters?.[0]?.faces?.neutral?.url;
+	return typeof face === "string" && face.startsWith("http") ? face : undefined;
 }
 
 export async function createGame(params: {
@@ -66,6 +75,26 @@ export async function createMv(params: {
 		}),
 	});
 	if (!res.ok) throw new Error(`MVの保存に失敗しました: ${res.status}`);
+	return res.json();
+}
+
+export async function createTalk(params: {
+	title: string;
+	manifest: TalkManifest;
+}): Promise<TalkRecord> {
+	const uploaded = await uploadJson("talk", params.manifest);
+	const res = await fetch("/api/talks", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			title: params.title,
+			manifestUrl: uploaded.link,
+			manifestDeleteId: uploaded.deleteId,
+			manifestDeleteHash: uploaded.deleteHash,
+			bgUrl: talkBgUrlOf(params.manifest),
+		}),
+	});
+	if (!res.ok) throw new Error(`かけあい動画の保存に失敗しました: ${res.status}`);
 	return res.json();
 }
 
@@ -118,6 +147,28 @@ export async function updateMv(
 	return json;
 }
 
+export async function updateTalk(
+	talkId: string,
+	params: { title: string; manifest: TalkManifest },
+): Promise<TalkRecord> {
+	const uploaded = await uploadJson("talk", params.manifest);
+	const res = await fetch(`/api/talks/${talkId}`, {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			title: params.title,
+			manifestUrl: uploaded.link,
+			manifestDeleteId: uploaded.deleteId,
+			manifestDeleteHash: uploaded.deleteHash,
+			bgUrl: talkBgUrlOf(params.manifest),
+		}),
+	});
+	if (!res.ok) throw new Error(`かけあい動画の更新に失敗しました: ${res.status}`);
+	const json = await res.json();
+	await cleanupPrevious(json.previousManifest);
+	return json;
+}
+
 /**
  * 旧オブジェクトの後始末。失敗しても投稿は成立しているので握り潰す
  * （残るのは孤児オブジェクト1個で、表示は壊れない）。
@@ -156,4 +207,18 @@ export async function loadMv(
 	const record: MvRecord = await res.json();
 	if (!record.manifestUrl) return null;
 	return { record, manifest: await fetchJson<MvManifest>(record.manifestUrl) };
+}
+
+/** かけあい動画1件を manifest 込みで取得する */
+export async function loadTalk(
+	talkId: string,
+): Promise<{ record: TalkRecord; manifest: TalkManifest } | null> {
+	const res = await fetch(`/api/talks/${talkId}`);
+	if (!res.ok) return null;
+	const record: TalkRecord = await res.json();
+	if (!record.manifestUrl) return null;
+	return {
+		record,
+		manifest: await fetchJson<TalkManifest>(record.manifestUrl),
+	};
 }

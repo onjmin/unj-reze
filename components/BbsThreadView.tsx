@@ -7,7 +7,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getUserIdLabel } from "@/lib/avatar";
-import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import {
+	createGame,
+	createMv,
+	createTalk,
+	loadGame,
+	loadMv,
+} from "@/lib/game-mv-client";
 import { useCollabAutoOpen } from "@/lib/hooks/useCollabAutoOpen";
 import {
 	useOlderReplies,
@@ -20,6 +26,7 @@ import {
 	stripMmlLine,
 } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
+import type { TalkManifest } from "@/lib/talk-config";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
@@ -42,6 +49,7 @@ const DotDrawingEditor = dynamic(() => import("./DotDrawingEditor"), {
 const MmlEditor = dynamic(() => import("./MmlEditor"), { ssr: false });
 const GameMaker = dynamic(() => import("./GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("./MvMaker"), { ssr: false });
+const TalkMaker = dynamic(() => import("./TalkMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("./MangaEditor"), { ssr: false });
 
 type ReplyGameDraft = {
@@ -145,6 +153,10 @@ export default function BbsThreadView({
 		title: string;
 		preset: MvPresetKind;
 	} | null>(null);
+	const [replyTalkDraft, setReplyTalkDraft] = useState<{
+		manifest: TalkManifest;
+		title: string;
+	} | null>(null);
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
@@ -171,7 +183,14 @@ export default function BbsThreadView({
 	/** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
 	 *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
 	const [activeScreen, setActiveScreen] = useState<
-		"drawing" | "dotdrawing" | "manga" | "mml" | "gamemaker" | "mvmaker" | null
+		| "drawing"
+		| "dotdrawing"
+		| "manga"
+		| "mml"
+		| "gamemaker"
+		| "mvmaker"
+		| "talkmaker"
+		| null
 	>(null);
 	const [submitting, setSubmitting] = useState(false);
 	/** コラボ元の画像。返信に添付済みの絵(replyImage)とは別枠で持つ。
@@ -288,7 +307,8 @@ export default function BbsThreadView({
 			!replyImage &&
 			!replyMml &&
 			!replyGameDraft &&
-			!replyMvDraft
+			!replyMvDraft &&
+			!replyTalkDraft
 		)
 			return;
 		if (submitting) return;
@@ -335,6 +355,7 @@ export default function BbsThreadView({
 			originType: replyOriginType,
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
+			hasTalk: !!replyTalkDraft,
 		};
 		setPost((p) => ({
 			...p,
@@ -346,6 +367,7 @@ export default function BbsThreadView({
 		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
+		const capturedTalkDraft = replyTalkDraft;
 		const capturedOriginType = replyOriginType;
 		const capturedDotSize = replyDotSize;
 		const capturedAnim = replyAnim;
@@ -357,6 +379,7 @@ export default function BbsThreadView({
 		setReplyMml(null);
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
+		setReplyTalkDraft(null);
 		setReplyOriginType(undefined);
 		setReplyTo(null);
 
@@ -390,6 +413,14 @@ export default function BbsThreadView({
 				});
 				mvId = saved.id;
 			}
+			let talkId: string | undefined;
+			if (capturedTalkDraft) {
+				const saved = await createTalk({
+					title: capturedTalkDraft.title,
+					manifest: capturedTalkDraft.manifest,
+				});
+				talkId = saved.id;
+			}
 
 			const reply = await api.posts.replies.create(post.id, {
 				content,
@@ -399,6 +430,7 @@ export default function BbsThreadView({
 				imageIsDrawn: capturedImageIsDrawn,
 				gameId,
 				mvId,
+				talkId,
 				dotW: capturedDotSize?.w,
 				dotH: capturedDotSize?.h,
 				animFrames: capturedAnim?.animFrames,
@@ -497,6 +529,14 @@ export default function BbsThreadView({
 		setActiveScreen(null);
 		setReplyText((prev) =>
 			prev.trim() ? prev : `#MV 「${data.title}」を作ったよ！`,
+		);
+	};
+
+	const handleSaveTalk = (data: { manifest: TalkManifest; title: string }) => {
+		setReplyTalkDraft(data);
+		setActiveScreen(null);
+		setReplyText((prev) =>
+			prev.trim() ? prev : `#かけあい動画 「${data.title}」を作ったよ！`,
 		);
 	};
 
@@ -813,6 +853,8 @@ export default function BbsThreadView({
 					setGameDraft={setReplyGameDraft}
 					mvDraft={replyMvDraft}
 					setMvDraft={setReplyMvDraft}
+					talkDraft={replyTalkDraft}
+					setTalkDraft={setReplyTalkDraft}
 					originType={replyOriginType}
 					setOriginType={setReplyOriginType}
 					onClose={() => {}}
@@ -823,6 +865,7 @@ export default function BbsThreadView({
 					onOpenMml={() => setActiveScreen("mml")}
 					onOpenGameMaker={() => setActiveScreen("gamemaker")}
 					onOpenMvMaker={() => setActiveScreen("mvmaker")}
+					onOpenTalkMaker={() => setActiveScreen("talkmaker")}
 				/>
 			</div>
 
@@ -881,6 +924,15 @@ export default function BbsThreadView({
 					onSave={handleSaveMv}
 					initialManifest={replyMvDraft?.manifest}
 					isEditing={!!replyMvDraft}
+				/>
+			)}
+			{activeScreen === "talkmaker" && (
+				<TalkMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveTalk}
+					initialManifest={replyTalkDraft?.manifest}
+					isEditing={!!replyTalkDraft}
 				/>
 			)}
 

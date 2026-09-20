@@ -24,7 +24,14 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
+import {
+	createGame,
+	createMv,
+	createTalk,
+	loadGame,
+	loadMv,
+	loadTalk,
+} from "@/lib/game-mv-client";
 import {
 	pollInterval,
 	useRealtimeSubscription,
@@ -42,6 +49,7 @@ import {
 	stripMmlLine,
 } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
+import type { TalkManifest } from "@/lib/talk-config";
 import { getDistinctTitle } from "@/lib/post-title";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed } from "@/lib/profile-cache";
@@ -73,6 +81,7 @@ const DotDrawingEditor = dynamic(() => import("./DotDrawingEditor"), {
 const MmlEditor = dynamic(() => import("./MmlEditor"), { ssr: false });
 const GameMaker = dynamic(() => import("./GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("./MvMaker"), { ssr: false });
+const TalkMaker = dynamic(() => import("./TalkMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("./MangaEditor"), { ssr: false });
 const PostComposer = dynamic(() => import("./PostComposer"), { ssr: false });
 const EditPostModal = dynamic(() => import("./EditPostModal"), { ssr: false });
@@ -148,6 +157,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		title: string;
 		preset: MvPresetKind;
 	} | null>(null);
+	const [replyTalkDraft, setReplyTalkDraft] = useState<{
+		manifest: TalkManifest;
+		title: string;
+	} | null>(null);
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
@@ -167,6 +180,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		manifest: MvManifest;
 		title: string;
 		preset: MvPresetKind;
+	} | null>(null);
+	// 返信のかけあい動画も同じ画面で編集するため talkId を持ち回る（editMvDraft と同じ理由）
+	const [editTalkDraft, setEditTalkDraft] = useState<{
+		talkId: string;
+		manifest: TalkManifest;
+		title: string;
 	} | null>(null);
 	const [editGameDraft, setEditGameDraft] = useState<{
 		manifest: GameManifestDraft;
@@ -492,6 +511,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		const capturedMml = replyMml;
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
+		const capturedTalkDraft = replyTalkDraft;
 		const capturedOriginType = replyOriginType;
 		const capturedDotSize = replyDotSize;
 		const capturedAnim = replyAnim;
@@ -530,6 +550,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			originType: replyOriginType,
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
+			hasTalk: !!replyTalkDraft,
 		};
 		setPost((p) => ({
 			...p,
@@ -545,6 +566,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setReplyMml(null);
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
+		setReplyTalkDraft(null);
 		setReplyOriginType(undefined);
 		setComposerOpen(false);
 
@@ -578,6 +600,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				});
 				mvId = saved.id;
 			}
+			let talkId: string | undefined;
+			if (capturedTalkDraft) {
+				const saved = await createTalk({
+					title: capturedTalkDraft.title,
+					manifest: capturedTalkDraft.manifest,
+				});
+				talkId = saved.id;
+			}
 
 			const reply = await api.posts.replies.create(post.id, {
 				content,
@@ -587,6 +617,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				imageIsDrawn: capturedImageIsDrawn,
 				gameId,
 				mvId,
+				talkId,
 				dotW: capturedDotSize?.w,
 				dotH: capturedDotSize?.h,
 				animFrames: capturedAnim?.animFrames,
@@ -882,6 +913,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		);
 	};
 
+	const handleSaveTalk = (data: { manifest: TalkManifest; title: string }) => {
+		setReplyTalkDraft(data);
+		setActiveScreen(null);
+		setReplyText((prev) =>
+			prev.trim() ? prev : `#かけあい動画 「${data.title}」を作ったよ！`,
+		);
+	};
+
 	const handleSaveEdit = async (
 		newContent: string,
 		nextImageSrc?: string | null,
@@ -1008,6 +1047,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		await handleEditMvFor(post);
 	};
 
+	/** 指定ポストのかけあい動画を編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
+	const handleEditTalkFor = useCallback(async (target: Post) => {
+		if (!target.talkId) return;
+		try {
+			const loaded = await loadTalk(target.talkId);
+			if (!loaded) throw new Error();
+			setEditTalkDraft({
+				talkId: target.talkId,
+				manifest: loaded.manifest,
+				title: loaded.record.title,
+			});
+			setActiveScreen("edit-talk");
+		} catch {
+			showToast("error", "かけあい動画の読み込みに失敗しました");
+		}
+	}, []);
+
+	const handleEditTalk = async () => {
+		setMenuOpen(false);
+		await handleEditTalkFor(post);
+	};
+
 	const handleRemixMv = async () => {
 		setMenuOpen(false);
 		if (!post.mvId) return;
@@ -1058,6 +1119,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			router.refresh();
 		} catch {
 			showToast("error", "MVの更新に失敗しました");
+		}
+	};
+
+	const handleSaveEditedTalk = async (data: {
+		manifest: TalkManifest;
+		title: string;
+	}) => {
+		const talkId = editTalkDraft?.talkId;
+		setActiveScreen(null);
+		if (!talkId) return;
+		try {
+			await api.talks.edit(talkId, {
+				title: data.title,
+				manifest: data.manifest,
+			});
+			showToast("success", "かけあい動画を更新しました");
+			router.refresh();
+		} catch {
+			showToast("error", "かけあい動画の更新に失敗しました");
 		}
 	};
 
@@ -1239,6 +1319,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									>
 										<Pencil size={12} className="shrink-0" />
 										<span>MVを編集</span>
+									</button>
+								)}
+								{isSelf && post.hasTalk && (
+									<button
+										role="menuitem"
+										onClick={handleEditTalk}
+										className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors"
+									>
+										<Pencil size={12} className="shrink-0" />
+										<span>かけあい動画を編集</span>
 									</button>
 								)}
 								{isSelf && post.hasGame && (
@@ -1617,6 +1707,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										}
 										onOpenCollab={handleOpenCollab}
 										onEditMv={handleEditMvFor}
+										onEditTalk={handleEditTalkFor}
 										onEditMml={handleEditMusicFor}
 									/>
 								);
@@ -1664,6 +1755,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					setGameDraft={setReplyGameDraft}
 					mvDraft={replyMvDraft}
 					setMvDraft={setReplyMvDraft}
+					talkDraft={replyTalkDraft}
+					setTalkDraft={setReplyTalkDraft}
 					originType={replyOriginType}
 					setOriginType={setReplyOriginType}
 					onClose={handleComposerClose}
@@ -1679,6 +1772,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onOpenMml={() => openScreen("mml")}
 					onOpenGameMaker={() => openScreen("gamemaker")}
 					onOpenMvMaker={() => openScreen("mvmaker")}
+					onOpenTalkMaker={() => openScreen("talkmaker")}
 					onOpenManga={() => {
 						setCollabImageUrl(undefined);
 						openScreen("manga");
@@ -1736,6 +1830,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					isEditing={!!replyMvDraft}
 				/>
 			)}
+			{activeScreen === "talkmaker" && (
+				<TalkMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveTalk}
+					initialManifest={replyTalkDraft?.manifest}
+					isEditing={!!replyTalkDraft}
+				/>
+			)}
 			{activeScreen === "mml" && (
 				<MmlEditor
 					onClose={() => {
@@ -1785,6 +1888,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					mvId={editMvDraft.mvId}
 				/>
 			)}
+			{activeScreen === "edit-talk" && editTalkDraft && (
+				<TalkMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveEditedTalk}
+					initialManifest={editTalkDraft.manifest}
+					isEditing={true}
+					talkId={editTalkDraft.talkId}
+				/>
+			)}
 			{activeScreen === "edit-game" && editGameDraft && (
 				<GameMaker
 					onClose={() => setActiveScreen(null)}
@@ -1825,6 +1938,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						removeGame: null,
 						editMv: () => {
 							handleEditMv();
+							setShowEditModal(false);
+						},
+						editTalk: () => {
+							handleEditTalk();
 							setShowEditModal(false);
 						},
 					}}
@@ -1923,6 +2040,7 @@ function ReplyTreeItem({
 	onPreviewImage,
 	onOpenCollab,
 	onEditMv,
+	onEditTalk,
 	onEditMml,
 }: {
 	post: Post;
@@ -1958,6 +2076,7 @@ function ReplyTreeItem({
 	) => void;
 	onOpenCollab?: (post: Post) => void;
 	onEditMv?: (post: Post) => void;
+	onEditTalk?: (post: Post) => void;
 	onEditMml?: (post: Post, mml: string) => void;
 }) {
 	const router = useRouter();
@@ -2449,6 +2568,7 @@ function ReplyTreeItem({
 									onPreviewImage={onPreviewImage}
 									onOpenCollab={onOpenCollab}
 									onEditMv={onEditMv}
+									onEditTalk={onEditTalk}
 									onEditMml={onEditMml}
 								/>
 							);
@@ -2482,6 +2602,13 @@ function ReplyTreeItem({
 							onEditMv && localPost.mvId
 								? () => {
 										onEditMv(localPost);
+										setShowEditModal(false);
+									}
+								: null,
+						editTalk:
+							onEditTalk && localPost.talkId
+								? () => {
+										onEditTalk(localPost);
 										setShowEditModal(false);
 									}
 								: null,

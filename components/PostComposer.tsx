@@ -4,6 +4,7 @@ import {
 	Clapperboard,
 	Gamepad2,
 	Image,
+	MessagesSquare,
 	Music,
 	Plus,
 	X,
@@ -36,6 +37,8 @@ interface PostComposerProps {
 	setGameDraft: (v: null) => void;
 	mvDraft: { title: string } | null;
 	setMvDraft: (v: null) => void;
+	talkDraft: { title: string } | null;
+	setTalkDraft: (v: null) => void;
 	originType?: OriginType;
 	setOriginType: (v: OriginType | undefined) => void;
 	onClose: () => void;
@@ -45,6 +48,7 @@ interface PostComposerProps {
 	onOpenMml: () => void;
 	onOpenGameMaker: () => void;
 	onOpenMvMaker: () => void;
+	onOpenTalkMaker: () => void;
 	onOpenManga?: () => void;
 	replyToDisplayName?: string;
 	inline?: boolean;
@@ -87,6 +91,8 @@ export default function PostComposer({
 	setGameDraft,
 	mvDraft,
 	setMvDraft,
+	talkDraft,
+	setTalkDraft,
 	originType,
 	setOriginType,
 	onClose,
@@ -96,6 +102,7 @@ export default function PostComposer({
 	onOpenMml,
 	onOpenGameMaker,
 	onOpenMvMaker,
+	onOpenTalkMaker,
 	onOpenManga,
 	replyToDisplayName,
 	inline,
@@ -314,6 +321,33 @@ export default function PostComposer({
 					</div>
 				</div>
 			)}
+			{talkDraft && (
+				<div
+					className={`relative mt-2 flex items-center gap-2 rounded-lg border border-amber-700/50 bg-amber-500/10 px-3 py-2 max-w-[280px] ${md ? "md:px-4 md:py-3 md:max-w-[420px]" : ""}`}
+				>
+					<MessagesSquare size={16} className="text-amber-400 shrink-0" />
+					<div className="min-w-0 flex-1">
+						<p className="text-xs font-bold text-amber-200 truncate">
+							{talkDraft.title}
+						</p>
+						<p className="text-[10px] text-amber-400/70">かけあい動画を添付中</p>
+					</div>
+					<div className="flex items-center gap-1.5 ml-auto">
+						<button
+							onClick={onOpenTalkMaker}
+							className="text-amber-300 hover:text-amber-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-700/40 hover:bg-amber-500/25 active:scale-95 transition-all"
+						>
+							編集
+						</button>
+						<button
+							onClick={() => setTalkDraft(null)}
+							className="text-amber-300/70 hover:text-red-400 shrink-0"
+						>
+							<X size={14} />
+						</button>
+					</div>
+				</div>
+			)}
 		</>
 	);
 
@@ -420,6 +454,17 @@ export default function PostComposer({
 							type="button"
 							onClick={() => {
 								setMenuOpen(false);
+								onOpenTalkMaker();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							かけあい動画作成
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
 								onOpenGameMaker();
 							}}
 							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
@@ -463,7 +508,9 @@ export default function PostComposer({
 	const submitButton = (
 		<button
 			onClick={onSubmit}
-			disabled={!text.trim() && !image && !mml && !gameDraft && !mvDraft}
+			disabled={
+				!text.trim() && !image && !mml && !gameDraft && !mvDraft && !talkDraft
+			}
 			className={`bg-blue-600 text-white font-bold rounded-full transition-colors hover:bg-blue-500 disabled:opacity-50 ${md ? "px-4 py-1.5 md:px-6 md:py-2.5 text-xs md:text-sm" : "px-4 py-1.5 text-xs"}`}
 		>
 			投稿
@@ -498,7 +545,8 @@ export default function PostComposer({
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key === "Enter" && (e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
-			const canSubmit = text.trim() || image || mml || gameDraft || mvDraft;
+			const canSubmit =
+				text.trim() || image || mml || gameDraft || mvDraft || talkDraft;
 			if (canSubmit) {
 				onSubmit();
 			}

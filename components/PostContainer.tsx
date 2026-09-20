@@ -70,6 +70,7 @@ interface PostContainerProps {
 	onEditImage: ((post: Post) => void) | null;
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
+	onEditTalk: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	/**
 	 * 編集成功後に API レスポンスの更新済ぽストを渡す。
@@ -102,6 +103,7 @@ export default function PostContainer({
 	onEditImage,
 	onEditMml,
 	onEditMv,
+	onEditTalk,
 	onEditPost,
 	userId,
 	quotedPost,
@@ -936,6 +938,12 @@ export default function PostContainer({
 						editMv: onEditMv
 							? () => {
 									onEditMv(post);
+									setShowEditModal(false);
+								}
+							: null,
+						editTalk: onEditTalk
+							? () => {
+									onEditTalk(post);
 									setShowEditModal(false);
 								}
 							: null,

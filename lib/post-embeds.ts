@@ -1,5 +1,6 @@
 import { attachGameInfo } from "./game-embed";
 import { attachMvInfo } from "./mv-embed";
+import { attachTalkInfo } from "./talk-embed";
 import type { DbPost } from "./types-db";
 
 /**
@@ -14,5 +15,6 @@ export async function attachEmbedInfo<
 >(posts: T): Promise<T> {
 	await attachGameInfo(posts);
 	await attachMvInfo(posts);
+	await attachTalkInfo(posts);
 	return posts;
 }

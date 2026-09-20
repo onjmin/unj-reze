@@ -25,6 +25,7 @@ interface SearchViewProps {
 	onEditImage: ((post: Post) => void) | null;
 	onEditMml: ((post: Post) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
+	onEditTalk: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	initialQuery?: string;
 }
@@ -153,6 +154,7 @@ export default function SearchView(props: SearchViewProps) {
 								onEditImage={props.onEditImage}
 								onEditMml={props.onEditMml}
 								onEditMv={props.onEditMv}
+								onEditTalk={props.onEditTalk}
 								onEditPost={props.onEditPost}
 							/>
 						</VirtualizedItem>

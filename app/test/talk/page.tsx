@@ -1,12 +1,14 @@
 "use client";
 
-// かけあい動画の開発用ページ（段階 1: 固定 manifest を再生する）。
-// 立ち絵は絵文字（emoji: 参照）で代用。素材と DB は次の段階。
+// かけあい動画の開発用ページ（段階 1〜2: 固定 manifest の再生とエディタ）。
+// 立ち絵は絵文字（emoji: 参照）で代用。投稿への紐づけと DB は次の段階。
 
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import { createDefaultTalkStage, type TalkManifest } from "@/lib/talk-config";
 
 const TalkPlayer = dynamic(() => import("@/components/TalkPlayer"), { ssr: false });
+const TalkMaker = dynamic(() => import("@/components/TalkMaker"), { ssr: false });
 
 const SAMPLE: TalkManifest = {
 	version: 1,
@@ -63,15 +65,39 @@ const SAMPLE: TalkManifest = {
 };
 
 export default function TalkTestPage() {
+	const [manifest, setManifest] = useState<TalkManifest>(SAMPLE);
+	const [revision, setRevision] = useState(0);
+	const [editing, setEditing] = useState(false);
+
 	return (
 		<main className="min-h-screen bg-gray-950 text-gray-100 p-4">
 			<h1 className="text-lg font-bold mb-3">かけあい動画（開発用）</h1>
 			<div className="max-w-2xl">
-				<TalkPlayer manifest={SAMPLE} />
+				<TalkPlayer key={revision} manifest={manifest} />
 			</div>
-			<p className="mt-3 text-xs text-gray-400">
-				タップで再生／一時停止。初回はボイスのデータ取得に時間がかかります。
-			</p>
+			<div className="mt-3 flex items-center gap-3">
+				<button
+					type="button"
+					onClick={() => setEditing(true)}
+					className="rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300 px-3 py-1 text-[12px]"
+				>
+					台本を編集
+				</button>
+				<p className="text-xs text-gray-400">タップで再生／一時停止。初回はボイスのデータ取得に時間がかかります。</p>
+			</div>
+			{editing && (
+				<TalkMaker
+					userId="dev"
+					initialManifest={manifest}
+					isEditing
+					onClose={() => setEditing(false)}
+					onSave={({ manifest: m }) => {
+						setManifest(m);
+						setRevision((r) => r + 1);
+						setEditing(false);
+					}}
+				/>
+			)}
 		</main>
 	);
 }

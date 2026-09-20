@@ -71,6 +71,7 @@ export async function POST(
 			avatarColor,
 			gameId,
 			mvId,
+			talkId,
 			dotW,
 			dotH,
 			animFrames,
@@ -80,7 +81,7 @@ export async function POST(
 			sessionId,
 		} = body;
 
-		if (!content && !hasImage && !gameId && !mvId) {
+		if (!content && !hasImage && !gameId && !mvId && !talkId) {
 			return NextResponse.json(
 				{ error: "content, image, or game is required" },
 				{ status: 400 },
@@ -119,6 +120,7 @@ export async function POST(
 			avatarColor,
 			gameId: gameId ? Number(gameId) : undefined,
 			mvId: mvId ? Number(mvId) : undefined,
+			talkId: talkId ? Number(talkId) : undefined,
 			dotW: dotW ? Number(dotW) : undefined,
 			dotH: dotH ? Number(dotH) : undefined,
 			animFrames: animFrames ? Number(animFrames) : undefined,

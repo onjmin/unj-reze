@@ -2,6 +2,7 @@ import Sqids from "sqids";
 import type {
 	GameRecord as ApiGame,
 	MvRecord as ApiMv,
+	TalkRecord as ApiTalk,
 	Notification as ApiNotification,
 	OshiItem as ApiOshiItem,
 	Post as ApiPost,
@@ -9,6 +10,7 @@ import type {
 import type {
 	DbGameRecord,
 	DbMvRecord,
+	DbTalkRecord,
 	DbNotification,
 	DbOshiItem,
 	DbPost,
@@ -129,6 +131,7 @@ export function encodePost(post: DbPost): ApiPost {
 		parentPostId: post.parentPostId ? encodeId(post.parentPostId) : undefined,
 		gameId: post.gameId ? encodeId(post.gameId) : undefined,
 		mvId: post.mvId ? encodeId(post.mvId) : undefined,
+		talkId: post.talkId ? encodeId(post.talkId) : undefined,
 		threadId: encodeId(post.threadId),
 		replies: post.replies ? post.replies.map(encodePost) : [],
 	} as ApiPost;
@@ -139,6 +142,13 @@ export function encodeMv(mv: DbMvRecord): ApiMv {
 		...stripDeleteTokens(mv as unknown as Record<string, unknown>),
 		id: encodeId(mv.id),
 	} as ApiMv;
+}
+
+export function encodeTalk(talk: DbTalkRecord): ApiTalk {
+	return {
+		...stripDeleteTokens(talk as unknown as Record<string, unknown>),
+		id: encodeId(talk.id),
+	} as ApiTalk;
 }
 
 export function encodeGame(game: DbGameRecord): ApiGame {

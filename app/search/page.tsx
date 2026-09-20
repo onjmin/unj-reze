@@ -35,6 +35,7 @@ function SearchPageContent() {
 			onEditImage={null}
 			onEditMml={null}
 			onEditMv={null}
+			onEditTalk={null}
 		/>
 	);
 }

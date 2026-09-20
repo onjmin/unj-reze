@@ -42,7 +42,16 @@ import {
 } from "@/lib/history";
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
-import { createGame, createMv, updateGame, updateMv } from "@/lib/game-mv-client";
+import type { TalkManifest } from "@/lib/talk-config";
+import {
+	createGame,
+	createMv,
+	createTalk,
+	loadTalk,
+	updateGame,
+	updateMv,
+	updateTalk,
+} from "@/lib/game-mv-client";
 import {
 	countUnreadMessages,
 	MESSAGES_READ_EVENT,
@@ -78,6 +87,7 @@ const MmlEditor = dynamic(() => import("@/components/MmlEditor"), {
 	ssr: false,
 });
 const MvMaker = dynamic(() => import("@/components/MvMaker"), { ssr: false });
+const TalkMaker = dynamic(() => import("@/components/TalkMaker"), { ssr: false });
 const GameMaker = dynamic(() => import("@/components/GameMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("@/components/MangaEditor"), { ssr: false });
 
@@ -226,6 +236,10 @@ export default function App() {
 		title: string;
 		preset: MvPresetKind;
 	} | null>(null);
+	const [talkDraft, setTalkDraft] = useState<{
+		manifest: TalkManifest;
+		title: string;
+	} | null>(null);
 	const [playingGame, setPlayingGame] = useState<{
 		manifest: GameManifestDraft;
 		title: string;
@@ -242,17 +256,26 @@ export default function App() {
 		mvId?: string;
 		creatorSlug?: string;
 	} | null>(null);
+	/** 投稿済みのかけあい動画を編集中（作者本人のときだけ更新できる）。 */
+	const [playingTalk, setPlayingTalk] = useState<{
+		manifest: TalkManifest;
+		title: string;
+		postId?: string;
+		talkId?: string;
+		creatorSlug?: string;
+	} | null>(null);
 	const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
 	const postGameLastIdRef = useRef(0);
 	const [discardModalConfig, setDiscardModalConfig] = useState<{
-		discardType: "image" | "mml" | "game" | "mv";
+		discardType: "image" | "mml" | "game" | "mv" | "talk";
 		targetScreen:
 			| "drawing"
 			| "dotdrawing"
 			| "manga"
 			| "mml"
 			| "gamemaker"
-			| "mvmaker";
+			| "mvmaker"
+			| "talkmaker";
 	} | null>(null);
 	const [editingPost, setEditingPost] = useState<Post | null>(null);
 	const [originalPostContent, setOriginalPostContent] = useState<string>("");
@@ -831,6 +854,8 @@ export default function App() {
 			walkPreset: attachedAnim?.walkPreset,
 			hasMv: !!mvDraft,
 			mvTitle: mvDraft?.title,
+			hasTalk: !!talkDraft,
+			talkTitle: talkDraft?.title,
 			hasGame: !!gameDraft,
 			gameTitle: gameDraft?.title,
 			originType,
@@ -862,6 +887,7 @@ export default function App() {
 		setAttachedMml(null);
 		setGameDraft(null);
 		setMvDraft(null);
+		setTalkDraft(null);
 		setOriginType(undefined);
 
 		try {
@@ -891,6 +917,14 @@ export default function App() {
 				});
 				mvId = savedMv.id;
 			}
+			let talkId: string | undefined;
+			if (talkDraft) {
+				const savedTalk = await createTalk({
+					title: talkDraft.title,
+					manifest: talkDraft.manifest,
+				});
+				talkId = savedTalk.id;
+			}
 
 			const reply = await api.posts.replies.create(postId, {
 				content,
@@ -905,6 +939,7 @@ export default function App() {
 				walkPreset: attachedAnim?.walkPreset,
 				gameId,
 				mvId,
+				talkId,
 				originType,
 			});
 
@@ -976,7 +1011,8 @@ export default function App() {
 			!attachedImage &&
 			!attachedMml &&
 			!gameDraft &&
-			!mvDraft
+			!mvDraft &&
+			!talkDraft
 		)
 			return;
 
@@ -1074,6 +1110,8 @@ export default function App() {
 			walkPreset: attachedAnim?.walkPreset,
 			hasMv: !!mvDraft,
 			mvTitle: mvDraft?.title,
+			hasTalk: !!talkDraft,
+			talkTitle: talkDraft?.title,
 			hasGame: !!gameDraft,
 			gameTitle: gameDraft?.title,
 			originType,
@@ -1089,6 +1127,7 @@ export default function App() {
 		setAttachedMml(null);
 		setGameDraft(null);
 		setMvDraft(null);
+		setTalkDraft(null);
 		setOriginType(undefined);
 
 		try {
@@ -1120,6 +1159,14 @@ export default function App() {
 				});
 				mvId = savedMv.id;
 			}
+			let talkId: string | undefined;
+			if (talkDraft) {
+				const savedTalk = await createTalk({
+					title: talkDraft.title,
+					manifest: talkDraft.manifest,
+				});
+				talkId = savedTalk.id;
+			}
 			const post = await api.posts.create({
 				content,
 				hasImage: !!attachedImage,
@@ -1128,6 +1175,7 @@ export default function App() {
 				avatarColor: "from-blue-500 to-indigo-600",
 				gameId,
 				mvId,
+				talkId,
 				dotW: attachedDotSize?.w,
 				dotH: attachedDotSize?.h,
 				animFrames: attachedAnim?.animFrames,
@@ -1275,6 +1323,26 @@ export default function App() {
 					creatorSlug: mv.creatorSlug,
 				});
 				openScreen("mvmaker");
+			} catch {}
+		}
+	};
+
+	const handleEditPostTalk = async (post: Post) => {
+		setEditingPost(post);
+		setOriginalPostContent((prev) => prev || post.content);
+		setShowGlobalEditModal(false);
+		if (post.talkId) {
+			try {
+				const loaded = await loadTalk(post.talkId);
+				if (!loaded) return;
+				setPlayingTalk({
+					manifest: loaded.manifest,
+					title: loaded.record.title,
+					postId: post.id,
+					talkId: post.talkId,
+					creatorSlug: loaded.record.creatorSlug,
+				});
+				openScreen("talkmaker");
 			} catch {}
 		}
 	};
@@ -1480,6 +1548,32 @@ export default function App() {
 		}
 	};
 
+	const handleSaveEditedTalk = async (data: {
+		manifest: TalkManifest;
+		title: string;
+	}) => {
+		if (!playingTalk?.talkId) return;
+		try {
+			await updateTalk(playingTalk.talkId, {
+				title: data.title,
+				manifest: data.manifest,
+			});
+		} catch {}
+		closeScreen();
+		setPlayingTalk(null);
+		if (editingPost) {
+			setShowGlobalEditModal(true);
+		}
+	};
+
+	const handleSaveTalk = (data: { manifest: TalkManifest; title: string }) => {
+		setTalkDraft(data);
+		closeScreen();
+		setInputText((prev) =>
+			prev.trim() ? prev : `#かけあい動画 「${data.title}」を作ったよ！`,
+		);
+	};
+
 	const handleSaveGame = (
 		manifest: GameManifestDraft,
 		meta: { title: string; preset: string },
@@ -1583,12 +1677,14 @@ export default function App() {
 			| "manga"
 			| "mml"
 			| "gamemaker"
-			| "mvmaker",
+			| "mvmaker"
+			| "talkmaker",
 	) => {
 		const hasImage = !!attachedImage;
 		const hasMml = !!attachedMml;
 		const hasGame = !!gameDraft;
 		const hasMv = !!mvDraft;
+		const hasTalk = !!talkDraft;
 
 		if (
 			screenType === "drawing" ||
@@ -1610,6 +1706,13 @@ export default function App() {
 				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
 				return;
 			}
+			if (hasTalk) {
+				setDiscardModalConfig({
+					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
 		} else if (screenType === "mml") {
 			if (hasImage) {
 				setDiscardModalConfig({
@@ -1629,6 +1732,13 @@ export default function App() {
 				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
 				return;
 			}
+			if (hasTalk) {
+				setDiscardModalConfig({
+					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
 		} else if (screenType === "gamemaker") {
 			if (hasImage) {
 				setDiscardModalConfig({
@@ -1643,6 +1753,13 @@ export default function App() {
 			}
 			if (hasMv) {
 				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
+				return;
+			}
+			if (hasTalk) {
+				setDiscardModalConfig({
+					discardType: "talk",
+					targetScreen: screenType,
+				});
 				return;
 			}
 		} else if (screenType === "mvmaker") {
@@ -1664,6 +1781,36 @@ export default function App() {
 				});
 				return;
 			}
+			if (hasTalk) {
+				setDiscardModalConfig({
+					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
+		} else if (screenType === "talkmaker") {
+			if (hasImage) {
+				setDiscardModalConfig({
+					discardType: "image",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasMml) {
+				setDiscardModalConfig({ discardType: "mml", targetScreen: screenType });
+				return;
+			}
+			if (hasGame) {
+				setDiscardModalConfig({
+					discardType: "game",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasMv) {
+				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
+				return;
+			}
 		}
 
 		// 返信コンポーザから来た場合は、保存/キャンセル後にコンポーザ（＝返信先）へ戻す
@@ -1683,6 +1830,7 @@ export default function App() {
 		if (discardType === "mml") setAttachedMml(null);
 		if (discardType === "game") setGameDraft(null);
 		if (discardType === "mv") setMvDraft(null);
+		if (discardType === "talk") setTalkDraft(null);
 
 		openScreen(targetScreen, composerOpen);
 		setDiscardModalConfig(null);
@@ -1753,6 +1901,26 @@ export default function App() {
 					initialManifest={playingMv?.manifest || mvDraft?.manifest}
 					isEditing={!!playingMv || !!mvDraft}
 					mvId={playingMv?.mvId}
+				/>
+			)}
+			{activeScreen === "talkmaker" && (
+				<TalkMaker
+					onClose={() => {
+						closeScreen();
+						setPlayingTalk(null);
+						if (editingPost) setShowGlobalEditModal(true);
+					}}
+					userId={userId}
+					onSave={
+						editingPost &&
+						!!currentUser?.slug &&
+						playingTalk?.creatorSlug === currentUser.slug
+							? handleSaveEditedTalk
+							: handleSaveTalk
+					}
+					initialManifest={playingTalk?.manifest || talkDraft?.manifest}
+					isEditing={!!playingTalk || !!talkDraft}
+					talkId={playingTalk?.talkId}
 				/>
 			)}
 			{activeScreen === "postgame" && playingGame && (
@@ -1905,6 +2073,8 @@ export default function App() {
 													setGameDraft={setGameDraft}
 													mvDraft={mvDraft}
 													setMvDraft={setMvDraft}
+													talkDraft={talkDraft}
+													setTalkDraft={setTalkDraft}
 													originType={originType}
 													setOriginType={setOriginType}
 													onClose={() => {}}
@@ -1920,6 +2090,7 @@ export default function App() {
 													onOpenMml={() => handleOpenEditor("mml")}
 													onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 													onOpenMvMaker={() => handleOpenEditor("mvmaker")}
+													onOpenTalkMaker={() => handleOpenEditor("talkmaker")}
 													onOpenManga={() => {
 														setCollabImageUrl(attachedImage || undefined);
 														handleOpenEditor("manga");
@@ -1981,6 +2152,7 @@ export default function App() {
 												onEditImage={handleEditPostImage}
 												onEditMml={handleEditPostMml}
 												onEditMv={handleEditPostMv}
+												onEditTalk={handleEditPostTalk}
 												onEditPost={handleEditPost}
 												userId={userId}
 											/>
@@ -2020,6 +2192,8 @@ export default function App() {
 							setGameDraft={setGameDraft}
 							mvDraft={mvDraft}
 							setMvDraft={setMvDraft}
+							talkDraft={talkDraft}
+							setTalkDraft={setTalkDraft}
 							originType={originType}
 							setOriginType={setOriginType}
 							onClose={() => {
@@ -2047,6 +2221,7 @@ export default function App() {
 							onOpenMml={() => handleOpenEditor("mml")}
 							onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 							onOpenMvMaker={() => handleOpenEditor("mvmaker")}
+							onOpenTalkMaker={() => handleOpenEditor("talkmaker")}
 							onOpenManga={() => {
 								setCollabImageUrl(attachedImage || undefined);
 								handleOpenEditor("manga");
@@ -2134,6 +2309,7 @@ export default function App() {
 									handleOpenPostGame(editingPost.gameId || "", editingPost.id),
 								removeGame: null,
 								editMv: () => handleEditPostMv(editingPost),
+								editTalk: () => handleEditPostTalk(editingPost),
 							}}
 						/>
 					)}

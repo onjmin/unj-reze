@@ -498,6 +498,11 @@ class MockDB {
 					threadPosts.some((tp) => !!tp.hasMv) !== options.hasMv
 				)
 					return false;
+				if (
+					options.hasTalk !== undefined &&
+					threadPosts.some((tp) => !!tp.hasTalk) !== options.hasTalk
+				)
+					return false;
 				return true;
 			})
 			.filter((p) => !hidden.has(p.slug ?? ""))
@@ -663,6 +668,7 @@ class MockDB {
 		slug?: string;
 		gameId?: number;
 		mvId?: number;
+		talkId?: number;
 		dotW?: number;
 		dotH?: number;
 		animFrames?: number;
@@ -697,6 +703,7 @@ class MockDB {
 			hasCollabButton: !!(
 				data.gameId ||
 				data.mvId ||
+				data.talkId ||
 				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 				hasMml
 			),
@@ -705,6 +712,8 @@ class MockDB {
 			gameId: data.gameId,
 			hasMv: !!data.mvId,
 			mvId: data.mvId,
+			hasTalk: !!data.talkId,
+			talkId: data.talkId,
 			hasMml,
 			dotW: data.dotW,
 			dotH: data.dotH,
@@ -818,6 +827,7 @@ class MockDB {
 			avatarColor?: string;
 			gameId?: number;
 			mvId?: number;
+		talkId?: number;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -858,11 +868,14 @@ class MockDB {
 			hasGame: !!data.gameId,
 			mvId: data.mvId,
 			hasMv: !!data.mvId,
+			talkId: data.talkId,
+			hasTalk: !!data.talkId,
 			hasMml: replyHasMml,
 			// createPost と同じ判定基準（画像はimageIsDrawnのときだけコラボ対象）
 			hasCollabButton: !!(
 				data.gameId ||
 				data.mvId ||
+				data.talkId ||
 				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 				replyHasMml
 			),
@@ -1555,6 +1568,8 @@ class MockDB {
 			post.gameId = undefined;
 			post.hasMv = false;
 			post.mvId = undefined;
+			post.hasTalk = false;
+			post.talkId = undefined;
 			return true;
 		}
 

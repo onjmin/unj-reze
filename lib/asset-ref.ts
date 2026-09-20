@@ -502,3 +502,23 @@ export function parseWalkRef(raw: string): WalkRef | null {
 export function isWalkRef(raw: string): boolean {
 	return !!parseWalkRef(raw);
 }
+
+/**
+ * `walk:` 参照（row_anim の横並びシート）から、指定コマだけの切り出し矩形 [sx, sy, sw, sh] を返す。
+ * アニメさせない静止画（MV/talk の目・口・立ち絵）へシートを割り当てるときに、シート全体を
+ * 1 コマの枠へ引き伸ばして歪ませないために使う。row_anim でなければ undefined。
+ */
+export function walkRefFrameCrop(
+	ref: string,
+	frameIndex: number,
+): [number, number, number, number] | undefined {
+	const wr = parseWalkRef(ref);
+	if (!wr || wr.stdId !== "row_anim" || !wr.crop) return undefined;
+	const frames = Math.max(1, wr.frames ?? 1);
+	const [csx, csy, csw, csh] = wr.crop;
+	const cw = csw / frames;
+	const ch = csh;
+	const row = wr.row ?? 0;
+	const idx = ((Math.round(frameIndex) % frames) + frames) % frames;
+	return [csx + idx * cw, csy + row * ch, cw, ch];
+}

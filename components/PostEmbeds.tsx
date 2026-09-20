@@ -15,6 +15,7 @@ import GameBox from "./GameBox";
 import MmlSource from "./MmlSource";
 import MvBox from "./MvBox";
 import SpriteImage from "./SpriteImage";
+import TalkBox from "./TalkBox";
 
 const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 
@@ -41,6 +42,7 @@ export interface PostEmbedsProps {
 	order?: "media-first" | "text-first";
 	imageWrapperClassName?: string;
 	mvClassName?: string;
+	talkClassName?: string;
 	gameClassName?: string;
 	/** MML/コード進行/汎用埋め込みの外枠（BBS表示はpl-6 mt-2でインデントを揃える） */
 	textEmbedWrapperClassName?: string;
@@ -73,10 +75,12 @@ export default function PostEmbeds({
 	order = "media-first",
 	imageWrapperClassName = "rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]",
 	mvClassName = "mb-2.5",
+	talkClassName = "mb-2.5",
 	gameClassName = "mb-2.5",
 	textEmbedWrapperClassName,
 	hashtagLinkClassName = "text-blue-400 hover:underline mb-1 inline-block text-[15px]",
-	suppressGenericEmbedIf = (p) => !!(p.hasImage || p.hasGame || p.hasMv),
+	suppressGenericEmbedIf = (p) =>
+		!!(p.hasImage || p.hasGame || p.hasMv || p.hasTalk),
 }: PostEmbedsProps) {
 	const router = useRouter();
 
@@ -136,6 +140,17 @@ export default function PostEmbeds({
 			mvPlays={post.mvPlays}
 			originType={post.originType}
 			className={mvClassName}
+		/>
+	);
+
+	const talk = post.hasTalk && post.talkId && (
+		<TalkBox
+			talkId={post.talkId}
+			postId={post.id}
+			talkTitle={post.talkTitle || "かけあい動画"}
+			talkThumbnail={post.talkThumbnail}
+			talkPlays={post.talkPlays}
+			className={talkClassName}
 		/>
 	);
 
@@ -234,6 +249,7 @@ export default function PostEmbeds({
 		<>
 			{image}
 			{mv}
+			{talk}
 			{game}
 		</>
 	);

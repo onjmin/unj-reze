@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard, Gamepad2, Music, X } from "lucide-react";
+import { Clapperboard, Gamepad2, MessagesSquare, Music, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { mmlMarkerOfLine } from "@/lib/mml";
@@ -41,6 +41,8 @@ export interface PostEditCapabilities {
 	removeGame: (() => void) | null;
 	/** MVエディタを開く。非対応なら null */
 	editMv: (() => void) | null;
+	/** かけあい動画エディタを開く。非対応なら null */
+	editTalk: (() => void) | null;
 }
 
 /**
@@ -510,6 +512,29 @@ export default function EditPostModal({
 								<button
 									onClick={capabilities.editMv}
 									className="text-cyan-300 hover:text-cyan-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-cyan-700/40 hover:bg-cyan-500/25 active:scale-95 transition-all"
+								>
+									編集
+								</button>
+							</div>
+						)}
+					</div>
+				)}
+
+				{/* かけあい動画添付 */}
+				{post.hasTalk && (
+					<div className="relative flex items-center gap-2.5 rounded-lg border border-amber-700/50 bg-amber-500/10 px-3 py-2 max-w-[280px] self-start w-full">
+						<MessagesSquare size={16} className="text-amber-400 shrink-0" />
+						<div className="min-w-0 flex-1">
+							<p className="text-xs font-bold text-amber-200 truncate">
+								{post.talkTitle || "かけあい動画"}
+							</p>
+							<p className="text-[10px] text-amber-400/70">かけあい動画を添付中</p>
+						</div>
+						{capabilities.editTalk && (
+							<div className="flex items-center gap-1.5 ml-auto">
+								<button
+									onClick={capabilities.editTalk}
+									className="text-amber-300 hover:text-amber-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-700/40 hover:bg-amber-500/25 active:scale-95 transition-all"
 								>
 									編集
 								</button>

@@ -1,10 +1,11 @@
 import { db as mockDb } from "../mock-db";
 import type { MvManifest } from "../mv-config";
 import { OriginType } from "../types";
-import type { DbGameRecord, DbMvRecord } from "../types-db";
+import type { DbGameRecord, DbMvRecord, DbTalkRecord } from "../types-db";
 import type {
 	CreateGameParams,
 	CreateMvParams,
+	CreateTalkParams,
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
@@ -16,10 +17,12 @@ import type {
 	ReportParams,
 	UpdateGameParams,
 	UpdateMvParams,
+	UpdateTalkParams,
 } from "./interface";
 
 const gameStore = new Map<number, DbGameRecord>();
 const mvStore = new Map<number, DbMvRecord>();
+const talkStore = new Map<number, DbTalkRecord>();
 
 export const mockStore: DataStore = {
 	async getPosts(
@@ -404,6 +407,57 @@ export const mockStore: DataStore = {
 		const existing = mvStore.get(id);
 		if (!existing) return;
 		mvStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
+	},
+
+	async createTalk(data: CreateTalkParams): Promise<DbTalkRecord> {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
+		const record: DbTalkRecord = {
+			id,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+			createdAt: new Date().toISOString(),
+			creatorSlug: data.creatorSlug,
+			plays: 0,
+		};
+		talkStore.set(id, record);
+		return record;
+	},
+
+	async getTalk(id: number): Promise<DbTalkRecord | null> {
+		return talkStore.get(id) ?? null;
+	},
+
+	async getTalksByIds(ids: number[]): Promise<DbTalkRecord[]> {
+		if (!ids || ids.length === 0) return [];
+		const set = new Set(ids);
+		return Array.from(talkStore.values()).filter((t) => set.has(t.id));
+	},
+
+	async updateTalk(
+		id: number,
+		data: UpdateTalkParams,
+	): Promise<DbTalkRecord | null> {
+		const existing = talkStore.get(id);
+		if (!existing) return null;
+		const updated: DbTalkRecord = {
+			...existing,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+		};
+		talkStore.set(id, updated);
+		return updated;
+	},
+
+	async recordTalkPlay(id: number) {
+		const existing = talkStore.get(id);
+		if (!existing) return;
+		talkStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
 	},
 
 	async recordGamePlay(

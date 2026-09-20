@@ -1,10 +1,11 @@
 import type { GameManifestDraft } from "@/components/GameMaker";
 import { type DmGate, rejectDmReason } from "./dm-rules";
-import { updateGame, updateMv } from "./game-mv-client";
+import { updateGame, updateMv, updateTalk } from "./game-mv-client";
 import { externalizeMml } from "./mml-payload";
 import type { Message, Trend } from "./mock-db";
 import { db as mockDbInstance } from "./mock-db";
 import type { MvManifest } from "./mv-config";
+import type { TalkManifest } from "./talk-config";
 import { ensureSessionId } from "./session";
 import { deleteObject } from "./uploader";
 import {
@@ -133,6 +134,7 @@ const staticApi = {
 				hasImage?: boolean;
 				hasGame?: boolean;
 				hasMv?: boolean;
+				hasTalk?: boolean;
 			},
 		) => {
 			const beforeId = opts?.beforeId
@@ -145,6 +147,7 @@ const staticApi = {
 				hasImage: opts?.hasImage,
 				hasGame: opts?.hasGame,
 				hasMv: opts?.hasMv,
+				hasTalk: opts?.hasTalk,
 			});
 			return posts.map(encodePost);
 		},
@@ -163,6 +166,7 @@ const staticApi = {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			talkId?: string;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -174,11 +178,15 @@ const staticApi = {
 				? decodeIdOrThrow(data.gameId)
 				: undefined;
 			const decodedMvId = data.mvId ? decodeIdOrThrow(data.mvId) : undefined;
+			const decodedTalkId = data.talkId
+				? decodeIdOrThrow(data.talkId)
+				: undefined;
 			const post = await mockDbInstance.createPost({
 				...data,
 				displayName: data.displayName || "名無し",
 				gameId: decodedGameId,
 				mvId: decodedMvId,
+				talkId: decodedTalkId,
 			});
 			return encodePost(post);
 		},
@@ -266,6 +274,7 @@ const staticApi = {
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;
+					talkId?: string | number;
 					dotW?: number;
 					dotH?: number;
 					animFrames?: number;
@@ -279,12 +288,14 @@ const staticApi = {
 					: undefined;
 				const gameIdNum = data.gameId ? Number(data.gameId) : undefined;
 				const mvIdNum = data.mvId ? Number(data.mvId) : undefined;
+				const talkIdNum = data.talkId ? Number(data.talkId) : undefined;
 				const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), {
 					...data,
 					displayName: data.displayName || "名無し",
 					parentPostId: decodedParentPostId,
 					gameId: gameIdNum,
 					mvId: mvIdNum,
+					talkId: talkIdNum,
 				});
 				if (!reply) throw new Error("Post not found");
 				return encodePost(reply);
@@ -525,6 +536,14 @@ const staticApi = {
 			return { success: true };
 		},
 	},
+	talks: {
+		edit: async (
+			_id: string,
+			_params: { title: string; manifest: unknown },
+		) => {
+			return { success: true };
+		},
+	},
 	games: {
 		edit: async (
 			_id: string,
@@ -607,6 +626,7 @@ const liveApi = {
 				hasImage?: boolean;
 				hasGame?: boolean;
 				hasMv?: boolean;
+				hasTalk?: boolean;
 			},
 		) => {
 			const params = new URLSearchParams();
@@ -619,6 +639,8 @@ const liveApi = {
 			if (opts?.hasGame !== undefined)
 				params.set("hasGame", String(opts.hasGame));
 			if (opts?.hasMv !== undefined) params.set("hasMv", String(opts.hasMv));
+			if (opts?.hasTalk !== undefined)
+				params.set("hasTalk", String(opts.hasTalk));
 			const qs = params.toString();
 			return fetcher<Post[]>(`/posts${qs ? `?${qs}` : ""}`);
 		},
@@ -638,6 +660,7 @@ const liveApi = {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			talkId?: string;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -733,6 +756,7 @@ const liveApi = {
 				previousMml?: { deleteId: string; deleteHash: string };
 				previousGameManifest?: { deleteId: string; deleteHash: string };
 				previousMvManifest?: { deleteId: string; deleteHash: string };
+				previousTalkManifest?: { deleteId: string; deleteHash: string };
 			}>(`/posts/${id}`, {
 				method: "DELETE",
 				body: JSON.stringify({ userId, sessionId: ensureSessionId() }),
@@ -742,6 +766,7 @@ const liveApi = {
 					["旧MML", result.previousMml],
 					["ゲームmanifest", result.previousGameManifest],
 					["MV manifest", result.previousMvManifest],
+					["かけあい動画 manifest", result.previousTalkManifest],
 				];
 			await Promise.all(
 				refs.map(async ([label, ref]) => {
@@ -789,6 +814,7 @@ const liveApi = {
 					avatarColor?: string;
 					gameId?: string | number;
 					mvId?: string | number;
+					talkId?: string | number;
 					dotW?: number;
 					dotH?: number;
 					animFrames?: number;
@@ -1052,6 +1078,10 @@ const liveApi = {
 	mvs: {
 		edit: (id: string, params: { title: string; manifest: MvManifest }) =>
 			updateMv(id, params),
+	},
+	talks: {
+		edit: (id: string, params: { title: string; manifest: TalkManifest }) =>
+			updateTalk(id, params),
 	},
 	games: {
 		edit: (

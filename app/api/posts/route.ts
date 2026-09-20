@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
 		const hasGame = hasGameParam !== null ? hasGameParam === "true" : undefined;
 		const hasMvParam = url.searchParams.get("hasMv");
 		const hasMv = hasMvParam !== null ? hasMvParam === "true" : undefined;
+		const hasTalkParam = url.searchParams.get("hasTalk");
+		const hasTalk =
+			hasTalkParam !== null ? hasTalkParam === "true" : undefined;
 
 		return await withEdgeCache(
 			request,
@@ -59,6 +62,7 @@ export async function GET(request: NextRequest) {
 					hasImage,
 					hasGame,
 					hasMv,
+					hasTalk,
 				});
 				await attachEmbedInfo(posts);
 				return NextResponse.json(posts.map(encodePost));
@@ -84,6 +88,7 @@ export async function POST(request: NextRequest) {
 			avatarColor,
 			gameId,
 			mvId,
+			talkId,
 			dotW,
 			dotH,
 			animFrames,
@@ -103,6 +108,7 @@ export async function POST(request: NextRequest) {
 			avatarColor?: string;
 			gameId?: string;
 			mvId?: string;
+			talkId?: string;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -114,7 +120,7 @@ export async function POST(request: NextRequest) {
 			sessionId?: string;
 		} = body;
 
-		if (!content && !hasImage && !gameId && !mvId) {
+		if (!content && !hasImage && !gameId && !mvId && !talkId) {
 			return NextResponse.json(
 				{ error: "content or attachment is required" },
 				{ status: 400 },
@@ -171,6 +177,10 @@ export async function POST(request: NextRequest) {
 		if (mvId && decodedMvId === null) {
 			return NextResponse.json({ error: "Invalid mvId" }, { status: 400 });
 		}
+		const decodedTalkId = talkId ? decodeId(talkId) : undefined;
+		if (talkId && decodedTalkId === null) {
+			return NextResponse.json({ error: "Invalid talkId" }, { status: 400 });
+		}
 
 		// MML本文はブラウザが uploader-worker へ直接上げ済み。ここに来るのはURLだけ。
 		// 公開ボディ由来なので保存先ホストを必ず検証する
@@ -190,6 +200,7 @@ export async function POST(request: NextRequest) {
 			slug: authorSlug,
 			gameId: decodedGameId === null ? undefined : decodedGameId,
 			mvId: decodedMvId === null ? undefined : decodedMvId,
+			talkId: decodedTalkId === null ? undefined : decodedTalkId,
 			dotW: dotW ? Number(dotW) : undefined,
 			dotH: dotH ? Number(dotH) : undefined,
 			animFrames: animFrames ? Number(animFrames) : undefined,
