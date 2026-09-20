@@ -2,7 +2,8 @@
 //
 // - 全行を先に計画して長さを得る（planTalkCues）→ 時間軸（lib/talk-timeline.ts）。
 // - 再生は AudioContext の時計を基準に、各行を studio.speak の `at` で先にすべて置く。
-//   合成は届いた順に置かれるので、頭の数行が出来た時点で鳴り始め、後続は裏で追いつく。
+//   先頭の行だけは合成の完了を待ってから置き（待たないと頭が欠ける・無音になる）、
+//   後続は届いたチャンクから順に置かれて、先頭の行が鳴っている間に裏で追いつく。
 // - 2 つ目の studio は作らない（サイト全体の音量は studio の masterGain に一本化されている）。
 
 import type { SpeechHandle } from "@onjmin/dtm";
@@ -120,15 +121,27 @@ export interface TalkSpeechSession {
 }
 
 /**
+ * 頭出しの余裕（秒）。合成が間に合えばこの分だけ待ってから鳴り始める。
+ * dtm は予定時刻を過ぎてから届いたチャンクを「遅れたぶんを飛ばして」置くので、余裕が
+ * 足りないと行の頭が欠け、丸ごと過ぎていれば捨てられて無音の行になる。
+ */
+const DEFAULT_TALK_LEAD_SEC = 0.6;
+
+/**
  * 時間軸の fromIndex 行目以降を、AudioContext クロック上に先にすべてスケジュールする。
  * 戻り値の t0 は「時間軸の 0 秒」に対応する絶対時刻（fromIndex 行の頭が startAt に来る）。
  * ユーザー操作のコールスタック内から呼ぶこと（自動再生ポリシー）。
+ *
+ * 先頭の行だけは合成の完了を待ってから置く（`awaitRender`）。残りの行は届いたチャンクから
+ * 順に置く従来どおりの方式で、先頭の行が鳴っている間に裏で追いつく。待っている間に
+ * 予定時刻を過ぎていたら、実際に鳴り出す時刻（`SpeechHandle.startTime`）へ時間軸を合わせ直す
+ * ので、絵と声がずれない。
  */
 export async function scheduleTalkSpeech(
 	manifest: TalkManifest,
 	timeline: TalkTimeline,
 	fromIndex: number,
-	leadSec = 0.3,
+	leadSec = DEFAULT_TALK_LEAD_SEC,
 ): Promise<TalkSpeechSession> {
 	await registerTalkVoicebanks(manifest);
 	const studio = await getStudio();
@@ -138,33 +151,59 @@ export async function scheduleTalkSpeech(
 			await ctx.resume();
 		} catch {}
 	}
-	const first = timeline.cues[fromIndex];
-	const startOffset = first ? first.startSec : 0;
-	const t0 = ctx.currentTime + leadSec - startOffset;
+	const rest = timeline.cues.slice(fromIndex);
+	const startOffset = rest[0]?.startSec ?? 0;
 	const abort = new AbortController();
 	const handles: SpeechHandle[] = [];
 	let stopped = false;
-	for (const entry of timeline.cues.slice(fromIndex)) {
-		if (!entry.voiced) continue;
+	const keep = (h: SpeechHandle | null): void => {
+		if (!h) return;
+		if (stopped) {
+			h.stop();
+			return;
+		}
+		handles.push(h);
+	};
+	const speakOptions = (entry: (typeof rest)[number], at: number) => {
 		const ch = talkCharacterOf(manifest, entry.cue.speaker);
-		if (!ch) continue;
-		void studio
-			.speak(entry.cue.text.trim(), {
-				model: ch.voice.model,
-				pitchOffset: ch.voice.pitchOffset ?? 0,
-				style: cueStyle(entry.cue, ch),
-				emotion: cueEmotion(entry.cue),
-				at: t0 + entry.startSec,
-				signal: abort.signal,
-			})
-			.then((h) => {
-				if (!h) return;
-				if (stopped) {
-					h.stop();
-					return;
-				}
-				handles.push(h);
-			});
+		if (!ch) return null;
+		return {
+			model: ch.voice.model,
+			pitchOffset: ch.voice.pitchOffset ?? 0,
+			style: cueStyle(entry.cue, ch),
+			emotion: cueEmotion(entry.cue),
+			at,
+			signal: abort.signal,
+		};
+	};
+
+	let t0 = ctx.currentTime + leadSec - startOffset;
+	const head = rest.find(
+		(c) => c.voiced && !!talkCharacterOf(manifest, c.cue.speaker),
+	);
+	if (head) {
+		const opts = speakOptions(head, t0 + head.startSec);
+		if (opts) {
+			const handle = await studio
+				.speak(head.cue.text.trim(), { ...opts, awaitRender: true })
+				.catch((e) => {
+					console.warn("[talk] 先頭の行の合成に失敗しました", e);
+					return null;
+				});
+			if (handle) {
+				// 合成が余裕に間に合わなかったときは startTime が予定より後になる。
+				t0 = handle.startTime - head.startSec;
+				keep(handle);
+			}
+		}
+	}
+	for (const entry of rest) {
+		if (entry === head || !entry.voiced) continue;
+		const opts = speakOptions(entry, t0 + entry.startSec);
+		if (!opts) continue;
+		void studio.speak(entry.cue.text.trim(), opts).then(keep, (e) => {
+			console.warn("[talk] 読み上げに失敗しました", entry.cue.id, e);
+		});
 	}
 	return {
 		t0,

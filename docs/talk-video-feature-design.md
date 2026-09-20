@@ -126,10 +126,14 @@ cues → (全行を計画+合成) → durations → timeline { cue, startSec, en
    **計画だけ**を全行ぶん行って長さを得る。dtm の `singingVoices.planSpeech(model, text)` が
    長さを返す（感情・話し方を含む版が要る → §7 のライブラリ改修 (a)）。
 2. `startSec[i] = startSec[i-1] + duration[i-1] + gap[i-1]` で並べる。
-3. 再生は AudioContext の時計 `t0 = ctx.currentTime + 0.3` を基準に、各行を
+3. 再生は AudioContext の時計 `t0 = ctx.currentTime + 0.6` を基準に、各行を
    `studio.speak(text, { at: t0 + startSec[i] })` で**先にすべてスケジュール**する。
-   合成は届いた順に置かれるので（dtm の `scheduleSpeech` と同じ仕組み）、頭の数行が
+   合成は届いた順に置かれるので（dtm の `scheduleSpeech` と同じ仕組み）、頭の行が
    合成できた時点で再生が始まり、後続は裏で追いつく。
+   ただし**先頭の行だけは `awaitRender: true` で合成の完了を待ってから置く**。dtm は予定時刻を
+   過ぎて届いたチャンクを遅れたぶんだけ飛ばして置き、丸ごと過ぎていれば捨てるので、待たずに
+   始めると再生直後の行の頭が欠ける・その行が無音になる。待っている間に予定時刻を過ぎたら、
+   実際に鳴り出す時刻（`SpeechHandle.startTime`）へ `t0` を合わせ直して絵と声を揃える。
 4. 描画側は `ctx.currentTime - t0` で現在秒を取り、timeline から現在の cue と経過割合を引く。
    MV の `onTick(step)` に相当するものは無く、`timeSec` だけを渡す。
 
@@ -242,7 +246,8 @@ MvMaker（8.6k 行）は流用せず、小さく作る。画面は「見本」�
 3. **見た目と書き出し**: 背景・字幕スタイル・BGM（MML）・タイトル・クレジット。mp4 書き出し（§7 (c)）。
 
 プレビューは MvMaker と同じく**ヘッダーの下に出しっぱなし**（タブを切り替えても消えない）。
-台本を編集すると `TalkPlayer` は計画済みの時間軸を捨てて idle に戻る（再生中・準備中は触らない）。
+台本を編集すると `TalkPlayer` は計画済みの時間軸を捨てて idle に戻る（再生中・準備中なら、進行中の
+開始処理を無効にして発話を止めてから捨てる。見本の切り替えで古い台本の声が鳴り続けないように）。
 
 パネルの見た目は [[gamemaker-panel-design]] に従う（グレーセクション、青の参照ボタン、紫は使わない）。
 自動保存は `lib/history.ts` に `"talk"` を足して使う。

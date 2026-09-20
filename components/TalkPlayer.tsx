@@ -44,6 +44,8 @@ interface PlayerRuntime {
 	t0: number;
 	/** 一時停止中の位置（行の頭の秒）。 */
 	pausedAt: number;
+	/** 再生中に時計が戻れる下限（＝いま始めた行の頭の秒）。合成待ちで声が遅れたとき用。 */
+	minSec: number;
 	audioNow: () => number;
 	/** 開始の世代。連続タップで古い非同期の開始が新しい開始を上書きしないようにする。 */
 	startGen: number;
@@ -62,6 +64,7 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 		session: null,
 		t0: 0,
 		pausedAt: 0,
+		minSec: 0,
 		audioNow: () => 0,
 		startGen: 0,
 	});
@@ -78,7 +81,8 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 
 	const currentTimeSec = useCallback((): number => {
 		const r = rt.current;
-		if (r.status === "playing") return r.audioNow() - r.t0;
+		if (r.status === "playing") return Math.max(r.minSec, r.audioNow() - r.t0);
+		if (r.status === "preparing") return r.minSec;
 		if (r.status === "paused") return r.pausedAt;
 		if (r.status === "ended") return r.timeline?.totalSec ?? 0;
 		return 0;
@@ -101,20 +105,23 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 	}, []);
 
 	// 台本が編集されたら計画（時間軸）を捨てる。エディタはプレビューを出しっぱなしにするので、
-	// これが無いと最初に計画した台本のまま鳴り続ける。再生中・準備中は触らない
-	// （鳴っている発話と時間軸がずれる）。
+	// これが無いと最初に計画した台本のまま鳴り続ける。再生中・準備中なら止めてから捨てる
+	// （見本の切り替えなど。鳴らしたままだと古い台本の声と新しい絵がずれる）。
 	const shownManifest = useRef(manifest);
 	useEffect(() => {
 		if (shownManifest.current === manifest) return;
 		shownManifest.current = manifest;
 		const r = rt.current;
-		if (r.status === "playing" || r.status === "preparing") return;
+		r.startGen++; // 進行中の開始処理（準備・合成待ち）を無効にする
+		stopSession();
 		r.timeline = null;
 		r.pausedAt = 0;
+		r.minSec = 0;
 		setTimeline(null);
 		setProgressSec(0);
+		setPrepSync(null);
 		if (r.status !== "idle") setStatusSync("idle");
-	}, [manifest, setStatusSync]);
+	}, [manifest, setStatusSync, setPrepSync, stopSession]);
 
 	// 画像の先読み（声とは独立）
 	useEffect(() => {
@@ -187,6 +194,7 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 			const r = rt.current;
 			const gen = ++r.startGen;
 			stopSession();
+			r.minSec = r.timeline?.cues[fromIndex]?.startSec ?? 0;
 			setStatusSync("preparing");
 			const tl = await ensureTimeline();
 			if (gen !== r.startGen) return; // 待っている間に別の開始/停止があった
@@ -196,17 +204,22 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 			}
 			const idx = Math.max(0, Math.min(tl.cues.length - 1, fromIndex));
 			const studio = await getStudio();
+			// 先頭の行の合成を待つあいだの表示（待たずに始めると頭が欠ける・無音になる）。
+			// 待っているあいだはこれから始める行を映す（時計の下限を先に入れておく）。
+			r.minSec = tl.cues[idx]?.startSec ?? 0;
+			setPrepSync({ text: "まもなく再生します…" });
 			const session = await scheduleTalkSpeech(manifest, tl, idx);
 			if (gen !== r.startGen) {
 				session.stop();
 				return;
 			}
+			setPrepSync(null);
 			r.session = session;
 			r.t0 = session.t0;
 			r.audioNow = () => studio.audioContext.currentTime;
 			setStatusSync("playing");
 		},
-		[ensureTimeline, manifest, stopSession, setStatusSync],
+		[ensureTimeline, manifest, stopSession, setStatusSync, setPrepSync],
 	);
 
 	const handleToggle = useCallback(() => {
