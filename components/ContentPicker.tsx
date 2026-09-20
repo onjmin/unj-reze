@@ -12,6 +12,12 @@ import {
 	youtubeRefFromUrl,
 } from "@/lib/asset-ref";
 import { getAvatarInfo } from "@/lib/avatar";
+import {
+	buildEmojiRef,
+	EMOJI_CATEGORIES,
+	loadRecentEmojis,
+	pushRecentEmoji,
+} from "@/lib/emoji-palette";
 import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
 import { MINECRAFT_SKIN_PRESETS } from "@/lib/minecraft-model";
 import {
@@ -43,6 +49,9 @@ export interface PickResult {
 	 *  解釈できるようにするため、タブごとに立てるフラグ（汎用の「画像を参照」経路でスキンを選んでも
 	 *  平たい1枚画像テクスチャにならないようにする）。 */
 	skin?: boolean;
+	/** 「絵文字」タブからの選択。ref は `emoji:X`、url は無し。2Dゲーム/yume25d のように絵文字を
+	 *  spriteRef と別フィールドで持つ呼び出し側は、このフラグで分岐して emoji 欄へ書き込む。 */
+	emoji?: string;
 }
 
 interface ContentPickerProps {
@@ -58,11 +67,15 @@ interface ContentPickerProps {
 	usedAssets?: { ref: string; url?: string; label: string }[];
 	/** mode==='bgm' のときのみ有効。現在選択済みのBGM/効果音の参照。再編集時にタブとURL/MML欄へ復元する。 */
 	currentRef?: string;
+	/** mode==='image' のときのみ有効。対象が絵文字（描画側で fillText する仮置き素材）を受け付けるときに
+	 *  true にすると「絵文字」タブが出る。背景・タイル・目/口のように画像しか描けない対象では出さない。 */
+	allowEmoji?: boolean;
 	onPick: (result: PickResult) => void;
 	onClose: () => void;
 }
 
 type ImageTab =
+	| "emoji"
 	| "posts"
 	| "slice"
 	| "history"
@@ -141,6 +154,7 @@ export default function ContentPicker({
 	userId,
 	usedAssets = [],
 	currentRef,
+	allowEmoji = false,
 	onPick,
 	onClose,
 }: ContentPickerProps) {
@@ -158,9 +172,27 @@ export default function ContentPicker({
 	const [imageUrlPreview, setImageUrlPreview] = useState<string | null>(null);
 	// 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
 	// 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
+	// 「絵文字」タブは対象によって出ないので、出ない対象で前回のタブが emoji のままなら mySheet へ振り替える。
 	const [imageTab, setImageTab] = useState<ImageTab>(
-		REMOVED_IMAGE_TABS.has(lastImageTab) ? "mySheet" : lastImageTab,
+		REMOVED_IMAGE_TABS.has(lastImageTab) ||
+			(lastImageTab === "emoji" && !allowEmoji)
+			? "mySheet"
+			: lastImageTab,
 	);
+	// 「絵文字」タブ用。カテゴリ選択・自由入力・最近使った絵文字（localStorage）。
+	const [emojiCategory, setEmojiCategory] = useState(EMOJI_CATEGORIES[0].id);
+	const [emojiInput, setEmojiInput] = useState("");
+	// モーダルはクリックで開くのでクライアントでしか初期化されない（localStorage が無くても空配列）。
+	const [recentEmojis] = useState<string[]>(() =>
+		mode === "image" && allowEmoji ? loadRecentEmojis() : [],
+	);
+	const pickEmoji = (raw: string) => {
+		const emoji = raw.trim();
+		if (!emoji) return;
+		stopAllPreviews();
+		pushRecentEmoji(emoji);
+		onPick({ ref: buildEmojiRef(emoji), label: emoji, emoji });
+	};
 	const allowedBgmTabs =
 		bgmKind === "sfx" ? SFX_TABS : bgmKind === "mml" ? MML_TABS : BGM_TABS;
 	// 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
@@ -705,6 +737,14 @@ export default function ContentPicker({
 							>
 								単色カラー
 							</button>
+							{allowEmoji && (
+								<button
+									className={tabBtn(imageTab === "emoji")}
+									onClick={() => changeImageTab("emoji")}
+								>
+									絵文字
+								</button>
+							)}
 							{/* 内蔵素材（リポジトリ同梱）と、rpgen-search 由来の外部素材を分けて示す。 */}
 							<button
 								className={tabBtn(imageTab === "local")}
@@ -1159,6 +1199,77 @@ export default function ContentPicker({
 							>
 								この単色カラーを設定
 							</button>
+						</div>
+					)}
+
+					{/* Image: 絵文字（仮置き素材を別の絵文字に選び直す） */}
+					{mode === "image" && allowEmoji && imageTab === "emoji" && (
+						<div className="space-y-3 p-1">
+							<p className="text-[10px] text-gray-500">
+								画像の代わりに絵文字1文字をそのまま表示します。あとから「画像を参照」で画像に差し替えられます。
+							</p>
+							<div className="flex items-center gap-1.5">
+								<input
+									value={emojiInput}
+									onChange={(e) => setEmojiInput(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === "Enter") pickEmoji(emojiInput);
+									}}
+									placeholder="直接入力（例: 🍄）"
+									className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-base text-gray-200 outline-none focus:border-blue-500"
+								/>
+								<button
+									onClick={() => pickEmoji(emojiInput)}
+									disabled={!emojiInput.trim()}
+									className="shrink-0 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold"
+								>
+									設定
+								</button>
+							</div>
+							{recentEmojis.length > 0 && (
+								<div>
+									<label className="block text-[11px] font-bold text-gray-300 mb-1.5">
+										最近使った絵文字
+									</label>
+									<div className="grid grid-cols-8 gap-1">
+										{recentEmojis.map((em, i) => (
+											<button
+												key={`${em}-${i}`}
+												onClick={() => pickEmoji(em)}
+												className="aspect-square rounded-lg bg-gray-900 border border-gray-800 hover:border-blue-500 text-2xl leading-none flex items-center justify-center font-emoji"
+											>
+												{em}
+											</button>
+										))}
+									</div>
+								</div>
+							)}
+							<div className="flex flex-wrap gap-1">
+								{EMOJI_CATEGORIES.map((c) => (
+									<button
+										key={c.id}
+										onClick={() => setEmojiCategory(c.id)}
+										className={`px-2 py-1 rounded-md text-[11px] font-bold transition ${emojiCategory === c.id ? "bg-blue-600 text-white" : "bg-gray-900 text-gray-400 hover:bg-gray-100/10"}`}
+									>
+										{c.label}
+									</button>
+								))}
+							</div>
+							<div className="grid grid-cols-8 gap-1">
+								{(
+									EMOJI_CATEGORIES.find((c) => c.id === emojiCategory) ??
+									EMOJI_CATEGORIES[0]
+								).emojis.map((em, i) => (
+									<button
+										key={`${em}-${i}`}
+										onClick={() => pickEmoji(em)}
+										title={em}
+										className="aspect-square rounded-lg bg-gray-900 border border-gray-800 hover:border-blue-500 text-2xl leading-none flex items-center justify-center font-emoji"
+									>
+										{em}
+									</button>
+								))}
+							</div>
 						</div>
 					)}
 

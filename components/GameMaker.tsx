@@ -12091,6 +12091,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const src = type === 'mml' ? (res.rawMml || res.ref.replace(/^mml:/, '')) : type === 'direct' ? res.ref.replace(/^direct:/, '') : res.url;
       return { ref: res.ref, src, type };
     };
+    // 「絵文字」タブからの選択。2D/yume25d は絵文字を spriteRef/imageRef と別フィールドで持ち、
+    // 画像が優先されるので、絵文字を書くと同時に画像参照を外す（外さないと絵文字が見えない）。
+    if (res.emoji !== undefined) {
+      const emoji = res.emoji;
+      if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, emoji, spriteRef: undefined, spriteUrl: undefined } }));
+      else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, emoji, spriteRef: undefined, spriteUrl: undefined } : o) })); }
+      else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, emoji, spriteRef: undefined, spriteUrl: undefined }));
+      else if (target.t === 'yumeTex') {
+        setGameData(p => {
+          if (!p.layout25d) return p;
+          const textures = { ...p.layout25d.textures };
+          if (textures[target.id]) textures[target.id] = { ...textures[target.id], emoji, imageRef: undefined, imageUrl: undefined };
+          return { ...p, layout25d: { ...p.layout25d, textures } };
+        });
+      }
+      return;
+    }
     if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url } }));
     else if (target.t === 'cmdChangeSprite' || target.t === 'cmdImage' || target.t === 'cmdBgm' || target.t === 'cmdSfx') { if (cmdPickCallbackRef.current) cmdPickCallbackRef.current(res); }
     else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, spriteRef: res.ref, spriteUrl: res.url } : o) })); }
@@ -19315,6 +19332,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         addUsed(gameData.player.spriteRef, gameData.player.spriteUrl, '主人公');
         for (const o of gameData.objects) addUsed(o.spriteRef, o.spriteUrl, o.name || `オブジェ: ${o.emoji}`);
         for (const [id, t] of Object.entries(gameData.tiles)) addUsed(t.imageRef, t.imageUrl, t.name || `タイル#${id}`);
+        // 絵文字を仮置きにできる対象（emoji フィールドを持ち、描画側が fillText でフォールバックするもの）だけ
+        // 「絵文字」タブを出す。背景・タイル・エフェクト・マイクラスキンは画像専用。
+        const t = picker.target;
+        const allowEmoji = t.t === 'player' || t.t === 'selObjSprite' || t.t === 'objsprite'
+          || (t.t === 'yumeTex' && gameData.layout25d?.textures[t.id]?.kind === 'sprite');
 
         return (
           <ContentPicker
@@ -19322,6 +19344,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             bgmKind={picker.target.t === 'sfx' ? 'sfx' : 'bgm'}
             userId={userId}
             usedAssets={usedImageAssets}
+            allowEmoji={allowEmoji}
             onPick={applyPick}
             onClose={() => setPicker(null)}
           />

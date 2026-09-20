@@ -29,6 +29,18 @@ export const TALK_EXPRESSIONS: ReadonlyArray<{
 export type TalkEmotion = "neutral" | "happy" | "sad" | "angry";
 /** 話し方（koe の SpeakingStyleName と同じ値）。 */
 export type TalkStyle = "neutral" | "calm" | "lively";
+export const TALK_STYLES: ReadonlyArray<{ value: TalkStyle; label: string }> = [
+	{ value: "neutral", label: "ふつう" },
+	{ value: "calm", label: "おだやか" },
+	{ value: "lively", label: "いきいき" },
+];
+/** 声の感情の表示名（TalkEmotion）。 */
+export const TALK_EMOTIONS: ReadonlyArray<{ value: TalkEmotion; label: string }> = [
+	{ value: "neutral", label: "ふつう" },
+	{ value: "happy", label: "うれしい" },
+	{ value: "sad", label: "かなしい" },
+	{ value: "angry", label: "おこり" },
+];
 
 /** 表情から声の感情を引く（cue.emotion 省略時）。 */
 export const emotionForExpression = (expr?: TalkExpression): TalkEmotion => {
@@ -124,6 +136,8 @@ export interface TalkCue {
 	expression?: TalkExpression;
 	/** 声の感情。省略時は expression から引く。 */
 	emotion?: TalkEmotion;
+	/** この行だけの話し方。省略時はキャラの voice.style。 */
+	style?: TalkStyle;
 	/** この行の後の間（秒）。省略時 DEFAULT_TALK_GAP_SEC。 */
 	gapSec?: number;
 	/** 字幕だけ変えたいとき（読み上げは text）。 */
@@ -157,6 +171,16 @@ export const createDefaultTalkStage = (): TalkStage => ({
 /** 読み上げが無い行の代用長（秒）。文字数 × 0.12 + 0.6。 */
 export const estimateCueSec = (text: string): number =>
 	Math.max(0.8, text.replace(/\s/g, "").length * 0.12 + 0.6);
+
+/** 行の声の感情（cue.emotion 省略時は表情から）。 */
+export const cueEmotion = (cue: Pick<TalkCue, "emotion" | "expression">): TalkEmotion =>
+	cue.emotion ?? emotionForExpression(cue.expression);
+
+/** 行の話し方（行の指定 → キャラの既定 → neutral）。 */
+export const cueStyle = (
+	cue: Pick<TalkCue, "style">,
+	character: Pick<TalkCharacter, "voice"> | undefined,
+): TalkStyle => cue.style ?? character?.voice.style ?? "neutral";
 
 export const talkCharacterOf = (
 	manifest: TalkManifest,

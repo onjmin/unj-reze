@@ -17,12 +17,12 @@ import { DEFAULT_MV_BLINK } from "@/lib/mv-blink";
 import type { MvAssetRef, MvVowel } from "@/lib/mv-config";
 import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import { planTalkCues, registerTalkVoicebanks } from "@/lib/talk-audio";
-import { applyTalkScriptText, buildTalkScriptAiPrompt, parseTalkScriptText, TALK_SCRIPT_HELP_TEXT, talkManifestToScriptText } from "@/lib/talk-script-text";
 import {
-	createDefaultTalkStage,
+	cueEmotion,
+	cueStyle,
 	DEFAULT_TALK_GAP_SEC,
-	emotionForExpression,
 	TALK_EXPRESSIONS,
+	TALK_STYLES,
 	TALK_W,
 	type TalkCharacter,
 	type TalkCue,
@@ -31,6 +31,8 @@ import {
 	type TalkManifest,
 	type TalkStyle,
 } from "@/lib/talk-config";
+import { createDefaultTalkManifest, TALK_PRESETS } from "@/lib/talk-presets";
+import { applyTalkScriptText, buildTalkScriptAiPrompt, parseTalkScriptText, TALK_SCRIPT_HELP_TEXT, talkManifestToScriptText } from "@/lib/talk-script-text";
 
 export interface TalkMakerProps {
 	onClose: () => void;
@@ -51,7 +53,7 @@ const BTN_ADD = "w-full flex items-center justify-center gap-1 rounded border bo
 const BTN_DEL = "p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10";
 const BTN_ICON = "p-1 rounded text-gray-400 hover:text-white hover:bg-gray-700/60 disabled:opacity-30";
 
-type Tab = "script" | "chars" | "look";
+type Tab = "preset" | "script" | "chars" | "look";
 
 /** 参照先のフィールド（ContentPicker の結果を入れる先）。 */
 type PickTarget =
@@ -64,39 +66,6 @@ type PickTarget =
 const CUSTOM_VOICE_ADD = "+custom";
 
 const newId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
-
-export const createDefaultTalkManifest = (): TalkManifest => ({
-	version: 1,
-	title: "",
-	stage: createDefaultTalkStage(),
-	characters: [
-		{
-			id: "a",
-			name: "ボケ",
-			color: "#f9a8d4",
-			side: "left",
-			scale: 1,
-			y: 0,
-			faces: { neutral: { ref: "emoji:🐱" }, happy: { ref: "emoji:😸" }, sad: { ref: "emoji:😿" }, angry: { ref: "emoji:😾" }, surprised: { ref: "emoji:🙀" } },
-			voice: { model: DEFAULT_VOICE_MODEL, style: "lively" },
-		},
-		{
-			id: "b",
-			name: "ツッコミ",
-			color: "#93c5fd",
-			side: "right",
-			scale: 1,
-			y: 0,
-			flipH: true,
-			faces: { neutral: { ref: "emoji:🐶" }, happy: { ref: "emoji:🐕" }, angry: { ref: "emoji:🐺" } },
-			voice: { model: "teto", pitchOffset: -2, style: "calm" },
-		},
-	],
-	cues: [
-		{ id: newId("c"), speaker: "a", text: "" },
-		{ id: newId("c"), speaker: "b", text: "" },
-	],
-});
 
 /** 参照のサムネ（絵文字はそのまま、画像は img、psd は文字）。 */
 function RefThumb({ asset, size = 40 }: { asset?: MvAssetRef; size?: number }) {
@@ -128,7 +97,8 @@ function RefThumb({ asset, size = 40 }: { asset?: MvAssetRef; size?: number }) {
 
 export default function TalkMaker({ onClose, onSave, userId, initialManifest, isEditing, talkId }: TalkMakerProps) {
 	const [manifest, setManifest] = useState<TalkManifest>(() => initialManifest ?? createDefaultTalkManifest());
-	const [tab, setTab] = useState<Tab>("script");
+	// 新規作成はまず見本を選ぶところから（MvMaker と同じ）。編集・自動保存の復元は台本から。
+	const [tab, setTab] = useState<Tab>(initialManifest ? "script" : "preset");
 	const [picker, setPicker] = useState<PickTarget | null>(null);
 	const [voiceGroups, setVoiceGroups] = useState<VoiceModelGroup[] | null>(null);
 	const [measuring, setMeasuring] = useState(false);
@@ -151,7 +121,10 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		if (initialManifest || restoredRef.current) return;
 		restoredRef.current = true;
 		void getAutosave<TalkManifest>(storageKey).then((saved) => {
-			if (saved?.data?.version === 1 && saved.data.cues.length > 0) setManifest(saved.data);
+			if (saved?.data?.version === 1 && saved.data.cues.length > 0) {
+				setManifest(saved.data);
+				setTab("script");
+			}
 		});
 	}, [initialManifest, storageKey]);
 	useEffect(() => {
@@ -238,8 +211,8 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 			const h = await studio.speak(text, {
 				model: ch.voice.model,
 				pitchOffset: ch.voice.pitchOffset ?? 0,
-				style: ch.voice.style ?? "neutral",
-				emotion: cue.emotion ?? emotionForExpression(cue.expression),
+				style: cueStyle(cue, ch),
+				emotion: cueEmotion(cue),
 				signal: abort.signal,
 			});
 			if (!h) { if (!abort.signal.aborted) stopSpeak(); return; }
@@ -266,6 +239,15 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		} finally {
 			setMeasuring(false);
 		}
+	};
+
+	// ── 見本 ──
+	const hasContent = manifest.cues.some((c) => c.text.trim()) || manifest.title.trim() !== "";
+	const applyPreset = (build: () => TalkManifest, name: string) => {
+		if (hasContent && !confirm(`「${name}」に作り替えます。いまの台本は失われますが、よろしいですか？`)) return;
+		stopSpeak();
+		setManifest(build());
+		setTab("script");
 	};
 
 	// ── 台本のテキスト入出力 ──
@@ -340,7 +322,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 
 			{/* タブ */}
 			<div className="shrink-0 flex gap-1 px-3 pt-2">
-				{([["script", "台本"], ["chars", "キャラ"], ["look", "見た目"]] as [Tab, string][]).map(([k, label]) => (
+				{([["preset", "見本"], ["script", "台本"], ["chars", "キャラ"], ["look", "見た目"]] as [Tab, string][]).map(([k, label]) => (
 					<button
 						key={k}
 						type="button"
@@ -353,6 +335,26 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 			</div>
 
 			<div className="flex-1 overflow-y-auto px-3 pb-24 pt-2 space-y-3">
+				{tab === "preset" && (
+					<div className="space-y-2">
+						<p className="text-[11px] text-gray-400 leading-relaxed">
+							まず見本をひとつ選びます。「台本」タブでセリフを書き換え、「キャラ」タブで絵と声を差し替えれば完成です。
+							見本は表情・話し方・間の使い方の手本にもなっています。
+						</p>
+						{TALK_PRESETS.map((p) => (
+							<button
+								key={p.name}
+								type="button"
+								onClick={() => applyPreset(p.build, p.name)}
+								className="w-full rounded-lg border border-gray-700 bg-gray-900/60 hover:bg-gray-100/5 p-3 text-left"
+							>
+								<p className="text-[13px] font-bold text-gray-100">{p.name}</p>
+								<p className="mt-1 text-[11px] leading-relaxed text-gray-400">{p.description}</p>
+							</button>
+						))}
+					</div>
+				)}
+
 				{tab === "script" && (
 					<div className="space-y-2">
 						<div className="flex items-center justify-between text-[11px] text-gray-400">
@@ -401,6 +403,15 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 											className="bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none"
 										>
 											{TALK_EXPRESSIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+										</select>
+										<select
+											value={cue.style ?? ""}
+											onChange={(e) => updateCue(cue.id, { style: e.target.value ? (e.target.value as TalkStyle) : undefined })}
+											className="bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none"
+											title="この行だけの話し方（空欄はキャラの設定に従う）"
+										>
+											<option value="">話し方: キャラの設定（{TALK_STYLES.find((o) => o.value === (ch?.voice.style ?? "neutral"))?.label}）</option>
+											{TALK_STYLES.map((o) => <option key={o.value} value={o.value}>話し方: {o.label}</option>)}
 										</select>
 										<label className="flex items-center gap-1 text-[10px] text-gray-400">
 											間
@@ -580,6 +591,9 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 				<ContentPicker
 					mode="image"
 					userId={userId}
+					// 表情は talk-engine が emoji: 参照を fillText で描けるので絵文字タブを出す。
+					// 目・口・背景は画像を重ねる前提なので画像だけ。
+					allowEmoji={picker.kind === "face"}
 					onPick={handlePick}
 					onClose={() => setPicker(null)}
 				/>

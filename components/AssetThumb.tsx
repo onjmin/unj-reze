@@ -20,12 +20,14 @@ export default function AssetThumb({
 }) {
 	const cvRef = useRef<HTMLCanvasElement>(null);
 	const walk = useMemo(() => parseWalkRef(refStr), [refStr]);
+	// emoji: 参照は画像を持たないので、そのまま文字で出す（使用履歴・かけあい動画の表情など）。
+	const emoji = refStr.startsWith("emoji:") ? refStr.slice(6) : null;
 	const imgUrl =
 		url ?? (walk?.source.kind === "url" ? walk.source.url : undefined);
 
 	useEffect(() => {
 		const cv = cvRef.current;
-		if (!cv || !imgUrl) return;
+		if (!cv || !imgUrl || emoji) return;
 		const ctx = cv.getContext("2d");
 		if (!ctx) return;
 
@@ -119,6 +121,17 @@ export default function AssetThumb({
 		size,
 		onError,
 	]);
+
+	if (emoji) {
+		return (
+			<div
+				className="w-full h-full flex items-center justify-center font-emoji leading-none"
+				style={{ fontSize: size * 0.6 }}
+			>
+				{emoji}
+			</div>
+		);
+	}
 
 	if (!walk && !(url && url.includes("#"))) {
 		return url ? (

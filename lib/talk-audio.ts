@@ -9,7 +9,8 @@ import type { SpeechHandle } from "@onjmin/dtm";
 import { getStudio } from "./dtm";
 import {
 	collectTalkCustomVoices,
-	emotionForExpression,
+	cueEmotion,
+	cueStyle,
 	type TalkEmotion,
 	type TalkManifest,
 	talkCharacterOf,
@@ -29,7 +30,7 @@ export const collectTalkVoiceNeeds = (manifest: TalkManifest): TalkVoiceNeeds =>
 		const ch = talkCharacterOf(manifest, cue.speaker);
 		if (!ch) continue;
 		models.add(ch.voice.model);
-		const emotion = cue.emotion ?? emotionForExpression(cue.expression);
+		const emotion = cueEmotion(cue);
 		if (emotion !== "neutral") emotions.add(emotion);
 	}
 	return { models: [...models], emotions: [...emotions] };
@@ -97,8 +98,8 @@ export async function planTalkCues(
 			try {
 				plan = await studio.planSpeech(body, {
 					model: ch.voice.model,
-					style: ch.voice.style ?? "neutral",
-					emotion: cue.emotion ?? emotionForExpression(cue.expression),
+					style: cueStyle(cue, ch),
+					emotion: cueEmotion(cue),
 				});
 			} catch (e) {
 				console.warn("[talk] 計画に失敗しました", cue.id, e);
@@ -151,8 +152,8 @@ export async function scheduleTalkSpeech(
 			.speak(entry.cue.text.trim(), {
 				model: ch.voice.model,
 				pitchOffset: ch.voice.pitchOffset ?? 0,
-				style: ch.voice.style ?? "neutral",
-				emotion: entry.cue.emotion ?? emotionForExpression(entry.cue.expression),
+				style: cueStyle(entry.cue, ch),
+				emotion: cueEmotion(entry.cue),
 				at: t0 + entry.startSec,
 				signal: abort.signal,
 			})

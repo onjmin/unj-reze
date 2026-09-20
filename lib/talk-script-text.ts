@@ -12,34 +12,34 @@
 //   # 先頭が # か // の行はコメント
 //
 // 話者の後の括弧に、表情（ふつう/うれしい/かなしい/おこり/おどろき か英語値）、
-// 声（声:happy）、間（間0.5 / 0.5秒 / 0.5s）を「,」「、」空白区切りで並べる。
+// 声（声:happy）、話し方（話し方:いきいき）、間（間0.5 / 0.5秒 / 0.5s）を「,」「、」空白区切りで並べる。
 // 字幕だけ変えたいときは「本文 ｜ 字幕」。
 // 話者は登場人物の名前で引く（無い名前は新しいキャラとして足す）。
 
 import {
 	DEFAULT_TALK_GAP_SEC,
+	TALK_EMOTIONS,
 	TALK_EXPRESSIONS,
+	TALK_STYLES,
 	type TalkCharacter,
 	type TalkCue,
 	type TalkEmotion,
 	type TalkExpression,
 	type TalkManifest,
+	type TalkStyle,
 } from "./talk-config";
 
-const EMOTIONS: ReadonlyArray<{ value: TalkEmotion; label: string }> = [
-	{ value: "neutral", label: "ふつう" },
-	{ value: "happy", label: "うれしい" },
-	{ value: "sad", label: "かなしい" },
-	{ value: "angry", label: "おこり" },
-];
-
 const expressionLabel = (v: TalkExpression): string => TALK_EXPRESSIONS.find((o) => o.value === v)?.label ?? v;
-const emotionLabel = (v: TalkEmotion): string => EMOTIONS.find((o) => o.value === v)?.label ?? v;
+const emotionLabel = (v: TalkEmotion): string => TALK_EMOTIONS.find((o) => o.value === v)?.label ?? v;
+const styleLabel = (v: TalkStyle): string => TALK_STYLES.find((o) => o.value === v)?.label ?? v;
 
 const parseExpression = (s: string): TalkExpression | undefined =>
 	TALK_EXPRESSIONS.find((o) => o.value === s || o.label === s)?.value;
 const parseEmotion = (s: string): TalkEmotion | undefined =>
-	EMOTIONS.find((o) => o.value === s || o.label === s)?.value;
+	TALK_EMOTIONS.find((o) => o.value === s || o.label === s)?.value;
+// 話し方は「おだやか（朗読調）」のような長い表示名でも読めるよう前方一致にする
+const parseStyle = (s: string): TalkStyle | undefined =>
+	TALK_STYLES.find((o) => o.value === s || s.startsWith(o.label))?.value;
 
 const fmtNum = (n: number): string => String(Math.round(n * 100) / 100);
 
@@ -54,6 +54,7 @@ export const talkManifestToScriptText = (manifest: TalkManifest): string => {
 		const attrs: string[] = [];
 		if (cue.expression && cue.expression !== "neutral") attrs.push(expressionLabel(cue.expression));
 		if (cue.emotion) attrs.push(`声:${emotionLabel(cue.emotion)}`);
+		if (cue.style) attrs.push(`話し方:${styleLabel(cue.style)}`);
 		if (cue.gapSec !== undefined && cue.gapSec !== DEFAULT_TALK_GAP_SEC) attrs.push(`間${fmtNum(cue.gapSec)}`);
 		const head = `${nameOf(cue.speaker)}${attrs.length ? `(${attrs.join(", ")})` : ""}`;
 		const body = cue.subtitle?.trim() ? `${cue.text} ｜ ${cue.subtitle.trim()}` : cue.text;
@@ -126,6 +127,13 @@ const parseAttrs = (attrs: string, lineNo: number, warnings: string[]): Partial<
 			else warnings.push(`${lineNo} 行目: 声「${emo[1]}」が分かりません`);
 			continue;
 		}
+		const sty = /^(?:話し方|style)\s*[:：=]\s*(.+)$/i.exec(tok);
+		if (sty) {
+			const v = parseStyle(sty[1].trim());
+			if (v) out.style = v;
+			else warnings.push(`${lineNo} 行目: 話し方「${sty[1]}」が分かりません`);
+			continue;
+		}
 		const gap = /^(?:間|gap)\s*[:：=]?\s*([\d.]+)\s*(?:秒|s)?$/i.exec(tok) ?? /^([\d.]+)\s*(?:秒|s)$/i.exec(tok);
 		if (gap) {
 			const n = Number(gap[1]);
@@ -133,7 +141,7 @@ const parseAttrs = (attrs: string, lineNo: number, warnings: string[]): Partial<
 			else warnings.push(`${lineNo} 行目: 間「${gap[1]}」が数字ではありません`);
 			continue;
 		}
-		warnings.push(`${lineNo} 行目: 「${tok}」は表情でも間でもありません`);
+		warnings.push(`${lineNo} 行目: 「${tok}」は表情・声・話し方・間のどれでもありません`);
 	}
 	return out;
 };
@@ -228,7 +236,12 @@ export const parseTalkScriptText = (text: string, manifest: TalkManifest): TalkS
 		const prev = pool.get(`${c.speaker}\n${c.text}`)?.shift();
 		if (!prev) continue;
 		c.id = prev.id;
-		if (prev.measuredSec !== undefined && (prev.emotion ?? "") === (c.emotion ?? "") && (prev.expression ?? "") === (c.expression ?? "")) {
+		if (
+			prev.measuredSec !== undefined &&
+			(prev.emotion ?? "") === (c.emotion ?? "") &&
+			(prev.expression ?? "") === (c.expression ?? "") &&
+			(prev.style ?? "") === (c.style ?? "")
+		) {
 			c.measuredSec = prev.measuredSec;
 		}
 	}
@@ -288,6 +301,7 @@ export const TALK_SCRIPT_HELP_TEXT = `かけあい動画の台本は、次の書
 ツッコミ(おこり, 間0.8)「なんでやねん」
 - 表情: ふつう / うれしい / かなしい / おこり / おどろき（英語 neutral / happy / sad / angry / surprised も可）。省略時は「ふつう」。
 - 声の感情: 声:うれしい のように書きます（ふつう / うれしい / かなしい / おこり）。省略時は表情から自動で決まるので、ふつうは書きません。
+- 話し方: 話し方:いきいき のように書きます（ふつう / おだやか / いきいき。英語 neutral / calm / lively も可）。省略時はそのキャラの既定の話し方です。
 - 間: 間0.8 / 0.8秒 / 0.8s（この行の後に空ける秒数、0〜5）。省略時は 0.35 秒。
 
 【複数行の本文】「 を閉じずに行を終えると、」 で終わる行まで同じセリフの続きになります。
@@ -326,6 +340,6 @@ ${current ? `\n# 現在の台本（続きを書く・書き直す場合の参考
 - 説明文は不要です。台本のテキストだけをコードブロックで出力してください。
 - 1 行 1 セリフ、「話者「本文」」の形で書き、話者は上の登場人物の名前だけを使ってください。
 - 1 セリフは 1〜2 文（40 文字程度まで）にし、長い説明は複数のセリフに分けてください。
-- 表情は変化があるところにだけ付け、間は必要なところにだけ付けてください。
+- 表情・話し方は変化があるところにだけ付け、間は必要なところにだけ付けてください。
 - そのまま「台本をテキストで編集」の欄に貼り付けて使います。`;
 };
