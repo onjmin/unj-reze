@@ -156,7 +156,9 @@ cues → (全行を計画+合成) → durations → timeline { cue, startSec, en
 1 フレーム = `drawTalkFrame(ctx, manifest, timeline, timeSec)`:
 
 1. 背景（`stage.bg` か `bgColor`）。
-2. キャラ 2 人。話している側は `expression` の立ち絵、聞いている側は `neutral`。
+2. キャラ 2 人。話している側はその行の `expression` の立ち絵、聞いている側は**直前の自分の
+   セリフの表情**を保つ（まだ喋っていなければ `neutral`）。行が変わるたびに ふつう へ戻すと
+   表情がコロコロして不自然なので、次に自分が喋るまで持ち越す。
    話者は少し前（scale ×1.03）・聞き手は少し暗く（alpha 0.85）して「誰が話しているか」を
    画面だけで分からせる。
 3. 口パク。話者は「音の有無」で開閉させるのが第一段階。第二段階で読み上げ計画の

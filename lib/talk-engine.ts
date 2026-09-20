@@ -120,6 +120,24 @@ const speakingStateAt = (timeline: TalkTimeline | null, timeSec: number): Speaki
 	return { current, tInCue, speaking: tInCue < current.durationSec };
 };
 
+/**
+ * upTo 行目までで、そのキャラが最後に見せた表情。聞き手は直前の自分のセリフの表情を
+ * 保ったままにする（行が変わるたびに ふつう へ戻るとコロコロして不自然なので）。
+ * まだ一度も喋っていなければ ふつう。話者に対しては、いま喋っている行の表情そのもの。
+ */
+function expressionOf(
+	timeline: TalkTimeline | null,
+	upTo: number,
+	charId: string,
+): TalkExpression {
+	if (!timeline) return "neutral";
+	for (let i = Math.min(upTo, timeline.cues.length - 1); i >= 0; i--) {
+		const c = timeline.cues[i];
+		if (c.cue.speaker === charId) return c.cue.expression ?? "neutral";
+	}
+	return "neutral";
+}
+
 export function drawTalkFrame(
 	ctx: CanvasRenderingContext2D,
 	manifest: TalkManifest,
@@ -133,7 +151,7 @@ export function drawTalkFrame(
 
 	const state = speakingStateAt(timeline, timeSec);
 	const speakerId = state.current?.cue.speaker ?? null;
-	const expression: TalkExpression = state.current?.cue.expression ?? "neutral";
+	const upTo = state.current?.index ?? -1;
 
 	// 聞き手を先に、話者を後に（手前に）描く。
 	const ordered = [...manifest.characters].sort((a, b) => {
@@ -142,10 +160,9 @@ export function drawTalkFrame(
 		return sa - sb;
 	});
 	for (const ch of ordered) {
-		const isSpeaker = ch.id === speakerId;
 		drawCharacter(ctx, ch, {
-			expression: isSpeaker ? expression : "neutral",
-			isSpeaker,
+			expression: expressionOf(timeline, upTo, ch.id),
+			isSpeaker: ch.id === speakerId,
 			timeSec,
 			state,
 		});
