@@ -5,7 +5,7 @@
 // 画面は 3 枚だけ（台本 / キャラ / 見た目）。MvMaker は流用せず小さく作る。
 // パネルの見た目は GameMaker の規約（グレーセクション・破線の追加・青の参照ボタン・紫は使わない）に合わせる。
 
-import { ChevronDown, ChevronUp, Image as ImageIcon, Play, Plus, Save, Square, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, FileText, Image as ImageIcon, Play, Plus, Save, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ContentPicker, { type PickResult } from "@/components/ContentPicker";
 import TalkPlayer from "@/components/TalkPlayer";
@@ -17,6 +17,7 @@ import { DEFAULT_MV_BLINK } from "@/lib/mv-blink";
 import type { MvAssetRef, MvVowel } from "@/lib/mv-config";
 import { listPsdLayerPaths, type PsdLayerInfo } from "@/lib/mv-psd";
 import { planTalkCues, registerTalkVoicebanks } from "@/lib/talk-audio";
+import { applyTalkScriptText, buildTalkScriptAiPrompt, parseTalkScriptText, TALK_SCRIPT_HELP_TEXT, talkManifestToScriptText } from "@/lib/talk-script-text";
 import {
 	createDefaultTalkStage,
 	DEFAULT_TALK_GAP_SEC,
@@ -132,6 +133,8 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 	const [voiceGroups, setVoiceGroups] = useState<VoiceModelGroup[] | null>(null);
 	const [measuring, setMeasuring] = useState(false);
 	const [speakingCueId, setSpeakingCueId] = useState<string | null>(null);
+	/** 「テキストで編集」モーダルの本文。null なら閉じている。 */
+	const [scriptText, setScriptText] = useState<string | null>(null);
 	const speakRef = useRef<{ stop: () => void } | null>(null);
 	const storageKey = useMemo(() => getStorageKey("talk", talkId), [talkId]);
 	const restoredRef = useRef(false);
@@ -265,6 +268,34 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		}
 	};
 
+	// ── 台本のテキスト入出力 ──
+	const openScriptText = () => setScriptText(talkManifestToScriptText(manifest));
+	const scriptParsed = useMemo(() => (scriptText === null ? null : parseTalkScriptText(scriptText, manifest)), [scriptText, manifest]);
+	const applyScriptText = () => {
+		if (!scriptParsed) return;
+		stopSpeak();
+		setManifest((m) => applyTalkScriptText(m, scriptParsed));
+		setScriptText(null);
+	};
+	const scriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+	/** 書式の解説と AI 依頼プロンプトの折りたたみ（弾幕スクリプトの解説モーダルと同じ位置づけ）。 */
+	const [scriptHelpOpen, setScriptHelpOpen] = useState(false);
+	const [scriptCopyFeedback, setScriptCopyFeedback] = useState<string | null>(null);
+	const copyScriptClip = async (label: string, text: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setScriptCopyFeedback(`${label}をコピーしました`);
+		} catch {
+			setScriptCopyFeedback(`${label}のコピーに失敗しました`);
+			/* 非セキュアコンテキストなどで書けないときは textarea を選択するだけにする */
+			if (label === "台本") scriptTextareaRef.current?.select();
+		}
+		setTimeout(() => setScriptCopyFeedback(null), 1800);
+	};
+	const copyScriptText = () => {
+		if (scriptText !== null) void copyScriptClip("台本", scriptText);
+	};
+
 	// 全行の長さが計れているときだけ合計を出す（未計測の行があると当てにならない）。
 	const measuredAll = manifest.cues.length > 0 && manifest.cues.every((c) => c.measuredSec !== undefined || !c.text.trim());
 	const totalSec = measuredAll
@@ -326,9 +357,14 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 					<div className="space-y-2">
 						<div className="flex items-center justify-between text-[11px] text-gray-400">
 							<span>{manifest.cues.length} 行 ・ 約 {totalSec ? Math.round(totalSec) : "?"} 秒</span>
-							<button type="button" onClick={measureAll} disabled={measuring} className={BTN_REF}>
-								{measuring ? "計測中…" : "長さを計る"}
-							</button>
+							<div className="flex items-center gap-1">
+								<button type="button" onClick={openScriptText} className={BTN_REF} title="台本をテキストで書き出し・取り込み">
+									<FileText size={11} /> テキスト
+								</button>
+								<button type="button" onClick={measureAll} disabled={measuring} className={BTN_REF}>
+									{measuring ? "計測中…" : "長さを計る"}
+								</button>
+							</div>
 						</div>
 						{manifest.cues.map((cue, i) => {
 							const ch = charById(cue.speaker);
@@ -452,6 +488,94 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 				)}
 			</div>
 
+			{scriptText !== null && scriptParsed && (
+				<div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-3" onClick={() => setScriptText(null)}>
+					<div className="w-full max-w-2xl max-h-full flex flex-col rounded-lg border border-gray-700 bg-gray-900 shadow-xl" onClick={(e) => e.stopPropagation()}>
+						<div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-gray-800">
+							<FileText size={14} className="text-gray-400" />
+							<span className={HEADING}>台本をテキストで編集</span>
+							<span className="flex-1" />
+							<button type="button" onClick={() => setScriptText(null)} className={BTN_ICON} title="閉じる"><X size={16} /></button>
+						</div>
+						<div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+							<p className="text-[10px] text-gray-400 leading-relaxed">
+								1 行 = 1 セリフ。<span className="text-gray-200">話者「本文」</span>（<span className="text-gray-200">話者: 本文</span> でも可）。
+								話者の後の括弧に表情（{TALK_EXPRESSIONS.map((o) => o.label).join("/")}）と間（間0.5）を書けます。
+								閉じ括弧 」 が来るまで本文は次の行へ続きます。話者を書かない行は前の行と別の話者、# で始まる行はコメントです。
+								登場人物に無い名前は新しいキャラとして足します。
+							</p>
+							<textarea
+								ref={scriptTextareaRef}
+								value={scriptText}
+								onChange={(e) => setScriptText(e.target.value)}
+								rows={14}
+								spellCheck={false}
+								placeholder={"ボケ「こんにちは」\nツッコミ(おこり)「なんでやねん」"}
+								className={`${INPUT} font-mono leading-relaxed`}
+							/>
+							<div className="text-[11px] text-gray-400">
+								{scriptParsed.cues.length} 行
+								{scriptParsed.newSpeakers.length > 0 && (
+									<span className="text-yellow-400"> ・ 新しいキャラ: {scriptParsed.newSpeakers.join("、")}</span>
+								)}
+							</div>
+							{scriptParsed.warnings.length > 0 && (
+								<ul className="text-[10px] text-red-400 space-y-0.5">
+									{scriptParsed.warnings.map((w, i) => <li key={`${i}-${w}`}>{w}</li>)}
+								</ul>
+							)}
+							{/* 書式の解説と AI 依頼プロンプト（弾幕スクリプトの「使い方を見る」と同じ構成） */}
+							<div className="rounded-lg border border-gray-800 bg-gray-950/40">
+								<button
+									type="button"
+									onClick={() => setScriptHelpOpen((v) => !v)}
+									className="w-full flex items-center gap-1 px-2.5 py-1.5 text-[11px] text-gray-300 hover:text-white"
+								>
+									{scriptHelpOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+									書式の解説・チャットAIに台本を書いてもらう
+								</button>
+								{scriptHelpOpen && (
+									<div className="px-2.5 pb-2.5 space-y-2">
+										<pre className="whitespace-pre-wrap break-words text-[10.5px] leading-relaxed text-green-300 bg-gray-950 border border-gray-800 rounded-lg p-2.5 font-mono max-h-64 overflow-y-auto">
+											{TALK_SCRIPT_HELP_TEXT}
+										</pre>
+										<p className="text-[10px] text-gray-400 leading-relaxed">
+											「AI依頼プロンプトをコピー」には、この解説の全文と登場人物の名前、いまの台本、依頼欄がまとめてあります。
+											ChatGPT や Claude などに貼り付けてテーマを書き足すだけで、そのまま上の欄に貼り付けられる台本を書いてもらえます。
+										</p>
+										<div className="flex gap-1.5">
+											<button type="button" onClick={() => void copyScriptClip("解説", TALK_SCRIPT_HELP_TEXT)} className={`${BTN_REF} flex-1 justify-center`}>
+												<Copy size={11} /> 解説を全文コピー
+											</button>
+											<button
+												type="button"
+												onClick={() => void copyScriptClip("AI依頼プロンプト", buildTalkScriptAiPrompt(manifest))}
+												className="flex-1 flex items-center justify-center gap-1 rounded border border-yellow-600/40 bg-yellow-500/10 text-yellow-300 hover:text-yellow-200 px-2 py-1 text-[11px]"
+											>
+												<Copy size={11} /> AI依頼プロンプトをコピー
+											</button>
+										</div>
+									</div>
+								)}
+							</div>
+						</div>
+						<div className="shrink-0 flex items-center gap-1 px-3 py-2 border-t border-gray-800">
+							<button type="button" onClick={copyScriptText} className={BTN_REF}><Copy size={11} /> コピー</button>
+							{scriptCopyFeedback && <span className="text-[10px] text-green-400 px-1">{scriptCopyFeedback}</span>}
+							<span className="flex-1" />
+							<button type="button" onClick={() => setScriptText(null)} className="text-[11px] text-gray-400 hover:text-white px-2">やめる</button>
+							<button
+								type="button"
+								onClick={applyScriptText}
+								disabled={scriptParsed.cues.length === 0}
+								className="flex items-center gap-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-1 text-[12px] font-bold"
+							>
+								台本に反映
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 			{picker && (
 				<ContentPicker
 					mode="image"
