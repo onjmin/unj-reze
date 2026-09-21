@@ -1877,6 +1877,13 @@ export default function DotDrawingEditor({
 		forceRender((n) => n + 1);
 	};
 
+	const toggleAlphaLock = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.alphaLocked = !entry.instance.alphaLocked;
+		forceRender((n) => n + 1);
+	};
+
 	const setLayerOpacity = (i: number, opacity: number) => {
 		const entry = layerEntriesRef.current[i];
 		if (!entry) return;
@@ -2972,6 +2979,7 @@ export default function DotDrawingEditor({
 					onReorder={reorderLayers}
 					onToggleVisibility={toggleVisibility}
 					onToggleLock={toggleLock}
+					onToggleAlphaLock={toggleAlphaLock}
 					onOpacityChange={setLayerOpacity}
 					onAdd={addLayer}
 					onDelete={deleteLayer}

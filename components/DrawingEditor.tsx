@@ -136,6 +136,18 @@ export default function DrawingEditor({
 	const [penSize, setPenSize] = useState(4);
 	const [brushSize, setBrushSize] = useState(12);
 	const [eraserSize, setEraserSize] = useState(20);
+	// 筆の濃さ。ひと筆の中では重ねても濃くならず、離したときに1回だけ乗る
+	const [paintOpacity, setPaintOpacity] = useState(100);
+	// 筆の縁のぼけ具合。0で従来どおりの硬い円
+	const [brushSoftness, setBrushSoftness] = useState(0);
+	// バケツの許容誤差と、線画の下へもぐり込ませる量
+	const [fillTolerance, setFillTolerance] = useState(24);
+	const [fillGrow, setFillGrow] = useState(2);
+	// バケツの領域判定を全レイヤーの見た目で行うか（線画と塗りを分けている絵の定石）
+	const [fillRefAll, setFillRefAll] = useState(true);
+	const fillToleranceRef = useRef(24);
+	const fillGrowRef = useRef(2);
+	const fillRefAllRef = useRef(true);
 	const [showGrid, setShowGrid] = useState(false);
 	const [recentColors, setRecentColors] = useState<string[]>([]);
 	const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
@@ -898,12 +910,17 @@ export default function DrawingEditor({
 				return;
 			}
 
+			const strokeStarting = px === null;
 			if (px === null) {
 				px = x;
 				py = y;
 			}
 			if (py === null) {
 				py = y;
+			}
+			// ひと筆を一時キャンバスに溜める。離したときに濃さを1回だけ掛けるため
+			if (strokeStarting && !active.stroking) {
+				active.beginStroke(toolRef.current === "eraser" ? "erase" : "draw");
 			}
 
 			if (toolRef.current === "brush") {
@@ -923,13 +940,15 @@ export default function DrawingEditor({
 		oekaki.onDrawn((x, y) => {
 			px = null;
 			py = null;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			// 溜めていたひと筆をここで初めてレイヤーへ乗せる
+			active?.endStroke();
 			// 複数指タッチ中に指が離れた場合は、描いていないので履歴も残さない
 			if (multiTouchingRef.current) {
 				lassoPointsRef.current = [];
 				return;
 			}
-			const active =
-				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 			if (active?.modified()) active.trace();
 
 			if (toolRef.current === "select" && selectDragMode !== null) {
@@ -967,13 +986,28 @@ export default function DrawingEditor({
 				if (!rgb || !active) return;
 				const w = active.canvas.width;
 				const h = active.canvas.height;
-				const result = oekaki.floodFill(active.data, w, h, x, y, [
-					rgb[0],
-					rgb[1],
-					rgb[2],
-					255,
-				]);
-				if (result) active.data = result;
+				// 領域の判定は見た目（全レイヤー合成）で行い、色は今のレイヤーにだけ置く。
+				// 線画が上のレイヤーにあっても、その囲みの内側だけを塗れる
+				let reference = active.data;
+				if (fillRefAllRef.current) {
+					const merged = oekaki
+						.render()
+						.getContext("2d", { willReadFrequently: true });
+					if (merged) reference = merged.getImageData(0, 0, w, h).data;
+				}
+				const mask = oekaki.floodFillMask(reference, w, h, x, y, {
+					tolerance: fillToleranceRef.current,
+					grow: fillGrowRef.current,
+				});
+				if (mask) {
+					active.data = oekaki.paintMask(
+						active.data,
+						mask,
+						[rgb[0], rgb[1], rgb[2], 255],
+						Math.min(100, Math.max(0, oekaki.opacity.value)) / 100,
+						active.alphaLocked,
+					);
+				}
 				active.trace();
 			}
 			updateOnionSkin();
@@ -998,6 +1032,17 @@ export default function DrawingEditor({
 		oekaki.brushSize.value = brushSize;
 		oekaki.eraserSize.value = eraserSize;
 	}, [penSize, brushSize, eraserSize]);
+
+	useEffect(() => {
+		oekaki.opacity.value = paintOpacity;
+		oekaki.softness.value = brushSoftness;
+	}, [paintOpacity, brushSoftness]);
+
+	useEffect(() => {
+		fillToleranceRef.current = fillTolerance;
+		fillGrowRef.current = fillGrow;
+		fillRefAllRef.current = fillRefAll;
+	}, [fillTolerance, fillGrow, fillRefAll]);
 
 	useEffect(() => {
 		const el = mountRef.current;
@@ -1194,6 +1239,13 @@ export default function DrawingEditor({
 		const entry = layerEntriesRef.current[i];
 		if (!entry) return;
 		entry.instance.locked = !entry.instance.locked;
+		forceRender((n) => n + 1);
+	};
+
+	const toggleAlphaLock = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.alphaLocked = !entry.instance.alphaLocked;
 		forceRender((n) => n + 1);
 	};
 
@@ -2048,10 +2100,40 @@ export default function DrawingEditor({
 							</span>
 						</div>
 					)}
-					{(tool === "dropper" || tool === "fill") && (
+					{tool === "dropper" && (
 						<span className="text-[10px] text-gray-500">
 							キャンバスをクリック
 						</span>
+					)}
+					{tool === "fill" && (
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-12 shrink-0">
+								色の許容
+							</span>
+							<input
+								type="range"
+								min={0}
+								max={128}
+								value={fillTolerance}
+								onChange={(e) => setFillTolerance(Number(e.target.value))}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-6 text-right">
+								{fillTolerance}
+							</span>
+							<span className="text-[10px] text-gray-500 shrink-0">はみ出し</span>
+							<input
+								type="range"
+								min={0}
+								max={8}
+								value={fillGrow}
+								onChange={(e) => setFillGrow(Number(e.target.value))}
+								className="w-16 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-8 text-right">
+								{fillGrow}px
+							</span>
+						</div>
 					)}
 					{(tool === "select" || tool === "lasso") && (
 						<div className="flex-1 flex items-center space-x-1">
@@ -2061,6 +2143,62 @@ export default function DrawingEditor({
 						</div>
 					)}
 				</div>
+
+				{(tool === "pen" ||
+					tool === "brush" ||
+					tool === "eraser" ||
+					tool === "fill") && (
+					<div className="flex items-center space-x-3">
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-12 shrink-0">
+								濃さ
+							</span>
+							<input
+								type="range"
+								min={1}
+								max={100}
+								value={paintOpacity}
+								onChange={(e) => setPaintOpacity(Number(e.target.value))}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-8 text-right">
+								{paintOpacity}%
+							</span>
+						</div>
+						{(tool === "brush" || tool === "eraser") && (
+							<div className="flex-1 flex items-center space-x-2">
+								<span className="text-[10px] text-gray-500 w-10 shrink-0">
+									ぼかし
+								</span>
+								<input
+									type="range"
+									min={0}
+									max={100}
+									value={brushSoftness}
+									onChange={(e) => setBrushSoftness(Number(e.target.value))}
+									className="flex-1 h-1 accent-blue-500"
+								/>
+								<span className="text-[10px] text-gray-400 w-8 text-right">
+									{brushSoftness}%
+								</span>
+							</div>
+						)}
+						{tool === "fill" && (
+							<button
+								onClick={() => setFillRefAll((v) => !v)}
+								title="線画が別レイヤーにあっても、その囲みの内側だけを塗る"
+								className={
+									"px-2 h-6 rounded text-[10px] shrink-0 transition-colors " +
+									(fillRefAll
+										? "bg-blue-600 text-white"
+										: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+								}
+							>
+								全レイヤー参照
+							</button>
+						)}
+					</div>
+				)}
 
 				<div className="flex items-center space-x-2">
 					<div
@@ -2244,6 +2382,7 @@ export default function DrawingEditor({
 					onReorder={reorderLayers}
 					onToggleVisibility={toggleVisibility}
 					onToggleLock={toggleLock}
+					onToggleAlphaLock={toggleAlphaLock}
 					onOpacityChange={setLayerOpacity}
 					onAdd={addLayer}
 					onDelete={deleteLayer}

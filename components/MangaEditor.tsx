@@ -2070,6 +2070,21 @@ export default function MangaEditor({
 							);
 							renderDisplay();
 						}}
+						onToggleAlphaLock={(panelIdx) => {
+							const realIdx = layersRef.current.length - 1 - panelIdx;
+							const l = layersRef.current[realIdx];
+							if (!l) return;
+							l.oekaki.alphaLocked = !l.oekaki.alphaLocked;
+							setLayerMetas(
+								layersRef.current.map((ll) => ({
+									id: ll.id,
+									name: ll.name,
+									visible: ll.visible,
+									opacity: ll.opacity,
+									oekaki: ll.oekaki,
+								})),
+							);
+						}}
 						onToggleLock={(panelIdx) => {
 							const realIdx = layersRef.current.length - 1 - panelIdx;
 							const l = layersRef.current[realIdx];

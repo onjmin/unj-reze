@@ -25,6 +25,7 @@ interface LayerPanelProps {
 	onReorder: (from: number, to: number) => void;
 	onToggleVisibility: (i: number) => void;
 	onToggleLock: (i: number) => void;
+	onToggleAlphaLock: (i: number) => void;
 	onOpacityChange: (i: number, opacity: number) => void;
 	onAdd: () => void;
 	onDelete: (i: number) => void;
@@ -59,6 +60,7 @@ export default function LayerPanel({
 	onReorder,
 	onToggleVisibility,
 	onToggleLock,
+	onToggleAlphaLock,
 	onOpacityChange,
 	onAdd,
 	onDelete,
@@ -156,6 +158,7 @@ export default function LayerPanel({
 							}}
 							onToggleVisibility={() => onToggleVisibility(i)}
 							onToggleLock={() => onToggleLock(i)}
+							onToggleAlphaLock={() => onToggleAlphaLock(i)}
 							onOpacityChange={(v) => onOpacityChange(i, v)}
 							onDelete={() => onDelete(i)}
 							canDelete={layers.length > 1}
@@ -210,6 +213,7 @@ export default function LayerPanel({
 						}}
 						onToggleVisibility={() => onToggleVisibility(i)}
 						onToggleLock={() => onToggleLock(i)}
+						onToggleAlphaLock={() => onToggleAlphaLock(i)}
 						onOpacityChange={(v) => onOpacityChange(i, v)}
 						onDelete={() => onDelete(i)}
 						canDelete={layers.length > 1}
@@ -240,6 +244,7 @@ function LayerRow({
 	onDrop,
 	onToggleVisibility,
 	onToggleLock,
+	onToggleAlphaLock,
 	onOpacityChange,
 	onDelete,
 	canDelete,
@@ -255,6 +260,7 @@ function LayerRow({
 	onDrop: () => void;
 	onToggleVisibility: () => void;
 	onToggleLock: () => void;
+	onToggleAlphaLock: () => void;
 	onOpacityChange: (v: number) => void;
 	onDelete: () => void;
 	canDelete: boolean;
@@ -322,6 +328,20 @@ function LayerRow({
 					className="p-1 text-gray-500 hover:text-gray-300 touch-none"
 				>
 					{layer.instance.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+				</button>
+				<button
+					onPointerDown={(e) => {
+						e.stopPropagation();
+						onToggleAlphaLock();
+					}}
+					title="透明ロック（色がある所にしか塗れなくなる）"
+					className={`px-1 w-6 h-6 rounded text-[11px] font-bold leading-none touch-none ${
+						layer.instance.alphaLocked
+							? "bg-blue-600/40 text-blue-200 ring-1 ring-blue-400/60"
+							: "text-gray-500 hover:text-gray-300"
+					}`}
+				>
+					α
 				</button>
 				<button
 					onPointerDown={(e) => {
