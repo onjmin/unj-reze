@@ -809,9 +809,115 @@ export default function App() {
 		handleAddReply,
 	} = usePostActions(userId, updatePost, { avatarUrl: currentUser?.avatarUrl });
 
+	/**
+	 * 送信に失敗した下書きの退避先。
+	 *
+	 * 返信は送信と同時に `/post/[id]` へ遷移する＝このページ自体が unmount されるので、
+	 * catch の中で setInputText しても戻らない。遷移をまたぐ必要があるため
+	 * sessionStorage を使う（`unj_pending_game` と同じ方式）。
+	 */
+	const FAILED_DRAFT_KEY = "unj_failed_post_draft";
+
+	type FailedDraft = {
+		content: string;
+		attachedImage: string | null;
+		attachedImageIsDrawn: boolean;
+		attachedDotSize: { w: number; h: number } | null;
+		attachedAnim: {
+			animFrames: number;
+			animFps: number;
+			walkPreset?: string;
+		} | null;
+		attachedMml: string | null;
+	};
+
+	const stashFailedDraft = (draft: FailedDraft) => {
+		try {
+			// 絵そのものは snapshotAttachedDrawing がエディタの履歴へ入れてあるので、
+			// 大きすぎる dataURL は落としてでも本文だけは必ず残す
+			const image =
+				draft.attachedImage && draft.attachedImage.length > 2_000_000
+					? null
+					: draft.attachedImage;
+			sessionStorage.setItem(
+				FAILED_DRAFT_KEY,
+				JSON.stringify({ ...draft, attachedImage: image }),
+			);
+		} catch (err) {
+			console.error("下書きの退避に失敗", err);
+		}
+	};
+
+	/**
+	 * 添付中の絵を、投稿を試みる前にエディタの履歴へ退避する。
+	 *
+	 * 楽観表示のために添付は送信前に捨ててしまうので、ここで残しておかないと
+	 * 送信が失敗した時に描いた絵を復元する手段が無くなる。
+	 * 退避できなかったら投稿自体を中断する（falseを返す）。
+	 */
+	const snapshotAttachedDrawing = async (): Promise<boolean> => {
+		if (!attachedImageIsDrawn || !attachedImage) return true;
+		const isDot = !!attachedDotSize;
+		const storageKey = getStorageKey(isDot ? "dotdrawing" : "drawing");
+		let snapshotState: DrawingEditorState | null = null;
+		try {
+			const { width, height } = await new Promise<{
+				width: number;
+				height: number;
+			}>((resolve, reject) => {
+				const img = new Image();
+				img.onload = () => resolve({ width: img.width, height: img.height });
+				img.onerror = () => reject(new Error("failed to load attached image"));
+				img.src = attachedImage;
+			});
+			snapshotState = {
+				mode: "standard",
+				width,
+				height,
+				gridW: attachedDotSize?.w ?? 32,
+				gridH: attachedDotSize?.h ?? 32,
+				zoom: 1,
+				layers: [
+					{
+						name: "layer1",
+						visible: true,
+						locked: false,
+						opacity: 100,
+						dataUrl: attachedImage,
+					},
+				],
+			};
+		} catch (err) {
+			console.error("投稿直前のスナップショット生成に失敗", err);
+		}
+		const result = snapshotState
+			? await saveHistory(
+					storageKey,
+					snapshotState,
+					isDot ? "dotdrawing" : "drawing",
+					50,
+				)
+			: null;
+		// "duplicate"(直前のスナップショットと同一)は保存自体は正常なので投稿を止めない。
+		if (result !== "saved" && result !== "duplicate") {
+			showToast(
+				"error",
+				"スナップショットの保存に失敗したため、投稿を中断しました",
+			);
+			return false;
+		}
+		return true;
+	};
+
 	const handleCreateReplyFromComposer = async (targetPost: Post) => {
 		if (replySubmittingRef.current) return;
 		replySubmittingRef.current = true;
+		// 新規スレ側(handleCreatePost)と同じ保護。返信だけ素通しだったので、
+		// 送信に失敗すると描いた絵の戻し先が無かった
+		if (!(await snapshotAttachedDrawing())) {
+			replySubmittingRef.current = false;
+			return;
+		}
 		const postId = targetPost.id;
 		const threadId = targetPost.threadId || targetPost.id;
 		const currentParent =
@@ -972,7 +1078,10 @@ export default function App() {
 				postsRef.current = next;
 				return next;
 			});
-		} catch {
+		} catch (err) {
+			// 握り潰すと後から原因を追えない。実際に「UIには出たのに保存されていない」
+			// という報告が出たとき、コンソールに何も残っていなかった
+			console.error("返信の送信に失敗", err);
 			const currentCached = readCachedPost(threadId);
 			if (currentCached) {
 				cachePost({
@@ -994,7 +1103,22 @@ export default function App() {
 				postsRef.current = next;
 				return next;
 			});
-			showToast("error", "返信の送信に失敗しました");
+			// 楽観表示のために消した入力を退避する。ここで残さないと、通信が落ちた
+			// だけで本文も絵も失われてトーストしか残らない。
+			// 既に /post/[id] へ遷移してこのページは unmount されているので、
+			// setInputText では戻らない（sessionStorage 経由でホームに戻った時に復元する）
+			stashFailedDraft({
+				content,
+				attachedImage,
+				attachedImageIsDrawn,
+				attachedDotSize,
+				attachedAnim,
+				attachedMml,
+			});
+			showToast(
+				"error",
+				"返信の送信に失敗しました。内容はホームのコンポーザに戻してあります",
+			);
 		} finally {
 			replySubmittingRef.current = false;
 		}
@@ -1019,57 +1143,7 @@ export default function App() {
 		// 投稿直前に「今から送る絵」のスナップショットを撮る。ここで失敗したら、
 		// 送信APIが失敗した際に復元できるデータが残らない（投稿失敗→絵が消える）
 		// ことになるため、後続の投稿処理には進まず中断して通知する。
-		if (attachedImageIsDrawn && attachedImage) {
-			const isDot = !!attachedDotSize;
-			const storageKey = getStorageKey(isDot ? "dotdrawing" : "drawing");
-			let snapshotState: DrawingEditorState | null = null;
-			try {
-				const { width, height } = await new Promise<{
-					width: number;
-					height: number;
-				}>((resolve, reject) => {
-					const img = new Image();
-					img.onload = () => resolve({ width: img.width, height: img.height });
-					img.onerror = () => reject(new Error("failed to load attached image"));
-					img.src = attachedImage;
-				});
-				snapshotState = {
-					mode: "standard",
-					width,
-					height,
-					gridW: attachedDotSize?.w ?? 32,
-					gridH: attachedDotSize?.h ?? 32,
-					zoom: 1,
-					layers: [
-						{
-							name: "layer1",
-							visible: true,
-							locked: false,
-							opacity: 100,
-							dataUrl: attachedImage,
-						},
-					],
-				};
-			} catch (err) {
-				console.error("投稿直前のスナップショット生成に失敗", err);
-			}
-			const result = snapshotState
-				? await saveHistory(
-						storageKey,
-						snapshotState,
-						isDot ? "dotdrawing" : "drawing",
-						50,
-					)
-				: null;
-			// "duplicate"(直前のスナップショットと同一)は保存自体は正常なので投稿を止めない。
-			if (result !== "saved" && result !== "duplicate") {
-				showToast(
-					"error",
-					"スナップショットの保存に失敗したため、投稿を中断しました",
-				);
-				return;
-			}
-		}
+		if (!(await snapshotAttachedDrawing())) return;
 
 		// #MML作曲行は1行目、自由コメントはその下の行として保存する
 		// （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
@@ -1194,13 +1268,23 @@ export default function App() {
 				postsRef.current = next;
 				return next;
 			});
-		} catch {
+		} catch (err) {
+			console.error("投稿に失敗", err);
 			setPosts((prev) => {
 				const next = prev.filter((p) => p.id !== tempId);
 				postsRef.current = next;
 				return next;
 			});
-			showToast("error", "投稿に失敗しました");
+			// 返信側と同じく、楽観表示のために消した入力をコンポーザへ戻す
+			setInputText(inputText);
+			setAttachedImage(attachedImage);
+			setAttachedImageIsDrawn(attachedImageIsDrawn);
+			setAttachedMml(attachedMml);
+			setGameDraft(gameDraft);
+			setMvDraft(mvDraft);
+			setTalkDraft(talkDraft);
+			setOriginType(originType);
+			showToast("error", "投稿に失敗しました。内容は戻してあります");
 		}
 	};
 
@@ -1503,6 +1587,26 @@ export default function App() {
 				Promise.resolve().then(() => {
 					if (returnTo) setPendingReturnTo(returnTo);
 					if (gameId) handleOpenPostGame(gameId, postId);
+				});
+			}
+		} catch {}
+		// 送信に失敗した返信の下書きを戻す（返信は遷移でこのページが unmount されるため、
+		// catch の中では戻せない）
+		try {
+			const failed = sessionStorage.getItem(FAILED_DRAFT_KEY);
+			if (failed) {
+				sessionStorage.removeItem(FAILED_DRAFT_KEY);
+				const draft = JSON.parse(failed);
+				Promise.resolve().then(() => {
+					if (draft.content) setInputText(draft.content);
+					if (draft.attachedImage) {
+						setAttachedImage(draft.attachedImage);
+						setAttachedImageIsDrawn(!!draft.attachedImageIsDrawn);
+						setAttachedDotSize(draft.attachedDotSize ?? null);
+						setAttachedAnim(draft.attachedAnim ?? null);
+					}
+					if (draft.attachedMml) setAttachedMml(draft.attachedMml);
+					showToast("error", "送信に失敗した下書きを戻しました");
 				});
 			}
 		} catch {}
