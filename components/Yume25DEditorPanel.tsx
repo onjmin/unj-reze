@@ -296,6 +296,8 @@ export default function Yume25DEditorPanel({
 					color: "#9fb4c8",
 					emoji: m.emoji,
 					modelUrl: m.url,
+					...(m.collide ? { modelCollision: true } : {}),
+					...(m.scale ? { modelScale: m.scale } : {}),
 				},
 			},
 		}));
@@ -830,6 +832,17 @@ export default function Yume25DEditorPanel({
 					// 見た目が別の仕組み（glTF・スキン画像）で決まるため、色も画像も3D描画には効かない。
 					const imageAffects3d =
 						!t.modelUrl && !t.minecraftSkin && t.special !== "ball";
+					const setTexFlag = (
+						key: "mural" | "cutout" | "smooth",
+						on: boolean,
+					) =>
+						onLayoutChange((l) => ({
+							...l,
+							textures: {
+								...l.textures,
+								[t.id]: { ...l.textures[t.id], [key]: on || undefined },
+							},
+						}));
 					return (
 						<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
 							<div className="flex items-center justify-between">
@@ -859,6 +872,76 @@ export default function Yume25DEditorPanel({
 									</button>
 								)}
 							</div>
+							{imageAffects3d &&
+								(t.imageUrl || t.imageRef) &&
+								t.kind !== "sprite" && (
+									<div className="flex items-center gap-3 flex-wrap border-t border-gray-700 pt-1.5">
+										<span className="font-bold text-gray-400">絵の貼り方</span>
+										{t.kind === "wall" && (
+											<label
+												className="flex items-center gap-1"
+												title="壁ツールでドラッグすると、1マスずつではなく「なぞった長さぶんの壁1枚」を置き、絵を全面へ1枚だけ貼る。建物のファサード向け"
+											>
+												<input
+													type="checkbox"
+													checked={!!t.mural}
+													onChange={(e) => setTexFlag("mural", e.target.checked)}
+												/>
+												壁画として置く
+											</label>
+										)}
+										<label
+											className="flex items-center gap-1"
+											title="画像の透明部分を切り抜く。窓やアーチの開口を絵で抜ける"
+										>
+											<input
+												type="checkbox"
+												checked={!!t.cutout}
+												onChange={(e) => setTexFlag("cutout", e.target.checked)}
+											/>
+											透明を抜く
+										</label>
+										<label
+											className="flex items-center gap-1"
+											title="拡大時になめらかに補間する。手描きの絵を大きく引き伸ばすとき用（ドット絵では外す）"
+										>
+											<input
+												type="checkbox"
+												checked={!!t.smooth}
+												onChange={(e) => setTexFlag("smooth", e.target.checked)}
+											/>
+											なめらか
+										</label>
+									</div>
+								)}
+							{t.kind === "wall" && t.mural && (
+								<div className="flex items-center gap-2 flex-wrap text-gray-400">
+									<label className="flex items-center gap-1">
+										段数
+										<input
+											type="number"
+											min={1}
+											max={12}
+											value={t.muralLevels ?? 3}
+											onChange={(e) => {
+												const n = Math.max(
+													1,
+													Math.min(12, Number(e.target.value) || 1),
+												);
+												onLayoutChange((l) => ({
+													...l,
+													textures: {
+														...l.textures,
+														[t.id]: { ...l.textures[t.id], muralLevels: n },
+													},
+												}));
+											}}
+											className="w-12 bg-gray-800 border border-gray-600 rounded px-1"
+										/>
+									</label>
+									<span>2Dマップで辺をなぞると、その長さで1枚置かれる</span>
+								</div>
+							)}
 							{t.special === "warp" && (
 								<div className="flex items-center gap-2 flex-wrap">
 									<span className="font-bold text-gray-400">ワープ先</span>
@@ -1054,7 +1137,7 @@ export default function Yume25DEditorPanel({
 										<input
 											type="range"
 											min={0.25}
-											max={4}
+											max={24}
 											step={0.25}
 											value={t.modelScale ?? 1}
 											onChange={(e) =>
@@ -1075,10 +1158,36 @@ export default function Yume25DEditorPanel({
 											{(t.modelScale ?? 1).toFixed(2)}マス
 										</span>
 									</label>
+									<label
+										className="flex items-center gap-1"
+										title="モデルの形から当たり判定を作る。体が通る高さでモデルが占めているマスの外周が壁になるので、建物なら中庭や門はそのまま通れる"
+									>
+										<input
+											type="checkbox"
+											checked={!!t.modelCollision}
+											onChange={(e) =>
+												onLayoutChange((l) => ({
+													...l,
+													textures: {
+														...l.textures,
+														[t.id]: {
+															...l.textures[t.id],
+															modelCollision: e.target.checked || undefined,
+														},
+													},
+												}))
+											}
+										/>
+										形から当たり判定を作る
+									</label>
 									<p className="text-[9px] text-gray-500 break-all">
-										サンプル3Dモデル（CDN読み込み）：
+										3Dモデル：
 										{t.modelUrl.replace("https://cdn.jsdelivr.net/gh/", "")}
-										。当たり判定はありません（すり抜け）。「高さ」を上げると宙に浮かせられます
+										。
+										{t.modelCollision
+											? "モデルの形が壁になります。"
+											: "当たり判定はありません（すり抜け）。"}
+										「高さ」を上げると宙に浮かせられます
 									</p>
 								</div>
 							)}
@@ -1434,11 +1543,13 @@ export default function Yume25DEditorPanel({
 										{m.emoji} {m.label}
 									</span>
 									<span className="text-[8px] text-gray-500">
-										{m.source === "three.js"
-											? "three.js examples"
-											: m.source === "MMD"
-												? `MMD (${m.format?.toUpperCase() ?? "PMX"})`
-												: "glTF-Sample-Assets"}
+										{m.credit
+											? `${m.source} / ${m.credit}`
+											: m.source === "three.js"
+												? "three.js examples"
+												: m.source === "MMD"
+													? `MMD (${m.format?.toUpperCase() ?? "PMX"})`
+													: "glTF-Sample-Assets"}
 									</span>
 								</button>
 							))}
@@ -1449,8 +1560,8 @@ export default function Yume25DEditorPanel({
 							)}
 						</div>
 						<p className="text-[9px] text-gray-500">
-							three.js / Khronos の公式サンプルモデルを
-							CDN（jsDelivr）から読み込みます。選ぶとスプライトパレットに追加され、スプライトツールで配置できます
+							three.js / Khronos の公式サンプルモデルは CDN（jsDelivr）から、
+							組み込み素材は R2 から読み込みます。選ぶとスプライトパレットに追加され、スプライトツールで配置できます
 						</p>
 					</div>
 				</div>

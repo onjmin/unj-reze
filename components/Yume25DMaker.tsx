@@ -953,6 +953,21 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 			setDialogue({ message: b.message || "……", choices: b.choices });
 		};
 
+		// ── 壁画のドラッグ設置（2Dビュー）──────────────────────────────────────
+		// 壁画テクスチャを選んでいるときの壁ツールは、1マスずつ塗るのではなく
+		// 「なぞった長さぶんの壁1枚」を置く。押した位置で辺（北辺/西辺）が決まり、その軸に沿って伸びる。
+		const [pendingMural, setPendingMural] = useState<{
+			col: number;
+			row: number;
+			dir: Dir4;
+			length: number;
+		} | null>(null);
+		const muralAnchorRef = useRef<{
+			col: number;
+			row: number;
+			dir: Dir4;
+		} | null>(null);
+
 		// ── 2Dエディタ描画：VIEW_COLS×VIEW_ROWS マス分の窓だけを scroll 位置基準で描画する ──────
 		const draw2DCanvas = useCallback(() => {
 			if (is3d) return;
@@ -1026,6 +1041,30 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 				}
 				ctx.stroke();
 			}
+			ctx.globalAlpha = 1;
+			// 壁画（幅と段数を持つ壁1枚）。1マスずつの壁より太い線で、ひと続きの物として描く。
+			const drawMuralRun = (
+				m: { col: number; row: number; dir: Dir4; length: number },
+				color: string,
+				alpha: number,
+			) => {
+				ctx.globalAlpha = alpha;
+				ctx.strokeStyle = color;
+				ctx.lineWidth = 7;
+				ctx.lineCap = "round";
+				ctx.beginPath();
+				ctx.moveTo(m.col * CELL, m.row * CELL);
+				if (m.dir === 0) ctx.lineTo((m.col + m.length) * CELL, m.row * CELL);
+				else ctx.lineTo(m.col * CELL, (m.row + m.length) * CELL);
+				ctx.stroke();
+				ctx.lineCap = "butt";
+			};
+			for (const m of L.murals ?? []) {
+				const base = m.level ?? 0;
+				const here = level >= base && level < base + m.levels;
+				drawMuralRun(m, L.textures[m.tex]?.color ?? "#f0f", here ? 1 : 0.25);
+			}
+			if (pendingMural) drawMuralRun(pendingMural, "#ffffff", 0.85);
 			ctx.globalAlpha = 1;
 			// ビルボード。上空（level>0）のものには右上に段数バッジを添える。
 			ctx.textAlign = "center";
@@ -1142,7 +1181,7 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 				}
 			}
 			ctx.restore();
-		}, [level, playing, playerAppearance, is3d]);
+		}, [level, playing, playerAppearance, is3d, pendingMural]);
 
 		// マウント中または依存関係が変更されたら初回だけ描画する
 		useEffect(() => {
@@ -1179,6 +1218,39 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 				}
 				if (isDrag && tool !== "erase") return; // 床以外はクリック単位（誤爆防止）
 
+				if (tool === "wall" && L.textures[selWall]?.mural) {
+					// 3Dビューからのタップ。ドラッグは視点回転に使われているので、ここでは既定サイズで置く
+					// （長さの調整は2Dマップでのドラッグ）。
+					const dists: [number, Dir4][] = [
+						[fy, 0],
+						[1 - fx, 1],
+						[1 - fy, 2],
+						[fx, 3],
+					];
+					dists.sort((a, b) => a[0] - b[0]);
+					const w = normalizeWall25D(c, r, dists[0][1], selWall, lv);
+					const levels = Math.max(
+						1,
+						Math.round(L.textures[selWall]?.muralLevels ?? 3),
+					);
+					onLayoutChange((l) => ({
+						...l,
+						murals: [
+							...(l.murals ?? []),
+							{
+								id: uid(),
+								col: w.col,
+								row: w.row,
+								dir: w.dir,
+								tex: selWall,
+								length: levels,
+								levels,
+								level: lv,
+							},
+						],
+					}));
+					return;
+				}
 				if (tool === "wall") {
 					const dists: [number, Dir4][] = [
 						[fy, 0],
@@ -1289,6 +1361,25 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 									(v.level ?? 0) === lv,
 							);
 							if (hit) return { ...l, walls: l.walls.filter((v) => v !== hit) };
+							// 壁画はひと続きの1枚なので、どこを指しても丸ごと消える。
+							const mu = (l.murals ?? []).find(
+								(m) =>
+									m.dir === w.dir &&
+									lv >= (m.level ?? 0) &&
+									lv < (m.level ?? 0) + m.levels &&
+									(m.dir === 0
+										? m.row === w.row &&
+											w.col >= m.col &&
+											w.col < m.col + m.length
+										: m.col === w.col &&
+											w.row >= m.row &&
+											w.row < m.row + m.length),
+							);
+							if (mu)
+								return {
+									...l,
+									murals: (l.murals ?? []).filter((m) => m.id !== mu.id),
+								};
 						}
 					}
 					if (lv === 0 && (l.floor[r]?.[c] ?? 0) !== 0) {
@@ -1303,16 +1394,96 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 			[tool, selFloor, selWall, selSprite, level, onLayoutChange],
 		);
 
+		const pointerToCell = (sxWin: number, syWin: number) => {
+			const sx = sxWin + scrollRef.current.col * CELL,
+				sy = syWin + scrollRef.current.row * CELL;
+			const c = Math.floor(sx / CELL),
+				r = Math.floor(sy / CELL);
+			return { c, r, fx: sx / CELL - c, fy: sy / CELL - r };
+		};
+
 		const applyEdit = useCallback(
 			(sxWin: number, syWin: number, isDrag: boolean) => {
-				const sx = sxWin + scrollRef.current.col * CELL,
-					sy = syWin + scrollRef.current.row * CELL;
-				const c = Math.floor(sx / CELL),
-					r = Math.floor(sy / CELL);
-				applyEditAt(c, r, isDrag, sx / CELL - c, sy / CELL - r);
+				const { c, r, fx, fy } = pointerToCell(sxWin, syWin);
+				applyEditAt(c, r, isDrag, fx, fy);
 			},
 			[applyEditAt],
 		);
+
+		/** 壁画テクスチャを選んだ壁ツールか（2Dビューのみ。3Dはタップ1回で既定サイズを置く）。 */
+		const muralMode = tool === "wall" && !!layout.textures[selWall]?.mural;
+
+		/** 押した位置のマス内相対座標から、近いほうの辺を北辺(0)/西辺(3)へ正規化して返す。 */
+		const edgeAt = (c: number, r: number, fx: number, fy: number) => {
+			const dists: [number, Dir4][] = [
+				[fy, 0],
+				[1 - fx, 1],
+				[1 - fy, 2],
+				[fx, 3],
+			];
+			dists.sort((a, b) => a[0] - b[0]);
+			return normalizeWall25D(c, r, dists[0][1], selWall, 0);
+		};
+
+		const muralDragStart = (sxWin: number, syWin: number) => {
+			const { c, r, fx, fy } = pointerToCell(sxWin, syWin);
+			const L = layoutRef.current;
+			if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return;
+			const e = edgeAt(c, r, fx, fy);
+			// 既にある壁画の上を押した → 消す（1マスずつの壁ツールと同じ「もう一度で取り除く」）
+			const hit = (L.murals ?? []).find(
+				(m) =>
+					m.dir === e.dir &&
+					(m.dir === 0
+						? m.row === e.row && e.col >= m.col && e.col < m.col + m.length
+						: m.col === e.col && e.row >= m.row && e.row < m.row + m.length),
+			);
+			if (hit) {
+				onLayoutChange((l) => ({
+					...l,
+					murals: (l.murals ?? []).filter((m) => m.id !== hit.id),
+				}));
+				return;
+			}
+			muralAnchorRef.current = { col: e.col, row: e.row, dir: e.dir };
+			setPendingMural({ col: e.col, row: e.row, dir: e.dir, length: 1 });
+		};
+
+		const muralDragMove = (sxWin: number, syWin: number) => {
+			const a = muralAnchorRef.current;
+			if (!a) return;
+			const { c, r } = pointerToCell(sxWin, syWin);
+			const L = layoutRef.current;
+			const from = a.dir === 0 ? a.col : a.row;
+			const limit = a.dir === 0 ? L.cols - 1 : L.rows - 1;
+			const to = Math.max(0, Math.min(limit, a.dir === 0 ? c : r));
+			const lo = Math.min(from, to),
+				hi = Math.max(from, to);
+			setPendingMural({
+				col: a.dir === 0 ? lo : a.col,
+				row: a.dir === 0 ? a.row : lo,
+				dir: a.dir,
+				length: hi - lo + 1,
+			});
+		};
+
+		const muralDragEnd = () => {
+			const p = pendingMural;
+			muralAnchorRef.current = null;
+			setPendingMural(null);
+			if (!p) return;
+			const levels = Math.max(
+				1,
+				Math.round(layoutRef.current.textures[selWall]?.muralLevels ?? 3),
+			);
+			onLayoutChange((l) => ({
+				...l,
+				murals: [
+					...(l.murals ?? []),
+					{ id: uid(), ...p, tex: selWall, levels, level },
+				],
+			}));
+		};
 
 		const pointerToCanvas = (e: React.PointerEvent<HTMLCanvasElement>) => {
 			const cv = e.currentTarget;
@@ -1478,13 +1649,28 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(
 							onPointerDown={(e) => {
 								e.preventDefault();
 								const { sx, sy } = pointerToCanvas(e);
+								if (muralMode) {
+									e.currentTarget.setPointerCapture(e.pointerId);
+									muralDragStart(sx, sy);
+									return;
+								}
 								applyEdit(sx, sy, false);
 							}}
 							onPointerMove={(e) => {
-								if ((e.buttons & 1) === 1) {
-									const { sx, sy } = pointerToCanvas(e);
-									applyEdit(sx, sy, true);
+								if ((e.buttons & 1) !== 1) return;
+								const { sx, sy } = pointerToCanvas(e);
+								if (muralMode) {
+									muralDragMove(sx, sy);
+									return;
 								}
+								applyEdit(sx, sy, true);
+							}}
+							onPointerUp={() => {
+								if (muralMode) muralDragEnd();
+							}}
+							onPointerCancel={() => {
+								muralAnchorRef.current = null;
+								setPendingMural(null);
 							}}
 							onContextMenu={(e) => e.preventDefault()}
 						/>

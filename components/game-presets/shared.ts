@@ -1052,6 +1052,18 @@ export interface Tex25D {
 	emoji?: string;
 	imageRef?: string;
 	imageUrl?: string;
+	/** 壁画モード（kind==='wall'）。このテクスチャを選んで壁ツールでドラッグすると、
+	 *  1マスずつ塗るのではなく Mural25D（幅と段数を持つ壁1枚）が置かれ、画像が全面へ1枚だけ貼られる。
+	 *  建物のファサードのように「横に長い1枚絵」を作るための指定。 */
+	mural?: boolean;
+	/** 壁画を置くときの段数（既定3）。置いた後の高さは Mural25D 側が持つので、これは新規設置の初期値。 */
+	muralLevels?: number;
+	/** 画像の透明部分を切り抜く（alphaTest）。窓やアーチの開口を絵で抜くのに使う。
+	 *  未指定だと壁は不透明のまま（アルファは無視される）。 */
+	cutout?: boolean;
+	/** 拡大時に線形補間する。既定はドット絵前提の最近傍補間で、
+	 *  手描き絵を建物サイズへ引き伸ばすと線が割れるため、その場合だけ立てる。 */
+	smooth?: boolean;
 	/** システム床の効果（kind==='floor' のみ）。2Dエンジンの TileDef.special と同じ値
 	 *  （'warp' | 'damage' | 'ice-up' | 'ice-right' | 'ice-down' | 'ice-left'）。
 	 *  yume25d にはシーンが無いので warp は同一マップ内の座標転送、damage は HP を削り、
@@ -1066,6 +1078,10 @@ export interface Tex25D {
 	/** サンプル3Dモデル（glb）のURL（kind==='sprite'）。指定時はビルボードの代わりに
 	 *  GLTFモデルを配置する（当たり判定なし・すり抜け）。model-catalog.ts の検索モーダルから設定する。 */
 	modelUrl?: string;
+	/** モデルの形から当たり判定を自動生成する（既定はすり抜け）。
+	 *  体が通る高さでモデルが占めているマスの外周が壁になるので、建物なら中庭や門はそのまま通れる。
+	 *  素材ごとの向き不向きがあるため、組み込みカタログ側が初期値を持つ（ModelCatalogEntry.collide）。 */
+	modelCollision?: boolean;
 	/** Minecraftスキン画像（Slim型・64x64）のURL（kind==='sprite'）。指定時はビルボードの代わりに
 	 *  ブロック人形の3Dモデル（lib/minecraft-model.ts）を組み立てて配置する。
 	 *  プリセットURL・任意の画像URL・アップロード画像のどれでも参照できる。 */
@@ -1096,6 +1112,24 @@ export interface Wall25D {
 	row: number;
 	dir: Dir4;
 	tex: number;
+	level?: number;
+}
+
+/** 壁画（1枚の絵を貼った、幅と段数を持つ壁）。Wall25D を並べたものではなく、これ自体が1個の設置物。
+ *  絵はこの矩形の全面へ1枚だけ貼られる（UVは各マスへ位置ぶんだけ割り当てられる）。
+ *  起点と辺は Wall25D と同じく北辺(0)/西辺(3)へ正規化して持ち、
+ *  辺に沿って dir=0 なら +col、dir=3 なら +row の向きへ length マスぶん伸びる。 */
+export interface Mural25D {
+	id: string;
+	col: number;
+	row: number;
+	dir: Dir4;
+	tex: number;
+	/** 辺に沿った長さ（マス）。1以上。 */
+	length: number;
+	/** 段数（縦の積み）。1以上。 */
+	levels: number;
+	/** 足元の段（未指定は0）。薄板壁と同じく、当たり判定があるのは 0 のときだけ。 */
 	level?: number;
 }
 
@@ -1132,6 +1166,8 @@ export interface Layout25D {
 	ceiling: boolean;
 	ceilingTex: number;
 	walls: Wall25D[];
+	/** 壁画（幅と段数を持つ壁1枚）。旧データには無いので optional。 */
+	murals?: Mural25D[];
 	billboards: Billboard25D[];
 	textures: Record<number, Tex25D>;
 	/** 壁の高さ（1.0＝1マス幅と同じ） */

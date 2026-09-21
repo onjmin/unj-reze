@@ -14,6 +14,7 @@ import {
 	type Dir4,
 	type Layout25D,
 	SYS_TILE_DAMAGE_SFX,
+	type Mural25D,
 	SYS_TILE_WARP_SFX,
 	type Tex25D,
 } from "@/components/game-presets/shared";
@@ -247,6 +248,58 @@ const BLOCK_SIZE = 1;
 const BLOCK_CLIMB_MAX = BLOCK_SIZE * 2 + 0.05; // 自動でよじ登れる最大段差（2段まで。3段以上は壁）
 const CLIMB_SPEED = 3.4; // よじ登りの上昇速度（マス/秒）≒1段0.3秒
 const PLAYER_BODY_H = 0.9; // ブロック側面判定に使う体の高さ
+/** モデルから当たり判定を起こすとき、足元のこの高さぶんは見ない。
+ *  地面や土台の水平面を拾って敷地を丸ごと塞いでしまうのを避けるため。 */
+const MODEL_COLLIDE_FLOOR_SKIP = 0.25;
+
+/** モデルの当たり判定を刻む細かさ（1マスを何分割するか）。
+ *  壁と同じマス単位だと、門のようなマス1個ぶんの開口が両脇のはみ出しで潰れてしまう。
+ *  1/4マス（0.25）ならプレイヤーの直径 0.44 が通る隙間を表現できる。 */
+const MODEL_COLLIDE_SUB = 4;
+
+/** XZ平面へ落とした三角形と、矩形 [x0,x1]×[z0,z1] が重なるか（分離軸判定）。
+ *  外接矩形だけで見ると、斜めの面が触れてもいないマスまで塞いでしまうのでちゃんと判定する。 */
+const triXzHitsRect = (
+	px: number[],
+	pz: number[],
+	x0: number,
+	z0: number,
+	x1: number,
+	z1: number,
+): boolean => {
+	if (Math.max(px[0], px[1], px[2]) < x0 || Math.min(px[0], px[1], px[2]) > x1)
+		return false;
+	if (Math.max(pz[0], pz[1], pz[2]) < z0 || Math.min(pz[0], pz[1], pz[2]) > z1)
+		return false;
+	const corners = [
+		[x0, z0],
+		[x1, z0],
+		[x1, z1],
+		[x0, z1],
+	];
+	for (let i = 0; i < 3; i++) {
+		const j = (i + 1) % 3;
+		// 辺の法線（-ez, ex）へ両者を射影して、重ならない軸が1本でもあれば離れている
+		const nx = -(pz[j] - pz[i]);
+		const nz = px[j] - px[i];
+		let tmin = Infinity,
+			tmax = -Infinity;
+		for (let k = 0; k < 3; k++) {
+			const d = nx * px[k] + nz * pz[k];
+			if (d < tmin) tmin = d;
+			if (d > tmax) tmax = d;
+		}
+		let bmin = Infinity,
+			bmax = -Infinity;
+		for (const [qx, qz] of corners) {
+			const d = nx * qx + nz * qz;
+			if (d < bmin) bmin = d;
+			if (d > bmax) bmax = d;
+		}
+		if (tmax < bmin || bmax < tmin) return false;
+	}
+	return true;
+};
 // 海（水面）：waterLevel から下がすべて水。落下は水の抵抗で沈降速度へ収束し「ゆっくり沈む」。
 const WATER_SINK_V = -0.7; // 沈降速度（マス/秒）
 const WATER_DRAG = 3.0; // 水の抵抗（1/秒。落下の勢いがこの速さで沈降速度へ収束）
@@ -510,6 +563,33 @@ const playSysSfx = (src: string) => {
 	}
 };
 
+/** クアッド1枚が画像から切り出す矩形 [u0, v0, u1, v1]。v は下が0（three の既定 flipY に合わせる）。 */
+type UvRect = [number, number, number, number];
+
+/** 壁画が覆うマスを1枚ずつ、貼るべきUVの切れ端と一緒に返す。
+ *  絵は矩形の全面へ1枚。各マスは自分の位置ぶんだけを受け取るので、並べると1枚の絵になる。 */
+const muralCells = (
+	m: Mural25D,
+): { col: number; row: number; level: number; uv: UvRect }[] => {
+	const out: { col: number; row: number; level: number; uv: UvRect }[] = [];
+	const base = m.level ?? 0;
+	const len = Math.max(1, m.length);
+	const lv = Math.max(1, m.levels);
+	for (let i = 0; i < len; i++) {
+		// 西辺のクアッドは u が -z 方向へ増える頂点順なので、列を逆から数える。
+		const ui = m.dir === 0 ? i : len - 1 - i;
+		for (let k = 0; k < lv; k++) {
+			out.push({
+				col: m.dir === 0 ? m.col + i : m.col,
+				row: m.dir === 0 ? m.row : m.row + i,
+				level: base + k,
+				uv: [ui / len, k / lv, (ui + 1) / len, (k + 1) / lv],
+			});
+		}
+	}
+	return out;
+};
+
 /** 歩行グラ（walk: 参照）の足踏み速度。NPCビルボードは常時ゆっくりマーチ、プレイヤーは歩行時のみ。 */
 const BILLBOARD_ANIM_FPS = 4;
 const PLAYER_ANIM_FPS = 7;
@@ -668,6 +748,8 @@ interface TexEntry {
 	canvas: HTMLCanvasElement;
 	url?: string;
 	anim?: WalkAnimState;
+	/** いま canvas へ壁画として（全面引き伸ばしで）描いてあるか。描き方が変わる指定なので url と同じく差し替え検知に要る。 */
+	mural?: boolean;
 }
 
 /** walk: 参照のうち、この2.5Dエンジンでシート分割アニメできる形式か
@@ -709,6 +791,32 @@ const drawCellContain = (
 	const w = sw * sc,
 		h = sh * sc;
 	ctx.drawImage(img, sx, sy, sw, sh, (cv.width - w) / 2, cv.height - h, w, h);
+};
+
+/** テクスチャキャンバスの既定サイズ（ドット絵前提）。壁画だけがここから外れる。 */
+const TEX_CANVAS_PX = 64;
+/** 壁画テクスチャのキャンバス寸法。手描きの正面図は 64px では線が完全に潰れる。
+ *  正方形で固定するのは、**キャンバスの寸法を画像の読み込み前に決める必要がある**ため
+ *  （下の canvasPxFor を参照）。絵の縦横比は「壁を何マス×何段で組むか」で決まるので、
+ *  ここで元画像の比を保つ必要はない。 */
+const MURAL_CANVAS_PX = 1024;
+
+/** そのテクスチャ定義が要求するキャンバスの一辺。画像の読み込みを待たずに決まる。 */
+const canvasPxFor = (def?: Tex25D) =>
+	def?.mural ? MURAL_CANVAS_PX : TEX_CANVAS_PX;
+
+/** 壁画（Tex25D.mural）用の描画：画像をキャンバス全面へ引き伸ばす。
+ *  UV 0〜1 が絵の全体と一致していないと壁の並びで絵が繋がらないため、
+ *  余白の出る contain ではなく fill で描く。 */
+const drawMuralFill = (
+	cv: HTMLCanvasElement,
+	img: HTMLImageElement,
+	smooth: boolean,
+) => {
+	const ctx = cv.getContext("2d")!;
+	ctx.imageSmoothingEnabled = smooth;
+	ctx.clearRect(0, 0, cv.width, cv.height);
+	ctx.drawImage(img, 0, 0, cv.width, cv.height);
 };
 
 /** 16×16 テクセルのブロック用ドット絵を、基準色から手続き的に作る。
@@ -958,6 +1066,9 @@ export class Yume25DEngine {
 	private povDistance = 1.6;
 	/** プレイヤーの大きさ（1=標準）。目線の高さ・見た目・当たり判定半径をまとめて決める。 */
 	private playerScale = 1;
+	/** モデル（Tex25D.modelCollision）から起こした当たり判定。
+	 *  キーは 1/MODEL_COLLIDE_SUB マス刻みのサブマス、値はその実体の上端 y。 */
+	private modelSolid = new Map<string, number>();
 	private hEdges = new Set<string>(); // セル(c,r)の北辺（z=r, x∈[c,c+1]）
 	private vEdges = new Set<string>(); // セル(c,r)の西辺（x=c, z∈[r,r+1]）
 	private billboardMeshes: THREE.Mesh[] = [];
@@ -1896,19 +2007,36 @@ export class Yume25DEngine {
 			color: "#ff00ff",
 		};
 		let entry = this.texEntries.get(id);
+		const wantPx = canvasPxFor(def);
+		if (entry && entry.canvas.width !== wantPx) {
+			// WebGL2 の three.js はテクスチャ領域を texStorage2D で**不変**に確保するので、
+			// 確保済みのキャンバスを後から拡縮しても画面へ反映されない（中身が更新されないまま残る）。
+			// 寸法が変わるときはテクスチャごと作り直す。getTex は clearScene 後の
+			// buildScene からしか呼ばれない＝古いマテリアルはもう居ないので、ここで破棄してよい。
+			entry.texture.dispose();
+			this.texEntries.delete(id);
+			entry = undefined;
+		}
 		if (!entry) {
 			const cv = document.createElement("canvas");
-			cv.width = 64;
-			cv.height = 64;
+			cv.width = wantPx;
+			cv.height = wantPx;
 			texCanvasDraw(cv, fallback);
 			const texture = new THREE.CanvasTexture(cv);
-			// ドット絵前提：常に最近傍補間・ミップマップなし
+			// ドット絵前提：既定は最近傍補間・ミップマップなし（Tex25D.smooth で線形へ）
 			texture.magFilter = THREE.NearestFilter;
 			texture.minFilter = THREE.NearestFilter;
 			texture.generateMipmaps = false;
 			texture.colorSpace = THREE.SRGBColorSpace;
 			entry = { texture, canvas: cv };
 			this.texEntries.set(id, entry);
+		}
+		// smooth の切り替えはテクスチャを作り直さず、フィルタだけ差し替える。
+		const filter = def?.smooth ? THREE.LinearFilter : THREE.NearestFilter;
+		if (entry.texture.magFilter !== filter) {
+			entry.texture.magFilter = filter;
+			entry.texture.minFilter = filter;
+			entry.texture.needsUpdate = true;
 		}
 		if (!def?.imageUrl) {
 			// 画像なし（または消去された）→ 色/絵文字を描き直す（Texture は同一実体を維持）
@@ -1918,10 +2046,12 @@ export class Yume25DEngine {
 			entry.texture.needsUpdate = true;
 			return entry.texture;
 		}
-		if (entry.url !== def.imageUrl) {
+		const mural = !!def.mural;
+		if (entry.url !== def.imageUrl || entry.mural !== mural) {
 			// 画像が新規指定/差し替えされた → ロードして描く。歩行グラ（walk:）ならアニメ登録。
 			const url = def.imageUrl;
 			entry.url = url;
+			entry.mural = mural;
 			entry.anim = undefined;
 			const walk = def.imageRef ? parseWalkRef(def.imageRef) : null;
 			// 単体スプライトの内蔵シート切り出し（url:...#sx,sy,sw,sh）に対応
@@ -1930,8 +2060,11 @@ export class Yume25DEngine {
 			img.crossOrigin = "anonymous";
 			img.onload = () => {
 				const e = this.texEntries.get(id);
-				if (this.disposed || !e || e.url !== url) return; // ロード中に差し替え/消去された
-				if (isAnimatableWalk(walk)) {
+				if (this.disposed || !e || e.url !== url || e.mural !== mural) return; // ロード中に差し替え/消去された
+				if (mural) {
+					// 壁画：1マスに収めず、壁の連なり全体へ1枚として貼る（UVは muralUvRects が割り当てる）
+					drawMuralFill(e.canvas, img, !!def.smooth);
+				} else if (isAnimatableWalk(walk)) {
 					const std =
 						walk.stdId === "auto"
 							? detectStandard(img.naturalWidth, img.naturalHeight)
@@ -1970,6 +2103,95 @@ export class Yume25DEngine {
 			img.src = loadUrl;
 		}
 		return entry.texture;
+	}
+
+	/**
+	 * 配置済みモデルの形から当たり判定を起こす（Tex25D.modelCollision）。
+	 * プレイヤーの体が通る高さ帯を横切る三角形が乗っているマスを「塞がったマス」とし、
+	 * その**外周の辺だけ**を薄板壁として登録する。判定そのものは既存の hEdges/vEdges に
+	 * 乗るので、壁と同じ挙動になる（押し出し・すり抜け防止もそのまま効く）。
+	 * 外周だけにするのは、中庭や門のような空きをマスとして残し、通れるようにするため。
+	 * 足元 MODEL_COLLIDE_FLOOR_SKIP ぶんを見ないので、地面や土台の水平面では塞がらない。
+	 * buildScene は毎回 hEdges/vEdges を作り直し、モデルのロードは解決済みPromiseから
+	 * 再開するので、再構築のたびにここが呼び直される。
+	 */
+	private addModelCollision(root: THREE.Object3D, baseY: number) {
+		const y0 = baseY + MODEL_COLLIDE_FLOOR_SKIP;
+		const y1 = baseY + PLAYER_BODY_H;
+		const box = new THREE.Box3().setFromObject(root);
+		const top = Math.max(box.max.y, y1); // 跳んでも入れないよう、実体はモデルの高さまであるものとして扱う
+		const sub = MODEL_COLLIDE_SUB;
+		const step = 1 / sub;
+		const vx = [0, 0, 0];
+		const vy = [0, 0, 0];
+		const vz = [0, 0, 0];
+		const p = new THREE.Vector3();
+		root.updateWorldMatrix(true, true);
+		root.traverse((o) => {
+			const mesh = o as THREE.Mesh;
+			if (!mesh.isMesh) return;
+			const geo = mesh.geometry as THREE.BufferGeometry;
+			const pos = geo.getAttribute("position");
+			if (!pos) return;
+			const idx = geo.getIndex();
+			const count = idx ? idx.count : pos.count;
+			for (let i = 0; i + 2 < count; i += 3) {
+				for (let k = 0; k < 3; k++) {
+					const j = idx ? idx.getX(i + k) : i + k;
+					p.fromBufferAttribute(pos, j).applyMatrix4(mesh.matrixWorld);
+					vx[k] = p.x;
+					vy[k] = p.y;
+					vz[k] = p.z;
+				}
+				if (Math.max(vy[0], vy[1], vy[2]) < y0) continue; // 帯より下（地面など）
+				if (Math.min(vy[0], vy[1], vy[2]) > y1) continue; // 帯より上（屋根・塔など）
+				const sx0 = Math.floor(Math.min(vx[0], vx[1], vx[2]) * sub);
+				const sx1 = Math.floor(Math.max(vx[0], vx[1], vx[2]) * sub);
+				const sz0 = Math.floor(Math.min(vz[0], vz[1], vz[2]) * sub);
+				const sz1 = Math.floor(Math.max(vz[0], vz[1], vz[2]) * sub);
+				for (let sc = sx0; sc <= sx1; sc++)
+					for (let sr = sz0; sr <= sz1; sr++)
+						if (
+							triXzHitsRect(
+								vx,
+								vz,
+								sc * step,
+								sr * step,
+								(sc + 1) * step,
+								(sr + 1) * step,
+							)
+						) {
+							const key = `${sc},${sr}`;
+							const prev = this.modelSolid.get(key);
+							if (prev === undefined || top > prev)
+								this.modelSolid.set(key, top);
+						}
+			}
+		});
+	}
+
+	/** プレイヤーの円が、モデルから起こした占有サブマスに重なるか。
+	 *  足元がそのサブマスの上端を超えていれば（屋上に立っている等）遮らない。 */
+	private blockedByModel(x: number, z: number): boolean {
+		if (this.modelSolid.size === 0) return false;
+		const sub = MODEL_COLLIDE_SUB;
+		const r = PLAYER_RADIUS;
+		const sc0 = Math.floor((x - r) * sub),
+			sc1 = Math.floor((x + r) * sub);
+		const sr0 = Math.floor((z - r) * sub),
+			sr1 = Math.floor((z + r) * sub);
+		for (let sc = sc0; sc <= sc1; sc++)
+			for (let sr = sr0; sr <= sr1; sr++) {
+				const top = this.modelSolid.get(`${sc},${sr}`);
+				if (top === undefined || this.hop >= top - 1e-3) continue;
+				// 円と軸並行矩形の最近点距離で重なりを見る
+				const qx = Math.min(Math.max(x, sc / sub), (sc + 1) / sub);
+				const qz = Math.min(Math.max(z, sr / sub), (sr + 1) / sub);
+				const dx = x - qx,
+					dz = z - qz;
+				if (dx * dx + dz * dz < r * r) return true;
+			}
+		return false;
 	}
 
 	/** walk: 参照のテクスチャ（NPCビルボード等）を常時ゆっくり足踏みさせる。
@@ -2208,11 +2430,16 @@ export class Yume25DEngine {
 		// 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
 		this.hEdges.clear();
 		this.vEdges.clear();
-		for (const w of L.walls) {
-			if ((w.level ?? 0) !== 0) continue;
-			if (w.dir === 0) this.hEdges.add(`${w.col},${w.row}`);
-			else if (w.dir === 3) this.vEdges.add(`${w.col},${w.row}`);
-		}
+		this.modelSolid.clear(); // モデルのロード完了時に張り直される
+		const addEdge = (col: number, row: number, dir: Dir4, level: number) => {
+			if (level !== 0) return;
+			if (dir === 0) this.hEdges.add(`${col},${row}`);
+			else if (dir === 3) this.vEdges.add(`${col},${row}`);
+		};
+		for (const w of L.walls) addEdge(w.col, w.row, w.dir, w.level ?? 0);
+		// 壁画も同じ薄板壁として塞ぐ（足元の段が0のときだけ）。
+		for (const m of L.murals ?? [])
+			for (const c of muralCells(m)) addEdge(c.col, c.row, m.dir, c.level);
 
 		// ── 床・天井：テクスチャIDごとに1ジオメトリへマージ ──
 		const floorQuads = new Map<number, number[]>(); // texId -> [c,r, ...]
@@ -2224,6 +2451,8 @@ export class Yume25DEngine {
 				arr.push(c, r);
 				floorQuads.set(t, arr);
 			}
+		// uvRect = [u0, v0, u1, v1]。既定はクアッド1枚へ画像1枚（従来どおり）。
+		// 壁画（Tex25D.mural）はここへマス単位の切れ端を渡し、並びで1枚の絵になる。
 		const pushQuad = (
 			pos: number[],
 			uv: number[],
@@ -2231,25 +2460,27 @@ export class Yume25DEngine {
 			col: number[],
 			v: number[][],
 			shade: number,
+			uvRect: UvRect = [0, 0, 1, 1],
 		) => {
 			const base = pos.length / 3;
 			for (const p of v) {
 				pos.push(p[0], p[1], p[2]);
 				col.push(shade, shade, shade);
 			}
-			uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+			const [u0, v0, u1, v1] = uvRect;
+			uv.push(u0, v0, u1, v0, u1, v1, u0, v1);
 			idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
 		};
 		const makeMergedMesh = (
 			texId: number,
-			quads: { v: number[][]; s: number }[],
+			quads: { v: number[][]; s: number; uv?: UvRect }[],
 			doubleSided: boolean,
 		) => {
 			const pos: number[] = [];
 			const uv: number[] = [];
 			const idx: number[] = [];
 			const col: number[] = [];
-			for (const q of quads) pushQuad(pos, uv, idx, col, q.v, q.s);
+			for (const q of quads) pushQuad(pos, uv, idx, col, q.v, q.s, q.uv);
 			const geo = new THREE.BufferGeometry();
 			geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
 			geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
@@ -2262,6 +2493,9 @@ export class Yume25DEngine {
 				map: this.getTex(texId),
 				vertexColors: true,
 				side: doubleSided ? THREE.DoubleSide : THREE.FrontSide,
+				// 切り抜きは transparent:false のまま alphaTest で行う（ビルボードと同じ理由で、
+				// 深度ソートに載せると壁どうしの描画順バグが出る）。
+				...(L.textures[texId]?.cutout ? { alphaTest: 0.5 } : {}),
 			});
 			this.ownedGeometries.push(geo);
 			this.ownedMaterials.push(mat);
@@ -2310,36 +2544,54 @@ export class Yume25DEngine {
 
 		// ── 壁：薄板1枚。両面描画して裏からも見えるようにする。
 		//    level の段だけ上（y = level*H 〜 (level+1)*H）に積み上げる ──
-		const wallQuads = new Map<number, { v: number[][]; s: number }[]>();
-		for (const w of L.walls) {
-			const arr = wallQuads.get(w.tex) ?? [];
-			const y0 = (w.level ?? 0) * H,
+		const wallQuads = new Map<
+			number,
+			{ v: number[][]; s: number; uv?: UvRect }[]
+		>();
+		const pushWallQuad = (
+			tex: number,
+			col: number,
+			row: number,
+			dir: Dir4,
+			level: number,
+			uv?: UvRect,
+		) => {
+			const arr = wallQuads.get(tex) ?? [];
+			const y0 = level * H,
 				y1 = y0 + H;
-			if (w.dir === 0) {
+			if (dir === 0) {
 				// 北辺：z=row、x∈[col, col+1]
 				arr.push({
 					v: [
-						[w.col, y0, w.row],
-						[w.col + 1, y0, w.row],
-						[w.col + 1, y1, w.row],
-						[w.col, y1, w.row],
+						[col, y0, row],
+						[col + 1, y0, row],
+						[col + 1, y1, row],
+						[col, y1, row],
 					],
 					s: FACE_SHADE.northSouth,
+					uv,
 				});
 			} else {
 				// 西辺：x=col、z∈[row, row+1]
 				arr.push({
 					v: [
-						[w.col, y0, w.row + 1],
-						[w.col, y0, w.row],
-						[w.col, y1, w.row],
-						[w.col, y1, w.row + 1],
+						[col, y0, row + 1],
+						[col, y0, row],
+						[col, y1, row],
+						[col, y1, row + 1],
 					],
 					s: FACE_SHADE.eastWest,
+					uv,
 				});
 			}
-			wallQuads.set(w.tex, arr);
-		}
+			wallQuads.set(tex, arr);
+		};
+		for (const w of L.walls)
+			pushWallQuad(w.tex, w.col, w.row, w.dir, w.level ?? 0);
+		// 壁画は1マス1枚ではなく、矩形の全面へ画像1枚。マスごとに切れ端のUVを渡す。
+		for (const m of L.murals ?? [])
+			for (const c of muralCells(m))
+				pushWallQuad(m.tex, c.col, c.row, m.dir, c.level, c.uv);
 		for (const [texId, quads] of wallQuads) makeMergedMesh(texId, quads, true);
 
 		// ── ビルボード：透過スプライト。alphaTest で深度バグ（奥の板が透けて欠ける）を防ぐ ──
@@ -2444,6 +2696,8 @@ export class Yume25DEngine {
 						-(box2.min.z + box2.max.z) / 2,
 					);
 					holder.add(inst);
+					// 当たり判定は既定ではすり抜け。素材側で指定されたものだけ、形から起こす。
+					if (def.modelCollision) this.addModelCollision(inst, baseY);
 				});
 				continue;
 			}
@@ -3788,6 +4042,10 @@ export class Yume25DEngine {
 			)
 				nx = b + PLAYER_RADIUS + EPS;
 		}
+		// モデル由来の実体はサブマス単位なので、辺ではなく「移動先で重なるか」で見る。
+		// 既に埋まっているときは塞がない（モデルが足元に現れた場合に閉じ込めないため）。
+		if (this.blockedByModel(nx, this.z) && !this.blockedByModel(this.x, this.z))
+			return;
 		this.x = nx;
 	}
 	private moveZ(dz: number) {
@@ -3810,6 +4068,8 @@ export class Yume25DEngine {
 			)
 				nz = b + PLAYER_RADIUS + EPS;
 		}
+		if (this.blockedByModel(this.x, nz) && !this.blockedByModel(this.x, this.z))
+			return;
 		this.z = nz;
 	}
 

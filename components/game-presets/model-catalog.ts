@@ -12,7 +12,14 @@ export interface ModelCatalogEntry {
 	/** キーワード検索の対象（日本語・英語を空白区切りで） */
 	tags: string;
 	url: string;
-	source: "three.js" | "Khronos" | "MMD";
+	source: "three.js" | "Khronos" | "MMD" | "ニコニ立体";
+	/** 配布元の指定に従うクレジット表記。表示不要な素材では省く。 */
+	credit?: string;
+	/** 置いたときに形から当たり判定を作るか。建物や岩のような「入れない物」だけ true。
+	 *  動物やキャラクターは歩き回るので false（未指定）のまま。 */
+	collide?: boolean;
+	/** 置いたときの大きさ（最大辺のマス数）。未指定は1。建物のように実寸が要る素材で指定する。 */
+	scale?: number;
 	/** モデル/モーションのフォーマット */
 	format?: "glb" | "gltf" | "pmx" | "pmd" | "vmd";
 	/** PMX/PMDモデル推奨のデフォルトVMDモーションURL */
@@ -33,6 +40,9 @@ const TAKAHIROX_MMD =
 	"https://cdn.jsdelivr.net/gh/takahirox/MMDLoader-app@master";
 const TAKAHIROX_MMD_VIEWER =
 	"https://cdn.jsdelivr.net/gh/takahirox/mmd-viewer-js@master";
+// 組み込み素材だけを置くR2バケット（unj-builtin）。一般ユーザーは書き込まず、運営が wrangler で置く。
+// 画像・テキストと違って形式を問わないので、中身の種類ではなく出所で分けてある。
+const BUILTIN = "https://pub-07d0a11104d64dcfbe036c7ec263ac55.r2.dev";
 
 export const MMD_MODEL_CATALOG: ModelCatalogEntry[] = [
 	{
@@ -466,6 +476,66 @@ export const MMD_MOTION_CATALOG: ModelCatalogEntry[] = [
 export const MODEL_CATALOG: ModelCatalogEntry[] = [
 	// MMD_MODEL_CATALOG はここに含めない（PMD/PMXはGLTFLoaderで読めないため、
 	// mmo3dのbabylon-mmd専用。Mmo3dEditorPanel.tsxが直接参照する）。
+	{
+		// ニコニ立体 td95608「ガバ立教大学」(novichok)。著作表示不要・商用可・改変可・再配布可。
+		// 配布は OBJ+MTL+PNG なので、GLTFLoader で読めるよう GLB へ変換して置いてある。
+		key: "rikkyo",
+		label: "赤レンガの本館",
+		emoji: "🏛️",
+		tags: "building 建物 校舎 大学 レンガ 洋館 立教 rikkyo",
+		url: `${BUILTIN}/models/rikkyo.glb`,
+		source: "ニコニ立体",
+		credit: "ガバ立教大学 / novichok",
+		format: "glb",
+		collide: true,
+		scale: 14,
+	},
+	{
+		// 同じ作者の冬版（td95609）。UV座標が別物なので通常版とはテクスチャを共有できない。
+		key: "rikkyo-winter",
+		label: "赤レンガの本館（冬）",
+		emoji: "🏛️",
+		tags: "building 建物 校舎 大学 レンガ 洋館 立教 rikkyo 冬 雪 winter snow",
+		url: `${BUILTIN}/models/rikkyo-winter.glb`,
+		source: "ニコニ立体",
+		credit: "ガバ立教大学（冬） / novichok",
+		format: "glb",
+		collide: true,
+		scale: 14,
+	},
+	// ローポリの家6種（td96137, まつかりすく）。CC0。配布物は6軒を並べた1ファイルなので、
+	// 1軒ずつ置けるようノード単位へ分割し、テクスチャを512pxへ落としてある（1軒32KB）。
+	...([1, 2, 3, 4, 5, 6].map((n) => ({
+		key: `house${n}`,
+		label: `家 ${n}`,
+		emoji: "🏠",
+		tags: `house 家 住宅 民家 建物 街 town ${n}`,
+		url: `${BUILTIN}/models/house${n}.glb`,
+		source: "ニコニ立体" as const,
+		credit: "家 ローポリ3Dモデル / まつかりすく (CC0)",
+		format: "glb" as const,
+		collide: true,
+		scale: 4,
+	})) as ModelCatalogEntry[]),
+	// ローポリ地形4種（td87473-5 / td87464, 遠藤 現終(仮名)）。要クレジット表示。
+	// テクスチャ無しの単色メッシュ。頂点を量子化して 1.7MB→1.2MB にしてある。
+	...([
+		["rock", "岩山", "🪨", "rock 岩 岩山 山 崖"],
+		["green", "野山", "⛰️", "green 野山 山 草 丘"],
+		["sand", "砂山", "🏜️", "sand 砂 砂山 山 砂漠 desert"],
+		["snow", "雪山", "🏔️", "snow 雪 雪山 山 氷 winter"],
+	].map(([k, label, emoji, tags]) => ({
+		key: `mountain-${k}`,
+		label: `ローポリ ${label}`,
+		emoji,
+		tags: `${tags} 地形 terrain 風景`,
+		url: `${BUILTIN}/models/mountain-${k}.glb`,
+		source: "ニコニ立体" as const,
+		credit: "ローポリ山シリーズ / 遠藤 現終(仮名)",
+		format: "glb" as const,
+		collide: true,
+		scale: 20,
+	})) as ModelCatalogEntry[]),
 	{
 		key: "duck",
 		label: "アヒル",
