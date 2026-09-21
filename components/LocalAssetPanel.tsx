@@ -12,6 +12,7 @@ import {
 	MV_LOCAL_SPRITES,
 	mvSpriteRef,
 } from "@/lib/local-assets";
+import { SURFACE_CATALOG, type SurfaceAsset } from "@/lib/surface-catalog";
 import { loadImage } from "@/lib/walk-sprite";
 import type { PickResult } from "./ContentPicker";
 import WalkSpritePreview from "./WalkSpritePreview";
@@ -53,6 +54,12 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 				>
 					キャラ
 				</button>
+				<button
+					className={secBtn(section === "surface")}
+					onClick={() => setSection("surface")}
+				>
+					表面素材
+				</button>
 				{LOCAL_TILE_SHEETS.map((s) => (
 					<button
 						key={s.id}
@@ -66,6 +73,8 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 
 			{section === "mv" ? (
 				<MvSpriteGrid onPick={onPick} />
+			) : section === "surface" ? (
+				<SurfaceGrid onPick={onPick} />
 			) : section === "chars" ? (
 				<>
 					<p className="text-[10px] text-gray-600 px-0.5">
@@ -108,6 +117,60 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 					onPick={onPick}
 				/>
 			)}
+		</div>
+	);
+}
+
+/**
+ * 表面素材（床・壁に貼るシームレステクスチャ、空のパノラマ）。
+ * タイルシートと違って1枚＝1素材なので、クロップ指定を付けずそのまま url: 参照で渡す。
+ */
+function SurfaceGrid({ onPick }: { onPick: (res: PickResult) => void }) {
+	const groups: { kind: SurfaceAsset["kind"]; label: string; note: string }[] = [
+		{ kind: "floor", label: "地面", note: "床ツールで塗ると道や地面になります" },
+		{ kind: "wall", label: "壁", note: "壁ツールで置くと塀になります" },
+		{
+			kind: "sky",
+			label: "空（360度パノラマ）",
+			note: "設定タブの「背景画像」に指定します。床や壁には使いません",
+		},
+	];
+	return (
+		<div className="flex flex-col gap-3">
+			<p className="px-0.5 text-[10px] text-gray-600">
+				つなぎ目のない地面・壁のテクスチャ（すべて CC0）。低解像度で描くエンジン向けに縮めてあります。
+			</p>
+			{groups.map((g) => (
+				<div key={g.kind} className="flex flex-col gap-1.5">
+					<p className="px-0.5 text-[10px] font-bold text-gray-500">
+						{g.label}
+						<span className="ml-1.5 font-normal text-gray-600">{g.note}</span>
+					</p>
+					<div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+						{SURFACE_CATALOG.filter((s) => s.kind === g.kind).map((s) => (
+							<button
+								key={s.key}
+								onClick={() =>
+									onPick({ ref: `url:${s.url}`, url: s.url, label: s.label })
+								}
+								title={s.credit}
+								className="flex flex-col items-center gap-1 p-1 rounded-lg border border-gray-800 hover:border-blue-500 bg-[#11131a] group"
+							>
+								{/* eslint-disable-next-line @next/next/no-img-element */}
+								<img
+									src={s.url}
+									alt=""
+									loading="lazy"
+									className="w-full aspect-square object-cover rounded"
+								/>
+								<span className="text-[9px] font-bold text-gray-400 group-hover:text-blue-400 truncate w-full text-center">
+									{s.label}
+								</span>
+							</button>
+						))}
+					</div>
+				</div>
+			))}
 		</div>
 	);
 }
