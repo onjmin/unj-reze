@@ -12,7 +12,7 @@ export interface ModelCatalogEntry {
 	/** キーワード検索の対象（日本語・英語を空白区切りで） */
 	tags: string;
 	url: string;
-	source: "three.js" | "Khronos" | "MMD" | "ニコニ立体";
+	source: "three.js" | "Khronos" | "MMD" | "ニコニ立体" | "Sketchfab";
 	/** 配布元の指定に従うクレジット表記。表示不要な素材では省く。 */
 	credit?: string;
 	/** 置いたときに形から当たり判定を作るか。建物や岩のような「入れない物」だけ true。
@@ -586,6 +586,72 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
 		collide: true,
 		scale: 2,
 	},
+	{
+		// td1382。配布は Unity 向けの FBX なので GLB へ変換し、
+		// 読めない TGA テクスチャを同梱の JPG へ差し替えてある。寸法は中京間(910×1820mm)。
+		key: "tatami",
+		label: "畳",
+		emoji: "🟩",
+		tags: "tatami 畳 和室 床 室内 japanese",
+		url: `${BUILTIN}/models/tatami.glb`,
+		source: "ニコニ立体",
+		credit: "畳 / ◆GRGSIBERIA",
+		format: "glb",
+		scale: 1.8,
+	},
+	{
+		key: "pot",
+		label: "金の壺",
+		emoji: "🏺",
+		tags: "pot 壺 つぼ 金 宝 小道具 室内",
+		url: `${BUILTIN}/models/pot.glb`,
+		source: "ニコニ立体",
+		credit: "金の壺 / 遠藤 現終(仮名)",
+		format: "glb",
+		collide: true,
+		scale: 0.8,
+	},
+	{
+		key: "cup",
+		label: "コップ",
+		emoji: "🥛",
+		tags: "cup コップ グラス 食器 小道具 室内",
+		url: `${BUILTIN}/models/cup.glb`,
+		source: "ニコニ立体",
+		credit: "コップ / k45mm-R",
+		format: "glb",
+		scale: 0.3,
+	},
+	// Sketchfab の CC BY 素材（日本の街並み一式）。表示義務があるので credit は必ず持たせる。
+	// 配布は 1024px の PBR テクスチャ込みで数MBあるが、このエンジンは低解像度で描くので
+	// 256px へ落としたうえで頂点を量子化してある（いずれも 1MB 未満）。
+	...([
+		["torii", "鳥居", "⛩️", "torii 鳥居 神社 shrine 門", 4, true, "Japanese Torii Gate / sahirvirmani"],
+		["stone-lantern", "石灯籠", "🏮", "lantern 灯籠 石灯籠 神社 庭", 1.6, true, "Japanese Stone Lantern / sahirvirmani"],
+		["jp-house-01", "日本家屋 1", "🏠", "house 家 日本家屋 住宅 建物 街", 8, true, "Japanese Residential Home 01 / reckzilla"],
+		["jp-house-03", "日本家屋 2", "🏠", "house 家 日本家屋 住宅 建物 街", 8, true, "Japanese Residential Home 03 / reckzilla"],
+		["psx-house", "日本家屋（PSX風）", "🏚️", "house 家 日本家屋 psx レトロ 建物", 8, true, "PSX Japanese House / Shazly"],
+		["jp-store", "商店", "🏪", "store 店 商店 建物 街 商店街", 8, true, "Old Japanese Store / Fridqeir"],
+		["vending", "自動販売機", "🥤", "vending 自販機 自動販売機 街 小道具", 2.4, true, "Outdoor Vending Machines / caboose3d"],
+		["utility-pole", "電柱", "🗼", "pole 電柱 電信柱 街 屋外", 8, true, "Telephone Poles / caboose3d"],
+		["traffic-light", "信号機", "🚦", "traffic 信号 信号機 街 道路", 5, true, "Japanese Traffic Light / afx_cgmotion"],
+		["phone-booth", "電話ボックス", "☎️", "phone 電話 電話ボックス 街 屋外", 2.2, true, "low poly phone booth / creosine"],
+		["park-bench", "ベンチ", "🪑", "bench ベンチ 公園 屋外 家具", 1.8, true, "Classic Park Bench (Low Poly) / berkgedik"],
+		["neon-signs", "ネオン看板", "🈺", "neon 看板 ネオン 街 商店街 夜", 3, false, "Japanese neon sign set / ydvisual"],
+		["chochin", "提灯", "🏮", "lantern 提灯 ちょうちん 祭り 和風", 0.8, false, "Chinese / Japanese paper lantern chochin / deepdown"],
+		["wood-bridge", "木橋", "🌉", "bridge 橋 木橋 和風 庭 風景", 8, false, "Japanese Wood Bridge / btitkin95"],
+	].map(([key, label, emoji, tags, scale, collide, credit]) => ({
+		key: key as string,
+		label: label as string,
+		emoji: emoji as string,
+		tags: tags as string,
+		url: `${BUILTIN}/models/${key}.glb`,
+		source: "Sketchfab" as const,
+		credit: `${credit} (CC BY)`,
+		format: "glb" as const,
+		scale: scale as number,
+		...(collide ? { collide: true } : {}),
+	})) as ModelCatalogEntry[]),
 	{
 		key: "duck",
 		label: "アヒル",
