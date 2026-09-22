@@ -15119,7 +15119,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       const hurtSeq = statusShakeMap[m.id];
                       const pop = dtDmgPopups[m.id];
                       return (
-                        // key に被弾シーケンスを混ぜて要素を作り直すことで、連続被弾でもアニメが必ず頭から再生される
+                        // ダメージ数値は枠の外（この包み）に置く。枠は揺れ終わりにも key が変わって作り直されるので、
+                        // 中に置くと浮かび上がりの途中で頭から再生し直され、数字が2回浮かぶ。
+                        <div key={m.id} className="relative">
+                        {/* key に被弾シーケンスを混ぜて要素を作り直すことで、連続被弾でもアニメが必ず頭から再生される */}
                         <div key={`${m.id}:${hurtSeq ?? 0}`}
                           className={`relative bg-black/90 border-2 rounded px-3 py-1.5 text-white min-w-[132px] shadow-xl ${hurtSeq ? 'border-red-500 bg-red-950/90' : 'border-gray-300'}`}
                           style={hurtSeq ? { animation: `statusHurtShake ${STATUS_SHAKE_MS}ms ease-in-out` } : undefined}>
@@ -15133,13 +15136,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <span className="text-indigo-200">{m.mp}/{m.maxMp ?? m.mp}</span>
                           </div>
                           <div className="text-[12px] leading-tight text-gray-400 mt-0.5 text-right">Lv.{progressRef.current.level}</div>
-                          {/* 被弾ダメージ数値のポップアップ */}
-                          {pop && (
-                            <div key={pop.id} className="absolute -top-2 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-2xl whitespace-nowrap z-10"
-                              style={{ color: '#000', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
-                              {pop.text}
-                            </div>
-                          )}
+                        </div>
+                        {/* 被弾ダメージ数値のポップアップ */}
+                        {pop && (
+                          <div key={pop.id} className="absolute -top-2 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-2xl whitespace-nowrap z-10"
+                            style={{ color: '#000', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
+                            {pop.text}
+                          </div>
+                        )}
                         </div>
                       );
                     })}
