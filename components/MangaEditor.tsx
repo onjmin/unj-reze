@@ -33,6 +33,7 @@ import {
 	BubbleConfig,
 	BubbleShape,
 	drawBubble,
+	getBubbleBounds,
 	TailDirection,
 } from "@/lib/manga-bubble";
 import { drawMangaText, MangaTextConfig } from "@/lib/manga-vertical-text";
@@ -534,15 +535,54 @@ function DialoguePreviewCanvas({
 			x: canvas.width / 2,
 			y: canvas.height / 2,
 		};
+
+		// 実際に描かれる範囲（しっぽ・トゲ・思考泡・線の太さ込み）を求めて、
+		// はみ出す場合は縮小して全体を映す。文字は本体の矩形に収まる前提。
+		const bubble =
+			dummyItem.shape === "none"
+				? null
+				: getBubbleBounds({
+						x: dummyItem.x,
+						y: dummyItem.y,
+						w: dummyItem.w,
+						h: dummyItem.h,
+						shape: dummyItem.shape,
+						tail: dummyItem.tail,
+						borderWidth: dummyItem.borderWidth ?? 3,
+					});
+		const textLeft = dummyItem.x - dummyItem.w / 2;
+		const textTop = dummyItem.y - dummyItem.h / 2;
+		const left = bubble ? Math.min(bubble.x, textLeft) : textLeft;
+		const top = bubble ? Math.min(bubble.y, textTop) : textTop;
+		const right = bubble
+			? Math.max(bubble.x + bubble.w, textLeft + dummyItem.w)
+			: textLeft + dummyItem.w;
+		const bottom = bubble
+			? Math.max(bubble.y + bubble.h, textTop + dummyItem.h)
+			: textTop + dummyItem.h;
+
+		const pad = 8;
+		const scale = Math.min(
+			1,
+			(canvas.width - pad * 2) / Math.max(1, right - left),
+			(canvas.height - pad * 2) / Math.max(1, bottom - top),
+		);
+
+		ctx.save();
+		// 描画範囲の中心をキャンバス中心に合わせてから縮小する
+		ctx.translate(canvas.width / 2, canvas.height / 2);
+		ctx.scale(scale, scale);
+		ctx.translate(-(left + right) / 2, -(top + bottom) / 2);
 		drawMangaDialogue(ctx, dummyItem);
+		ctx.restore();
 	}, [dialogue]);
 
 	return (
 		<canvas
 			ref={canvasRef}
 			width={360}
-			height={180}
-			className="w-full max-h-[180px] rounded-lg border border-gray-700 shadow-inner bg-slate-900 object-contain"
+			height={220}
+			className="w-full max-h-[220px] rounded-lg border border-gray-700 shadow-inner bg-slate-900 object-contain"
 		/>
 	);
 }
