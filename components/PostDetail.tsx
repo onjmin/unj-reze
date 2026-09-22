@@ -23,7 +23,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { getAvatarInfo } from "@/lib/avatar";
+import { avatarSeedOf, getAvatarInfo } from "@/lib/avatar";
 import {
 	createGame,
 	createMv,
@@ -118,7 +118,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	}, []);
 
 	const [post, setPost] = useState<Post>(initial);
-	const postAuthorId = post.bbsId || post.userId;
+	const postAuthorId = avatarSeedOf(post);
 	const postAvatarInfo = getAvatarInfo(postAuthorId, post.displayName);
 	// MML本文はR2にある（content にはマーカーだけ）。「曲を編集」導線はここで
 	// 解決済みの本文を使い回す。独自に都度フェッチすると失敗時の扱いがずれて
@@ -1744,6 +1744,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			{composerOpen && (
 				<PostComposer
 					userId={userId}
+					avatarSeed={userSlug}
 					avatarUrl={avatarUrl}
 					text={replyText}
 					setText={setReplyText}
@@ -2230,7 +2231,7 @@ function ReplyTreeItem({
 	const { handleLike, handleDislike, handleRepost, handleHeart } =
 		usePostActions(userId, (_id, updater) => setLocalPost(updater));
 
-	const authorId = localPost.bbsId || localPost.userId;
+	const authorId = avatarSeedOf(localPost);
 	const avatarInfo = getAvatarInfo(authorId, localPost.displayName);
 	const isSelf =
 		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;

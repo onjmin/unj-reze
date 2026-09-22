@@ -20,7 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { getAvatarInfo } from "@/lib/avatar";
+import { avatarSeedOf, getAvatarInfo } from "@/lib/avatar";
 import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { getDistinctTitle } from "@/lib/post-title";
@@ -110,7 +110,7 @@ export default function PostContainer({
 	onPostUpdated,
 }: PostContainerProps) {
 	const router = useRouter();
-	const authorId = post.bbsId || post.userId;
+	const authorId = avatarSeedOf(post);
 	const avatarInfo = getAvatarInfo(authorId, post.displayName);
 	const [showReplyInput, setShowReplyInput] = useState(false);
 	const [replyText, setReplyText] = useState("");
@@ -734,7 +734,7 @@ export default function PostContainer({
 					{quotedPost &&
 						(() => {
 							const quotedAvatarInfo = getAvatarInfo(
-								quotedPost.bbsId || quotedPost.userId,
+								avatarSeedOf(quotedPost),
 								quotedPost.displayName,
 							);
 							return (
@@ -1078,7 +1078,7 @@ function ReplyPreview({
 	// 21件以上のスレが全部「+15」で頭打ちになる。
 	const extraCount = Math.max(replies.length, parentPost.repliesCount) - maxAvatars;
 
-	const activeAuthorId = reply?.bbsId || reply?.userId;
+	const activeAuthorId = avatarSeedOf(reply);
 	const activeAvatarInfo = getAvatarInfo(activeAuthorId, reply?.displayName);
 
 	return (
@@ -1095,7 +1095,7 @@ function ReplyPreview({
 						const isActive =
 							(r.slug || r.displayName) ===
 							(reply?.slug || reply?.displayName);
-						const rAuthorId = r.bbsId || r.userId;
+						const rAuthorId = avatarSeedOf(r);
 						const rAvatarInfo = getAvatarInfo(rAuthorId, r.displayName);
 						return (
 							<div

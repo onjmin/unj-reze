@@ -20,6 +20,8 @@ const MmlPlayer = dynamic(() => import("./MmlPlayer"), { ssr: false });
 
 interface PostComposerProps {
 	userId: string;
+	/** 自動生成アイコンの種（slug）。プロフィール・投稿と同じ絵柄にするため表示名より優先する。 */
+	avatarSeed?: string;
 	avatarUrl?: string;
 	text: string;
 	setText: (v: string) => void;
@@ -79,6 +81,7 @@ function ToolbarButton({
 
 export default function PostComposer({
 	userId,
+	avatarSeed,
 	avatarUrl,
 	text,
 	setText,
@@ -163,7 +166,7 @@ export default function PostComposer({
 	};
 	const originOption = ORIGIN_TYPE_OPTIONS.find((o) => o.value === originType);
 
-	const avatarInfo = getAvatarInfo(userId);
+	const avatarInfo = getAvatarInfo(avatarSeed || userId, userId);
 	const replyAvatarInfo = replyToDisplayName
 		? getAvatarInfo(replyToDisplayName)
 		: null;
@@ -330,7 +333,9 @@ export default function PostComposer({
 						<p className="text-xs font-bold text-amber-200 truncate">
 							{talkDraft.title}
 						</p>
-						<p className="text-[10px] text-amber-400/70">かけあい動画を添付中</p>
+						<p className="text-[10px] text-amber-400/70">
+							かけあい動画を添付中
+						</p>
 					</div>
 					<div className="flex items-center gap-1.5 ml-auto">
 						<button

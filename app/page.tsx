@@ -2164,6 +2164,7 @@ export default function App() {
 												<PostComposer
 													inline
 													userId={userId}
+													avatarSeed={currentUser?.slug}
 													avatarUrl={currentUser?.avatarUrl}
 													bbsMode={bbsMode}
 													text={inputText}
@@ -2283,6 +2284,7 @@ export default function App() {
 					{composerOpen && (
 						<PostComposer
 							userId={userId}
+							avatarSeed={currentUser?.slug}
 							avatarUrl={currentUser?.avatarUrl}
 							bbsMode={bbsMode}
 							text={inputText}

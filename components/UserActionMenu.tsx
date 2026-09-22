@@ -73,7 +73,7 @@ export default function UserActionMenu({
 		currentUserId === targetUserDisplayName ||
 		currentUserSlug === targetUserSlug;
 	const avatarInfo = getAvatarInfo(
-		targetUserId || targetUserSlug,
+		targetUserSlug || targetUserId,
 		targetUserDisplayName,
 	);
 

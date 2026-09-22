@@ -27,7 +27,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { getAvatarInfo } from "@/lib/avatar";
+import { avatarSeedOf, getAvatarInfo } from "@/lib/avatar";
 import { extractChordsFromContent } from "@/lib/chord";
 import { collabHref } from "@/lib/collab-link";
 import {
@@ -129,7 +129,7 @@ function ProfilePostMenu({
 	const [showReportModal, setShowReportModal] = useState(false);
 	const [reportReason, setReportReason] = useState("");
 
-	const pAuthorId = post.bbsId || post.userId;
+	const pAuthorId = avatarSeedOf(post);
 	const pAvatarInfo = getAvatarInfo(pAuthorId, post.displayName);
 	const targetSlug = post.slug || post.displayName;
 	const isSelfPost = !!currentUserSlug && currentUserSlug === targetSlug;
@@ -1399,7 +1399,7 @@ export default function ProfileView({
 					filteredPosts
 						.filter((p) => !deletedPostIds.has(p.id))
 						.map((p) => {
-							const pAuthorId = p.bbsId || p.userId;
+							const pAuthorId = avatarSeedOf(p);
 							const pAvatarInfo = getAvatarInfo(pAuthorId, p.displayName);
 							return (
 								<div

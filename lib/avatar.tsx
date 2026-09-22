@@ -77,6 +77,18 @@ export function getUserIdLabel(
 	return match ? match[0] : displayName || "???";
 }
 
+/** 自動生成アイコン（画像未設定時の色＋絵柄）の種。getAvatarInfo の第1引数に渡す。
+ *  必ず slug（= String(users.id)）を優先すること。プロフィール画面は slug で引くので、
+ *  投稿側だけ bbsId（cc_user_id）を種にすると同じ人のアイコンが画面ごとに食い違う。 */
+export function avatarSeedOf(
+	p:
+		| { slug?: string | null; userId?: string | null; bbsId?: string | null }
+		| null
+		| undefined,
+): string | undefined {
+	return p?.slug || p?.userId || p?.bbsId || undefined;
+}
+
 /** 特殊用途の userId（1、空文字、空白のみ）かどうか判定 */
 function isSpecialUserId(userId: string | number | null | undefined): boolean {
 	if (userId === null || userId === undefined) return true;
