@@ -1200,9 +1200,12 @@ export default function DrawingEditor({
 		const entries = layerEntriesRef.current.filter((_, idx) => idx !== i);
 		setLayerEntries(entries);
 		layerEntriesRef.current = entries;
+		// 消した行が選択中より上なら、選択は1つ繰り上がる。
+		// はみ出しの補正は繰り上げた後に行う（先に補正すると、
+		// 一番下を選択中に上の行を消したとき二重に減って別のレイヤーが選ばれる）
 		let newIdx = activeLayerIndexRef.current;
+		if (i < newIdx) newIdx--;
 		if (newIdx >= entries.length) newIdx = entries.length - 1;
-		if (i < activeLayerIndexRef.current) newIdx--;
 		if (newIdx < 0) newIdx = 0;
 		setActiveLayerIndex(newIdx);
 		activeLayerIndexRef.current = newIdx;
