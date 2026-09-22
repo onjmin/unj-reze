@@ -105,6 +105,55 @@ export async function uploadText(
 	};
 }
 
+/**
+ * 画像（dataURL）をR2へ上げてURLを返す。POST /image にバイト列をそのまま送る。
+ *
+ * 画像は必ずここを通すこと。以前は unj-reze の /api/upload がR2へ直接書いていたが、
+ * uploader のリプレイ検知・形式チェック・サイズ上限・レート制限を素通りし、
+ * しかも保存名をクライアントが決められた（他人の画像を上書きできた）。
+ * 署名は `image\n${nonce}\n${本体のSHA-256}` + PEPPER（uploader の handleRawImageUpload）。
+ */
+export async function uploadImage(dataUrl: string): Promise<UploadResult> {
+	if (!isUploaderAvailable) {
+		throw new Error("NEXT_PUBLIC_UPLOADER_URL が設定されていません");
+	}
+
+	const blob = await (await fetch(dataUrl)).blob();
+	const bytes = await blob.arrayBuffer();
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	const bodyDigest = Array.from(new Uint8Array(digest))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+	const nonce = crypto.randomUUID().replace(/-/g, "");
+	const requestHash = await sha256(
+		`image\n${nonce}\n${bodyDigest}` + UPLOAD_SECRET_PEPPER,
+	);
+
+	const params = new URLSearchParams({ nonce });
+	const res = await fetch(`${UPLOADER_URL}/image?${params.toString()}`, {
+		method: "POST",
+		headers: {
+			"Content-Type": blob.type || "application/octet-stream",
+			Authorization: `Client-ID ${CLIENT_ID}`,
+			"X-Request-Hash": requestHash,
+		},
+		body: bytes,
+	});
+	if (!res.ok)
+		throw new Error(
+			`画像のアップロードに失敗しました: ${res.status} ${await res.text()}`,
+		);
+
+	const json = (await res.json()) as {
+		data: { link: string; delete_id: string; delete_hash: string };
+	};
+	return {
+		link: json.data.link,
+		deleteId: json.data.delete_id,
+		deleteHash: json.data.delete_hash,
+	};
+}
+
 /** manifest（JSON）をR2へ。JSON.stringify してから上げる */
 export async function uploadJson(
 	kind: "mv" | "game" | "talk",

@@ -43,10 +43,7 @@ function keyFromUrl(url: string): string | null {
 	return url.slice(base.length + 1);
 }
 
-export async function uploadImage(
-	base64Data: string,
-	filename?: string,
-): Promise<string> {
+export async function uploadImage(base64Data: string): Promise<string> {
 	const ext = (base64Data.match(/^data:image\/(\w+)/) || [])[1] || "png";
 	const extMap: Record<string, string> = {
 		jpeg: "jpg",
@@ -56,9 +53,7 @@ export async function uploadImage(
 		webp: "webp",
 	};
 	const safeExt = extMap[ext] || "png";
-	const key =
-		filename ||
-		`${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+	const key = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
 
 	const base64 = base64Data.includes(",")
 		? base64Data.split(",")[1]

@@ -7,7 +7,7 @@ import { db as mockDbInstance } from "./mock-db";
 import type { MvManifest } from "./mv-config";
 import type { TalkManifest } from "./talk-config";
 import { ensureSessionId } from "./session";
-import { deleteObject } from "./uploader";
+import { deleteObject, isUploaderAvailable, uploadImage } from "./uploader";
 import {
 	decodeIdOrThrow,
 	encodeId,
@@ -120,7 +120,7 @@ const staticApi = {
 		},
 	},
 	upload: {
-		image: async (data: { image: string; filename?: string }) => ({
+		image: async (data: { image: string }) => ({
 			url: data.image,
 		}),
 	},
@@ -557,6 +557,22 @@ const staticApi = {
 	},
 };
 
+/**
+ * このタブで uploader へ上げた画像の削除トークン（URL → トークン）。
+ * 画像を上げる場所は12箇所あり、どれも URL だけを投稿系の関数へ渡すので、
+ * ここで覚えておき、投稿・返信・編集の送信時に imageSrc から引いて添える。
+ * トークンが無い画像（直リンク・旧投稿の再送）はサーバー側でトークン無しとして保存され、
+ * 投稿を消しても実体は消えない（従来どおり）。
+ */
+const uploadedImageTokens = new Map<
+	string,
+	{ imageDeleteId: string; imageDeleteHash: string }
+>();
+
+function imageTokensFor(imageSrc?: string) {
+	return (imageSrc && uploadedImageTokens.get(imageSrc)) || {};
+}
+
 const liveApi = {
 	auth: {
 		anonymous: (sessionId: string) => {
@@ -609,11 +625,22 @@ const liveApi = {
 			}),
 	},
 	upload: {
-		image: (data: { image: string; filename?: string }) =>
-			fetcher<{ url: string }>("/upload", {
-				method: "POST",
-				body: JSON.stringify(data),
-			}),
+		// 本番は uploader 経由のみ（lib/uploader.ts uploadImage のコメント参照）。
+		// /api/upload はローカル開発（uploader 未設定）用のフォールバックで、
+		// 本番（STORAGE_PROVIDER=r2）では受け付けない。
+		image: async (data: { image: string }) => {
+			if (!isUploaderAvailable)
+				return fetcher<{ url: string }>("/upload", {
+					method: "POST",
+					body: JSON.stringify(data),
+				});
+			const res = await uploadImage(data.image);
+			uploadedImageTokens.set(res.link, {
+				imageDeleteId: res.deleteId,
+				imageDeleteHash: res.deleteHash,
+			});
+			return { url: res.link };
+		},
 	},
 	posts: {
 		/** `beforeId` を渡すとそのスレッドより古いページを取得する（キーセットページング）。 */
@@ -672,6 +699,7 @@ const liveApi = {
 				method: "POST",
 				body: JSON.stringify({
 					...data,
+					...imageTokensFor(data.imageSrc),
 					...(await externalizeMml(data.content)),
 					sessionId: ensureSessionId(),
 				}),
@@ -723,24 +751,34 @@ const liveApi = {
 			},
 		) => {
 			const result = await fetcher<
-				Post & { previousMml?: { deleteId: string; deleteHash: string } }
+				Post & {
+					previousMml?: { deleteId: string; deleteHash: string };
+					previousImage?: { deleteId: string; deleteHash: string };
+				}
 			>(`/posts/${id}`, {
 				method: "PATCH",
 				body: JSON.stringify({
 					userId,
 					originType,
 					imageSrc,
+					...imageTokensFor(imageSrc),
 					...(dotMeta ? { dotMeta } : {}),
 					...(await externalizeMml(content)),
 					sessionId: ensureSessionId(),
 				}),
 			});
-			const { previousMml, ...post } = result;
-			if (previousMml?.deleteId && previousMml?.deleteHash) {
+			const { previousMml, previousImage, ...post } = result;
+			const olds: [string, { deleteId: string; deleteHash: string } | undefined][] =
+				[
+					["旧MML", previousMml],
+					["旧画像", previousImage],
+				];
+			for (const [label, ref] of olds) {
+				if (!ref?.deleteId || !ref?.deleteHash) continue;
 				try {
-					await deleteObject(previousMml.deleteId, previousMml.deleteHash);
+					await deleteObject(ref.deleteId, ref.deleteHash);
 				} catch (e) {
-					console.warn("[uploader] 旧MMLの削除に失敗（孤児として残ります）", e);
+					console.warn(`[uploader] ${label}の削除に失敗（孤児として残ります）`, e);
 				}
 			}
 			return post as Post;
@@ -754,6 +792,7 @@ const liveApi = {
 			const result = await fetcher<{
 				success: boolean;
 				previousMml?: { deleteId: string; deleteHash: string };
+				previousImage?: { deleteId: string; deleteHash: string };
 				previousGameManifest?: { deleteId: string; deleteHash: string };
 				previousMvManifest?: { deleteId: string; deleteHash: string };
 				previousTalkManifest?: { deleteId: string; deleteHash: string };
@@ -764,6 +803,7 @@ const liveApi = {
 			const refs: [string, { deleteId: string; deleteHash: string } | undefined][] =
 				[
 					["旧MML", result.previousMml],
+					["添付画像", result.previousImage],
 					["ゲームmanifest", result.previousGameManifest],
 					["MV manifest", result.previousMvManifest],
 					["かけあい動画 manifest", result.previousTalkManifest],
@@ -828,6 +868,7 @@ const liveApi = {
 						method: "POST",
 						body: JSON.stringify({
 							...data,
+							...imageTokensFor(data.imageSrc),
 							...mml,
 							sessionId: ensureSessionId(),
 						}),

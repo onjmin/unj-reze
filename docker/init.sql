@@ -171,6 +171,10 @@ CREATE TABLE threads (
     -- R2にゴミが溜まり続ける（lib/db/pg.ts editPost 参照）。
     mml_delete_id TEXT,
     mml_delete_hash TEXT,
+    -- content_url（uploader に上げた添付画像）の削除トークン。投稿の削除・画像差し替えの
+    -- ときに画像の実体を消すのに使う（unj-reze lib/db/pg.ts deletePost / editPost）。
+    image_delete_id TEXT,
+    image_delete_hash TEXT,
     -- ここから reze 由来（unj/unj-reze DB統合時に追加）
     hearts_total INTEGER NOT NULL DEFAULT 0,
     reposts INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +225,9 @@ CREATE TABLE res (
     -- threads.mml_delete_id/hash と同じ役目（このレスのMMLの削除トークン）。
     mml_delete_id TEXT,
     mml_delete_hash TEXT,
+    -- threads.image_delete_id/hash と同じ役目（このレスの添付画像の削除トークン）。
+    image_delete_id TEXT,
+    image_delete_hash TEXT,
     command_result TEXT NOT NULL DEFAULT '',
     -- ここから reze 由来（unj/unj-reze DB統合時に追加）
     good_count SMALLINT NOT NULL DEFAULT 0, -- unjのresには元々いいね系の列が無かった

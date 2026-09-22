@@ -3,7 +3,7 @@ import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
 import { getClientIp } from "@/lib/ip";
-import { parseMmlRef } from "@/lib/manifest-ref";
+import { parseImageDeleteRef, parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { CH_FEED } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
@@ -207,6 +207,7 @@ export async function POST(request: NextRequest) {
 			animFps: animFps ? Number(animFps) : undefined,
 			walkPreset: sanitizeWalkPreset(walkPreset),
 			...mmlRef,
+			...parseImageDeleteRef(body, imageSrc),
 			originType,
 		});
 		await attachEmbedInfo(post);

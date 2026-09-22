@@ -8,17 +8,14 @@ function getStorage() {
 	return s3Storage;
 }
 
-export async function uploadImage(
-	base64Data: string,
-	filename?: string,
-): Promise<string> {
+export async function uploadImage(base64Data: string): Promise<string> {
 	const storage = getStorage();
 	if (!storage || typeof storage.uploadImage !== "function") {
 		throw new Error(
 			`Storage provider '${process.env.STORAGE_PROVIDER || "local"}' is unavailable`,
 		);
 	}
-	return storage.uploadImage(base64Data, filename);
+	return storage.uploadImage(base64Data);
 }
 
 export async function deleteImage(url: string): Promise<void> {

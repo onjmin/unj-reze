@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import type { DotMetaEdit } from "@/lib/db/interface";
-import { parseMmlRef } from "@/lib/manifest-ref";
+import { parseImageDeleteRef, parseMmlRef } from "@/lib/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
@@ -218,6 +218,7 @@ export async function PATCH(
 		imageSrc,
 		mmlRef,
 		dotMeta,
+		parseImageDeleteRef(body, imageSrc),
 	);
 	if (!result) {
 		return NextResponse.json(
@@ -243,10 +244,12 @@ export async function PATCH(
 	//   その全文を全接続へブロードキャストすることになる（docs/NEON_EGRESS.md）。
 	const {
 		previousMml: _omitPreviousMml,
+		previousImage: _omitPreviousImage,
 		replies: _omitReplies,
 		...broadcast
 	} = encoded as typeof encoded & {
 		previousMml?: { deleteId: string; deleteHash: string };
+		previousImage?: { deleteId: string; deleteHash: string };
 	};
 	publishRealtime([
 		{ channel: CH_FEED, event: "post.updated", data: broadcast },
@@ -259,12 +262,12 @@ export async function PATCH(
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
 	// （lib/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
-	const previousMml = (
-		result as typeof result & {
-			previousMml?: { deleteId: string; deleteHash: string };
-		}
-	).previousMml;
-	return NextResponse.json({ ...encoded, previousMml });
+	// 差し替えで外れた旧画像（previousImage）も同じ扱い。
+	const { previousMml, previousImage } = result as typeof result & {
+		previousMml?: { deleteId: string; deleteHash: string };
+		previousImage?: { deleteId: string; deleteHash: string };
+	};
+	return NextResponse.json({ ...encoded, previousMml, previousImage });
 }
 
 export async function DELETE(
@@ -326,6 +329,9 @@ export async function DELETE(
 		success: true,
 		previousMml: result.mmlDeleteId
 			? { deleteId: result.mmlDeleteId, deleteHash: result.mmlDeleteHash }
+			: undefined,
+		previousImage: result.imageDeleteId
+			? { deleteId: result.imageDeleteId, deleteHash: result.imageDeleteHash }
 			: undefined,
 		previousGameManifest: result.gameManifestDeleteId
 			? {

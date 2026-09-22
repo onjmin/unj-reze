@@ -9,6 +9,7 @@ import type {
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
+	ImageDeleteRef,
 	GetRepliesOptions,
 	MessageParams,
 	MmlRef,
@@ -82,6 +83,9 @@ export const mockStore: DataStore = {
 		imageSrc?: string,
 		mml?: MmlRef,
 		dotMeta?: DotMetaEdit,
+		// 画像の削除トークンは mock では保存しない（deletePost も R2 のトークンを返さない。
+		// 理由は下の deletePost のコメントと同じ：インメモリで実体の後始末に実益が無い）
+		_imageRef?: ImageDeleteRef,
 	) {
 		return mockDb.editPost(
 			id,

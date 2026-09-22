@@ -91,6 +91,33 @@ export function parseMmlRef(
 	};
 }
 
+/**
+ * 添付画像の削除トークン。imageSrc が uploader の画像キー（`<8桁hex>.<ext>`）を指し、
+ * delete_id がそのキーと一致するときだけ通す。一致しないトークンを保存すると、
+ * 投稿を消したときに別の画像を消しにいくことになる（トークン自体は uploader が
+ * キーごとに検証するので他人の画像は消せないが、自分の別画像は消えうる）。
+ * 不一致・欠落は 400 にせず「トークン無し」として扱う（旧クライアントや直リンク画像）。
+ */
+export function parseImageDeleteRef(
+	body: unknown,
+	imageSrc: unknown,
+): { imageDeleteId?: string; imageDeleteHash?: string } {
+	const b = body as Record<string, unknown> | null | undefined;
+	const id = b?.imageDeleteId;
+	const hash = b?.imageDeleteHash;
+	if (typeof imageSrc !== "string" || typeof id !== "string") return {};
+	if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) return {};
+	if (!/^[0-9a-f]{8}\.(png|jpg|gif|webp)$/.test(id)) return {};
+	let parsed: URL;
+	try {
+		parsed = new URL(imageSrc);
+	} catch {
+		return {};
+	}
+	if (parsed.protocol !== "https:" || parsed.pathname !== `/${id}`) return {};
+	return { imageDeleteId: id, imageDeleteHash: hash };
+}
+
 /** サムネ用の背景参照。解決済み http(s) URL だけ通す */
 export function parseBgRef(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;

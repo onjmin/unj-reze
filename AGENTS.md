@@ -58,6 +58,14 @@ external services. Do not hard-code a provider.
   `pg` is dynamically imported and listed in `next.config.ts`'s `serverExternalPackages` so it
   never gets bundled into the Cloudflare Workers production build.
 - `lib/storage/s3.ts` is the **local filesystem** provider (`./public/uploads`) despite its name; only `lib/storage/r2.ts` uses `@aws-sdk/client-s3`.
+- **All uploads in production go through the uploader worker** (sibling repo `uploader`, client
+  `lib/uploader.ts`): images via `uploadImage` → `POST /image`, text/manifests via `uploadText`.
+  Never write to R2 directly from this app — that skips the uploader's replay check, type/size
+  validation and rate limit (and once let clients pick the object key). `/api/upload` returns 410
+  whenever the uploader is configured; it only exists for local dev without one.
+  Image delete tokens are stored in `threads/res.image_delete_id/hash` (client attaches them via
+  `imageTokensFor` in `lib/api.ts`); deleting a post or replacing its image deletes the file, even
+  if someone's game/MV borrowed it by URL — the owner's delete wins.
 - Schema lives in `docker/init.sql` (also mounted by `docker compose up -d db-neon` for local dev).
   It mirrors the original at `unj/wiki/init.sql` in the sibling `unj` repo — keep both in sync when
   editing either. Migrations are applied manually (see `README.md`); there is no schema file that

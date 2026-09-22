@@ -97,7 +97,18 @@ export interface MmlRef {
 	mmlDeleteHash?: string;
 }
 
-export interface CreatePostParams extends MmlRef {
+/**
+ * 添付画像の削除トークン。画像はブラウザが uploader へ直接上げ（lib/uploader.ts uploadImage）、
+ * DBには imageSrc（URL）とこのトークンが渡る。DELETE_SECRET_PEPPER は uploader 側にしか無く
+ * 後から再計算できないので、保存しておかないと投稿を消しても画像の実体を消せない。
+ * 値は lib/manifest-ref.ts parseImageDeleteRef で imageSrc のキーと突き合わせ済みのものだけ。
+ */
+export interface ImageDeleteRef {
+	imageDeleteId?: string;
+	imageDeleteHash?: string;
+}
+
+export interface CreatePostParams extends MmlRef, ImageDeleteRef {
 	displayName?: string;
 	content: string;
 	hasImage?: boolean;
@@ -149,7 +160,7 @@ export interface DotMetaEdit {
 	walkPreset?: string | null;
 }
 
-export interface ReplyParams extends MmlRef {
+export interface ReplyParams extends MmlRef, ImageDeleteRef {
 	displayName?: string;
 	/** セッションから解決済みのスラッグ。省略時は displayName から導出する。 */
 	slug?: string;
@@ -269,6 +280,8 @@ export interface DataStore {
 		imageSrc?: string,
 		mml?: MmlRef,
 		dotMeta?: DotMetaEdit,
+		/** 画像を差し替える編集で、新しい画像の削除トークン */
+		imageRef?: ImageDeleteRef,
 	): Promise<DbPost | null>;
 	/**
 	 * 投稿/レスを削除する。所有者不一致・存在しないIDは false。
@@ -279,7 +292,9 @@ export interface DataStore {
 	 * まま「DB上は存在し件数にも数えられるが、フィード/ハッシュタグ/最新レスの
 	 * どこからも二度と辿れない」迷子状態になってしまう（返信は物理削除・スレは
 	 * 論理削除という非対称性が原因、実際にこれで表示不能になった返信を踏んだ）。
-	 * 成功時は消えたMML/ゲーム・MV manifestの削除トークン（無ければ空オブジェクト）を返す。
+	 * 成功時は消えたMML/添付画像/ゲーム・MV manifestの削除トークン（無ければ空オブジェクト）を返す。
+	 * 画像は他人のゲーム/MV/かけあい動画が URL で借りていることがあるが、DBからは見えない。
+	 * 所有者の削除を優先して消す（2026-09-23 所有者判断。借りた側は以後その画像が欠ける）。
 	 * ゲーム/MVは他の投稿からまだ参照されていれば消さない（実装側でorphan判定する）。
 	 * 呼び出し側（app/api/posts/[id]/route.ts）がこれをレスポンスに載せ、
 	 * クライアント（lib/api.ts posts.remove）がDB削除確定後にR2の実体を消す
@@ -299,6 +314,8 @@ export interface DataStore {
 				threadId?: number;
 				mmlDeleteId?: string;
 				mmlDeleteHash?: string;
+				imageDeleteId?: string;
+				imageDeleteHash?: string;
 				gameManifestDeleteId?: string;
 				gameManifestDeleteHash?: string;
 				mvManifestDeleteId?: string;

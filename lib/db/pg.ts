@@ -70,6 +70,7 @@ import type {
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
+	ImageDeleteRef,
 	GetRepliesOptions,
 	MessageParams,
 	MmlRef,
@@ -339,6 +340,35 @@ function deriveInsertContent(data: {
  * deletePost（投稿/レス削除）が使う。ゲーム/MVの manifest は orphanedManifestRefsOf が別に扱う
  * （games/mvs は他の投稿からも参照されうるため、単純な「消えたら即削除」にはできない）。
  */
+/**
+ * 削除確定した行から、添付画像の削除トークンを取り出す（mmlDeleteRefOf の画像版）。
+ * 画像を URL で借りている他人のゲーム/MV/かけあい動画があっても消す——DBからは
+ * その参照が見えないので、所有者の削除を優先する（lib/db/interface.ts deletePost）。
+ */
+function imageDeleteRefOf(row: {
+	content_url?: string | null;
+	image_delete_id?: string | null;
+	image_delete_hash?: string | null;
+}): { imageDeleteId?: string; imageDeleteHash?: string } {
+	if (row.content_url && row.image_delete_id && row.image_delete_hash) {
+		return {
+			imageDeleteId: row.image_delete_id,
+			imageDeleteHash: row.image_delete_hash,
+		};
+	}
+	return {};
+}
+
+/** 挿入する行が画像投稿のときだけトークンを保存する（MML優先の分岐で画像が落ちた時は捨てる） */
+function imageTokensForInsert(
+	contentUrl: string,
+	ref: { imageDeleteId?: string; imageDeleteHash?: string },
+): [string | null, string | null] {
+	return contentUrl && ref.imageDeleteId && ref.imageDeleteHash
+		? [ref.imageDeleteId, ref.imageDeleteHash]
+		: [null, null];
+}
+
 function mmlDeleteRefOf(row: {
 	content_type: unknown;
 	content_data_url?: string | null;
@@ -890,6 +920,8 @@ export const pgStore: DataStore = {
 					["content_data_url", val(c.contentDataUrl)],
 					["mml_delete_id", val(c.mmlDeleteId)],
 					["mml_delete_hash", val(c.mmlDeleteHash)],
+					["image_delete_id", val(imageTokensForInsert(c.contentUrl, data)[0])],
+					["image_delete_hash", val(imageTokensForInsert(c.contentUrl, data)[1])],
 					// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
 					// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
 					// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
@@ -1093,6 +1125,8 @@ export const pgStore: DataStore = {
 					["content_data_url", val(c.contentDataUrl)],
 					["mml_delete_id", val(c.mmlDeleteId)],
 					["mml_delete_hash", val(c.mmlDeleteHash)],
+					["image_delete_id", val(imageTokensForInsert(c.contentUrl, data)[0])],
+					["image_delete_hash", val(imageTokensForInsert(c.contentUrl, data)[1])],
 					// createPost と同じ理由でhasImage/MMLも起点にする。
 					// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
 					[
@@ -1193,11 +1227,12 @@ export const pgStore: DataStore = {
 		imageSrc?: string,
 		mml?: MmlRef,
 		dotMeta?: DotMetaEdit,
+		imageRef?: ImageDeleteRef,
 	) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash FROM ${table} WHERE id = $1`,
+			`SELECT user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash FROM ${table} WHERE id = $1`,
 			[rawId],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return null;
@@ -1230,6 +1265,25 @@ export const pgStore: DataStore = {
 			}
 		};
 
+		// 画像も同じ考え方。content_url が実際に変わったときだけ、旧画像のトークンを
+		// 返し（DB確定後にクライアントが消す）、新しい画像のトークンを書く。
+		// 同じURLの再送（本文だけ直した編集でも imageSrc は送られてくる）で
+		// トークンを上書きすると、クライアントは旧トークンを持っていないので消えてしまう。
+		let previousImage: { deleteId: string; deleteHash: string } | undefined;
+		const setImageTokensIfReplaced = (newContentUrl: string) => {
+			if ((prevRow.content_url || "") === newContentUrl) return;
+			const [newId, newHash] = imageTokensForInsert(newContentUrl, imageRef ?? {});
+			push("image_delete_id", newId);
+			push("image_delete_hash", newHash);
+			const prevRef = imageDeleteRefOf(prevRow);
+			if (prevRef.imageDeleteId && prevRef.imageDeleteHash) {
+				previousImage = {
+					deleteId: prevRef.imageDeleteId,
+					deleteHash: prevRef.imageDeleteHash,
+				};
+			}
+		};
+
 		// content_type は content_url/content_data_url と必ず連動させる。
 		// text列だけ書き換えてtypeを放置すると、hasImage/hasMml が deriveDisplay で
 		// 導出できなくなる（画像を足したのに反映されない/消したのにhasImageが残る事故）。
@@ -1258,6 +1312,7 @@ export const pgStore: DataStore = {
 			push("mml_delete_id", c.mmlDeleteId);
 			push("mml_delete_hash", c.mmlDeleteHash);
 			capturePreviousMmlIfReplaced(c.contentDataUrl);
+			setImageTokensIfReplaced(c.contentUrl);
 			// MML編集（この分岐）も画像編集（下の分岐）と同じくコラボの起点にする。
 			// c.contentType===CT.Dtm を見落とすとMML埋め込みだけ「コラボ」ボタンが
 			// 一度も出ないまま導線が死ぬ（createPost/addReplyと同じ罠）。
@@ -1276,6 +1331,7 @@ export const pgStore: DataStore = {
 			push("mml_delete_id", c.mmlDeleteId);
 			push("mml_delete_hash", c.mmlDeleteHash);
 			capturePreviousMmlIfReplaced(c.contentDataUrl);
+			setImageTokensIfReplaced(c.contentUrl);
 			// 画像を新たに足した／差し替えた編集はコラボの起点にする。createPost/addReply
 			// と同じ理由（お絵描き投稿は自動的にコラボ可能にする設計）。
 			if (imageSrc) push("has_collab_button", true);
@@ -1305,8 +1361,14 @@ export const pgStore: DataStore = {
 		// 旧オブジェクトの削除トークンをここにだけ載せて返す。DB更新が確定したあとに
 		// 呼び出し側（app/api/posts/[id]/route.ts）がレスポンスに載せ、クライアントが
 		// 消す（lib/game-mv-client.ts の updateGame/updateMv と同じ順序）。
-		if (result) (result as DbPost & { previousMml?: typeof previousMml }).previousMml =
-			previousMml;
+		if (result) {
+			const r = result as DbPost & {
+				previousMml?: typeof previousMml;
+				previousImage?: typeof previousImage;
+			};
+			r.previousMml = previousMml;
+			r.previousImage = previousImage;
+		}
 		return result;
 	},
 
@@ -1314,7 +1376,7 @@ export const pgStore: DataStore = {
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
 			const { rows } = await q(
-				`SELECT thread_id, user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, talk_id FROM res WHERE id = $1`,
+				`SELECT thread_id, user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash, game_id, mv_id, talk_id FROM res WHERE id = $1`,
 				[resId],
 			);
 			if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
@@ -1330,12 +1392,13 @@ export const pgStore: DataStore = {
 			return {
 				threadId: threadToPostId(Number(row.thread_id)),
 				...mmlDeleteRefOf(row),
+				...imageDeleteRefOf(row),
 				...(await orphanedManifestRefsOf(row)),
 			};
 		}
 		const threadId = postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_data_url, mml_delete_id, mml_delete_hash, game_id, mv_id, talk_id, res_count FROM threads WHERE id = $1`,
+			`SELECT user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash, game_id, mv_id, talk_id, res_count FROM threads WHERE id = $1`,
 			[threadId],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
@@ -1353,6 +1416,7 @@ export const pgStore: DataStore = {
 			await q(
 				`UPDATE threads SET content_text = $1, content_url = '', content_type = $2,
          content_data_url = '', mml_delete_id = NULL, mml_delete_hash = NULL,
+         image_delete_id = NULL, image_delete_hash = NULL,
          game_id = NULL, mv_id = NULL, talk_id = NULL, dot_w = NULL, dot_h = NULL,
          anim_frames = NULL, anim_fps = NULL, walk_preset = NULL
        WHERE id = $3`,
@@ -1364,6 +1428,7 @@ export const pgStore: DataStore = {
 			return {
 				threadId: threadToPostId(threadId),
 				...mmlDeleteRefOf(row),
+				...imageDeleteRefOf(row),
 				...(await orphanedManifestRefsOf(row)),
 			};
 		}
@@ -1378,6 +1443,7 @@ export const pgStore: DataStore = {
 		return {
 			threadId: threadToPostId(threadId),
 			...mmlDeleteRefOf(row),
+			...imageDeleteRefOf(row),
 			...(await orphanedManifestRefsOf(row)),
 		};
 	},
