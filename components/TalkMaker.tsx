@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, Copy, FileText, Image as ImageIcon, Play, Plus,
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ContentPicker, { type PickResult } from "@/components/ContentPicker";
 import TalkPlayer from "@/components/TalkPlayer";
+import VoiceCredits, { useVoiceCreditFor } from "@/components/VoiceCredits";
 import { buildPsdRef, imageRefToUrl, isPsdRef, parseRef, walkRefFrameCrop } from "@/lib/asset-ref";
 import { getStudio } from "@/lib/dtm";
 import { DEFAULT_VOICE_MODEL, loadVoiceModelGroups, VOICE_STYLES, type VoiceModelGroup } from "@/lib/game-voice";
@@ -622,6 +623,8 @@ function CharacterPanel({
 	const [customOpen, setCustomOpen] = useState(false);
 	const [customUrl, setCustomUrl] = useState("");
 	const [customLabel, setCustomLabel] = useState("");
+	/** 選んでいる音源の利用規約（プルダウンのすぐ下に出す）。 */
+	const voiceCredit = useVoiceCreditFor(c.voice.model, c.voice.custom?.label);
 	const set = (patch: Partial<TalkCharacter>) => onChange((prev) => ({ ...prev, ...patch }));
 
 	const openCustom = () => {
@@ -756,6 +759,10 @@ function CharacterPanel({
 						{VOICE_STYLES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
 					</select>
 				</label>
+				{/* 選んだ音源の利用規約。プルダウンのすぐ下に出す（埋め込みの TalkBox にも同じ文言が出る）。 */}
+				<div className="col-span-2 -mt-1">
+					<VoiceCredits credits={voiceCredit ? [voiceCredit] : []} variant="creator" className="bg-transparent px-0 py-0" />
+				</div>
 				<label className="text-[10px] text-gray-400 col-span-2">高さ {(c.voice.pitchOffset ?? 0) > 0 ? "+" : ""}{c.voice.pitchOffset ?? 0}
 					<input type="range" min={-12} max={12} step={1} value={c.voice.pitchOffset ?? 0} onChange={(e) => set({ voice: { ...c.voice, pitchOffset: Number(e.target.value) || 0 } })} className="w-full accent-blue-500" />
 				</label>

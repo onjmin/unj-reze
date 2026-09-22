@@ -5,6 +5,7 @@ import { loadTalk } from "@/lib/game-mv-client";
 import { TALK_H, TALK_W, type TalkManifest } from "@/lib/talk-config";
 import EmbedCollabBar from "./EmbedCollabBar";
 import TalkPlayer from "./TalkPlayer";
+import VoiceCredits, { useTalkVoiceCredits } from "./VoiceCredits";
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
@@ -44,6 +45,9 @@ export default function TalkBox({
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	/** ボイスのクレジット（音源の利用規約）の実測高さ。展開後の高さに足す。 */
+	const [creditHeight, setCreditHeight] = useState(0);
+	const creditObsRef = useRef<ResizeObserver | null>(null);
 	const instanceIdRef = useRef(`talk_${postId}_${talkId}`);
 	const countedRef = useRef(false);
 
@@ -56,9 +60,30 @@ export default function TalkBox({
 		return () => obs.disconnect();
 	}, []);
 
+	const credits = useTalkVoiceCredits(manifest);
+
+	// クレジットは行数も折り返しも投稿次第なので、高さは実測して足す
+	// （この箱は高さを固定して開閉するアニメーションなので、はみ出すと切れる）。
+	const creditRef = useCallback((node: HTMLDivElement | null) => {
+		creditObsRef.current?.disconnect();
+		creditObsRef.current = null;
+		if (!node) {
+			setCreditHeight(0);
+			return;
+		}
+		const obs = new ResizeObserver(() => setCreditHeight(node.offsetHeight));
+		obs.observe(node);
+		creditObsRef.current = obs;
+		setCreditHeight(node.offsetHeight);
+	}, []);
+	useEffect(() => () => creditObsRef.current?.disconnect(), []);
+
 	const fullHeight =
 		measuredWidth > 0
-			? measuredWidth * (TALK_H / TALK_W) + HEADER_HEIGHT + CONTROLS_HEIGHT
+			? measuredWidth * (TALK_H / TALK_W) +
+				HEADER_HEIGHT +
+				CONTROLS_HEIGHT +
+				creditHeight
 			: THUMBNAIL_HEIGHT;
 	const isOpen = phase === "opening" || phase === "open";
 	const currentHeight = isOpen ? fullHeight : THUMBNAIL_HEIGHT;
@@ -189,9 +214,14 @@ export default function TalkBox({
 					/>
 
 					{manifest ? (
-						<div className="flex-1 overflow-hidden bg-black px-0">
-							<TalkPlayer manifest={manifest} />
-						</div>
+						<>
+							<div className="flex-1 overflow-hidden bg-black px-0">
+								<TalkPlayer manifest={manifest} />
+							</div>
+							<div ref={creditRef} className="shrink-0">
+								<VoiceCredits credits={credits} />
+							</div>
+						</>
 					) : (
 						<div className="flex flex-1 items-center justify-center gap-2 text-[11px] text-gray-500">
 							{loading && <Loader2 size={14} className="animate-spin" />}
