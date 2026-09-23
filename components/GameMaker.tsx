@@ -73,6 +73,7 @@ import type { Mmo3dRenderer, WeatherDef } from './game-presets/shared';
 import { ensureSessionId } from '@/lib/session';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/pixel-weather';
 import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv-config';
+import { useSaveShortcut } from '@/lib/hooks/useSaveShortcut';
 
 export type { PresetId };
 
@@ -12390,6 +12391,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     a.href = url; a.download = `${(title.trim() || gameData.name).replace(/\s+/g, '_')}.json`;
     a.click(); URL.revokeObjectURL(url);
   };
+  // Ctrl+S は投稿ではなく JSON として手元に保存（再生専用の埋め込みでは効かせない）
+  useSaveShortcut(handleExport, !playOnly);
 
   const importFileRef = useRef<HTMLInputElement>(null);
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {

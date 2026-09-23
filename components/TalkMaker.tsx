@@ -34,6 +34,7 @@ import {
 } from "@/lib/talk-config";
 import { createDefaultTalkManifest, TALK_PRESETS } from "@/lib/talk-presets";
 import { applyTalkScriptText, buildTalkScriptAiPrompt, parseTalkScriptText, TALK_SCRIPT_HELP_TEXT, talkManifestToScriptText } from "@/lib/talk-script-text";
+import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 
 export interface TalkMakerProps {
 	onClose: () => void;
@@ -295,6 +296,19 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		void clearAutosave(storageKey);
 		onSave({ manifest: finalManifest, title });
 	};
+
+	// Ctrl+S は投稿ではなく JSON として手元に保存
+	const handleExport = () => {
+		const json = JSON.stringify(manifest, null, 2);
+		const blob = new Blob([json], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `${(manifest.title.trim() || "かけあい動画").replace(/\s+/g, "_")}.json`;
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+	useSaveShortcut(handleExport);
 
 	const charById = (id: string) => manifest.characters.find((c) => c.id === id);
 

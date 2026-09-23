@@ -55,6 +55,7 @@ import {
 	resizeCanvas,
 } from "@/lib/export-drawing";
 import { api } from "@/lib/api";
+import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 import { copyToClipboard, readPasteImage } from "@/lib/oekaki-clipboard";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
@@ -264,6 +265,22 @@ export default function DotDrawingEditor({
 		const targetH = gridH * scale;
 		exportSinglePng(canvas, targetW, targetH, `dot_${targetW}x${targetH}.png`);
 	};
+
+	// 全レイヤーを合成して等倍（1ドット=1px）のPNGで保存
+	const handleSaveComposite = () => {
+		const canvas = oekaki.render();
+		const dotSize = oekaki.getDotSize() || 1;
+		const isWalk = walkModeRef.current;
+		const w = isWalk
+			? walkPresetRef.current.w
+			: Math.round(canvas.width / dotSize);
+		const h = isWalk
+			? walkPresetRef.current.h
+			: Math.round(canvas.height / dotSize);
+		exportSinglePng(canvas, w, h, `dot_${w}x${h}.png`);
+	};
+	// Ctrl+S は投稿ではなく全レイヤーを合成した画像として手元に保存
+	useSaveShortcut(handleSaveComposite);
 
 	const getAnimFramesForExport = (scale: number) => {
 		const frames =
@@ -2335,11 +2352,6 @@ export default function DotDrawingEditor({
 					} else {
 						handleUndo();
 					}
-					return;
-				}
-				if (key === "s" || e.code === "KeyS") {
-					e.preventDefault();
-					handleSave();
 					return;
 				}
 				if (key === "c" || e.code === "KeyC") {

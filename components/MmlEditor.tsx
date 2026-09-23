@@ -21,6 +21,7 @@ import {
 	saveAutosave,
 	saveHistory,
 } from "@/lib/history";
+import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 
 interface MmlEditorProps {
 	onClose: () => void;
@@ -220,6 +221,8 @@ export default function MmlEditor({
 		a.click();
 		URL.revokeObjectURL(url);
 	};
+	// Ctrl+S は投稿ではなく .mml として手元に保存
+	useSaveShortcut(handleExport);
 
 	const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0];

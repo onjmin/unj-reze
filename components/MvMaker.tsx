@@ -220,6 +220,7 @@ import MvTimeline from "./MvTimeline";
 import MvTransitionModal from "./MvTransitionModal";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
+import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 
 function formatMinSecMs(sec: number): string {
 	if (!sec || isNaN(sec) || sec < 0) return "0:00.0";
@@ -2616,6 +2617,8 @@ export default function MvMaker({
 		a.click();
 		URL.revokeObjectURL(url);
 	};
+	// Ctrl+S は投稿ではなく JSON として手元に保存
+	useSaveShortcut(handleExport);
 
 	const handleExportMp4 = () => {
 		if (!playerRef.current) return;
