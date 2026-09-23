@@ -1565,6 +1565,24 @@ export default function DrawingEditor({
 		onSave(oekaki.render().toDataURL());
 	};
 
+	// キャンバス全体を選択する（全選択→コピー→貼り付けの入口）
+	const handleSelectAll = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active?.editable) return false;
+		const { width, height } = active.canvas;
+		if (showGrid) {
+			active.selectByDot(0, 0, width, height);
+		} else {
+			active.select(0, 0, width, height);
+		}
+		setTool("select");
+		toolRef.current = "select";
+		drawSelectionHandle();
+		forceRender((n) => n + 1);
+		return true;
+	};
+
 	/**
 	 * 選択範囲をクリップボードにコピーする。選択が無ければ何もしない
 	 *
@@ -1645,6 +1663,10 @@ export default function DrawingEditor({
 					} else {
 						handleUndo();
 					}
+					return;
+				}
+				if (key === "a" || e.code === "KeyA") {
+					if (handleSelectAll()) e.preventDefault();
 					return;
 				}
 				if (key === "c" || e.code === "KeyC") {
