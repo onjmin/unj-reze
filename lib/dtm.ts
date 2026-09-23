@@ -26,3 +26,16 @@ export const getStudio = (): Promise<DtmStudio> => {
 	}
 	return studioPromise;
 };
+
+/** 合成の遅い内蔵音源（最初のチャンクだけで鳴らし始めると、行の途中に間が空きやすい）。 */
+const SLOW_SPEECH_MODELS: ReadonlySet<string> = new Set(["roze"]);
+
+/**
+ * セリフの読み上げ（`studio.speak` の `awaitRender: "first-chunk"`）で、鳴らし始める前に
+ * 合成しておく秒数（`minBufferSec`）。最初のチャンクは数モーラしかないので、合成の遅い音源は
+ * 2 つ目が間に合わず行の途中に間が空く（`lateChunks: "shift"` で後ろへずれる）。遅い音源だけ
+ * 多めに貯める（鳴り出しはそのぶん遅れる）。`slow` は呼び出し側だけが知っている遅さ
+ * （持ち込みの .koe は URL 配信でユニットの音を 1 つずつ取りに行くので初回が遅い）。
+ */
+export const speechMinBufferSec = (model: string, slow = false): number =>
+	slow || SLOW_SPEECH_MODELS.has(model) ? 0.4 : 0.2;

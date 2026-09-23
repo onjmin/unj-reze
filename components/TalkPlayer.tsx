@@ -3,16 +3,19 @@
 // かけあい動画のプレイヤー。設計: docs/talk-video-feature-design.md
 //
 // 再生の流れ（ユーザー操作の延長で行う）:
-//   準備（TTS アセット・音源・感情モデル）→ 全行の計画 → 時間軸 → 発話を絶対時刻で全部置く → 描画ループ
-// 時刻は AudioContext の時計から引く（timeSec = ctx.currentTime - t0）。
+//   準備（TTS アセット・音源・感情モデル）→ 全行の計画 → 時間軸 → 先頭の行の鳴り出しを待つ → 描画ループ
+//   （残りの行は lib/talk-audio.ts の発話セッションが鳴らしながら 1 行ずつ置いていく）
+//   初回は全行の計画の前に最初の行の合成を鳴らさずに始めておき、計画と重ねる（合成が遅いときに効く）。
+// 時刻は発話セッションの時計から引く（session.timeSec()。AudioContext の時計を声に合わせたもの。
+// 声が遅れたり行の途中で後ろへずれたりすると、絵もそのぶん待つ）。
 // 一時停止は発話を止めて現在の行の頭を覚え、再開はそこから置き直す（行の途中からは再開しない）。
 
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getStudio } from "@/lib/dtm";
 import {
 	planTalkCues,
 	prepareTalkVoice,
+	prerenderTalkHead,
 	scheduleTalkSpeech,
 	type TalkSpeechSession,
 } from "@/lib/talk-audio";
@@ -39,14 +42,12 @@ interface PlayerRuntime {
 	status: Status;
 	prep: Prep | null;
 	timeline: TalkTimeline | null;
+	/** 発話セッション（再生中のみ）。時刻（声に合わせて動く時計）もここから引く。 */
 	session: TalkSpeechSession | null;
-	/** 時間軸の 0 秒に対応する AudioContext クロック秒（再生中のみ有効）。 */
-	t0: number;
 	/** 一時停止中の位置（行の頭の秒）。 */
 	pausedAt: number;
 	/** 再生中に時計が戻れる下限（＝いま始めた行の頭の秒）。合成待ちで声が遅れたとき用。 */
 	minSec: number;
-	audioNow: () => number;
 	/** 開始の世代。連続タップで古い非同期の開始が新しい開始を上書きしないようにする。 */
 	startGen: number;
 }
@@ -62,10 +63,8 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 		prep: null,
 		timeline: null,
 		session: null,
-		t0: 0,
 		pausedAt: 0,
 		minSec: 0,
-		audioNow: () => 0,
 		startGen: 0,
 	});
 
@@ -81,7 +80,7 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 
 	const currentTimeSec = useCallback((): number => {
 		const r = rt.current;
-		if (r.status === "playing") return Math.max(r.minSec, r.audioNow() - r.t0);
+		if (r.status === "playing") return Math.max(r.minSec, r.session?.timeSec() ?? r.minSec);
 		if (r.status === "preparing") return r.minSec;
 		if (r.status === "paused") return r.pausedAt;
 		if (r.status === "ended") return r.timeline?.totalSec ?? 0;
@@ -178,6 +177,8 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 			setPrepSync({ text: "ボイスを準備中…", progress: total > 0 ? loaded / total : 0 });
 		});
 		setPrepSync({ text: "台本を読んでいます…", progress: 0 });
+		// 最初の行の合成を先に始めておき、全行の計画と重ねる（時間軸が無い＝最初の行から再生する）
+		await prerenderTalkHead(manifest);
 		const plans = await planTalkCues(manifest, (done, total) => {
 			setPrepSync({ text: "台本を読んでいます…", progress: total > 0 ? done / total : 0 });
 		});
@@ -203,8 +204,7 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 				return;
 			}
 			const idx = Math.max(0, Math.min(tl.cues.length - 1, fromIndex));
-			const studio = await getStudio();
-			// 先頭の行の合成を待つあいだの表示（待たずに始めると頭が欠ける・無音になる）。
+			// 先頭の行の最初のチャンクの合成を待つあいだの表示（待たずに始めると頭が欠ける）。
 			// 待っているあいだはこれから始める行を映す（時計の下限を先に入れておく）。
 			r.minSec = tl.cues[idx]?.startSec ?? 0;
 			setPrepSync({ text: "まもなく再生します…" });
@@ -215,8 +215,6 @@ export default function TalkPlayer({ manifest, className, onEnded }: TalkPlayerP
 			}
 			setPrepSync(null);
 			r.session = session;
-			r.t0 = session.t0;
-			r.audioNow = () => studio.audioContext.currentTime;
 			setStatusSync("playing");
 		},
 		[ensureTimeline, manifest, stopSession, setStatusSync, setPrepSync],

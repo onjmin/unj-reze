@@ -11,7 +11,7 @@ import ContentPicker, { type PickResult } from "@/components/ContentPicker";
 import TalkPlayer from "@/components/TalkPlayer";
 import VoiceCredits, { useVoiceCreditFor } from "@/components/VoiceCredits";
 import { buildPsdRef, imageRefToUrl, isPsdRef, parseRef, walkRefFrameCrop } from "@/lib/asset-ref";
-import { getStudio } from "@/lib/dtm";
+import { getStudio, speechMinBufferSec } from "@/lib/dtm";
 import { DEFAULT_VOICE_MODEL, loadVoiceModelGroups, VOICE_STYLES, type VoiceModelGroup } from "@/lib/game-voice";
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from "@/lib/history";
 import { DEFAULT_MV_BLINK } from "@/lib/mv-blink";
@@ -215,6 +215,10 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 				pitchOffset: ch.voice.pitchOffset ?? 0,
 				style: cueStyle(cue, ch),
 				emotion: cueEmotion(cue),
+				// 頭を欠かさず、最初のチャンクが出来しだい鳴らす（プレイヤーと同じ鳴らし方）。
+				awaitRender: "first-chunk",
+				lateChunks: "shift",
+				minBufferSec: speechMinBufferSec(ch.voice.model, !!ch.voice.custom),
 				signal: abort.signal,
 			});
 			if (!h) { if (!abort.signal.aborted) stopSpeak(); return; }

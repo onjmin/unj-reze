@@ -4,6 +4,9 @@
 // - 初回は TTS アセット約 45MB を取得する。プレイ開始時に prepareGameVoice() で先に
 //   取っておき、最初のセリフで待たせない（2 回目以降は Cache API から一瞬）。
 // - 頭上 1 文字ずつ表示との同期はしない。ウィンドウが出たら鳴らし、閉じたら止めるだけ。
+// - 鳴らし方は `awaitRender: "first-chunk"`（最初のチャンクが出来てから頭から鳴らす。合成が
+//   追いつかなければ後ろをずらす＝`lateChunks: "shift"`）。既定（false）は合成が間に合わないと
+//   セリフの頭が欠ける（遅い音源では行の大半が欠けた）。
 
 import type { SpeechHandle, VoiceModelGroup } from "@onjmin/dtm";
 import type {
@@ -14,7 +17,7 @@ import type {
 	MessageVoiceStyle,
 	PresetData,
 } from "@/components/game-presets/shared";
-import { getStudio } from "./dtm";
+import { getStudio, speechMinBufferSec } from "./dtm";
 
 export type { SpeechHandle };
 
@@ -145,6 +148,10 @@ export const speakGameMessage = async (
 			pitchOffset: voice.pitchOffset ?? 0,
 			emotion: voice.emotion ?? "neutral",
 			style: voice.style ?? "neutral",
+			// 頭を欠かさず、最初のチャンクが出来しだい鳴らす（遅れた後続は後ろへずらす）。
+			awaitRender: "first-chunk",
+			lateChunks: "shift",
+			minBufferSec: speechMinBufferSec(voice.model),
 			signal,
 		});
 	} catch (e) {
