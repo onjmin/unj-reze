@@ -47,6 +47,7 @@ import {
 	generateSpriteSheetCanvas,
 } from "@/lib/export-drawing";
 import { api } from "@/lib/api";
+import { copyToClipboard, readPasteImage } from "@/lib/oekaki-clipboard";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
@@ -180,7 +181,6 @@ export default function DrawingEditor({
 	const [zoom, setZoom] = useState(1);
 	const [flipped, setFlipped] = useState(false);
 	const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
-	const internalClipboardRef = useRef<HTMLCanvasElement | null>(null);
 	const selectDragModeRef = useRef<"new" | "resize" | "move" | "rotate" | null>(
 		null,
 	);
@@ -1562,38 +1562,19 @@ export default function DrawingEditor({
 		onSave(oekaki.render().toDataURL());
 	};
 
+	/**
+	 * 選択範囲をクリップボードにコピーする。選択が無ければ何もしない
+	 *
+	 * @returns コピーしたか
+	 */
 	const handleCopy = () => {
-		const active =
-			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-		const target =
-			layerEntriesRef.current
-				.map((l) => l.instance)
-				.find((l) => l.selection) || active;
-		if (!target) return;
-		let copyCanvas: HTMLCanvasElement | null = null;
-		if (target.selection) {
-			copyCanvas = target.copySelection();
-		} else if (target.canvas) {
-			copyCanvas = document.createElement("canvas");
-			copyCanvas.width = target.canvas.width;
-			copyCanvas.height = target.canvas.height;
-			const ctx = copyCanvas.getContext("2d");
-			if (ctx) ctx.drawImage(target.canvas, 0, 0);
-		}
-		if (copyCanvas) {
-			internalClipboardRef.current = copyCanvas;
-			if (navigator.clipboard?.write && window.isSecureContext) {
-				copyCanvas.toBlob((blob) => {
-					if (blob) {
-						try {
-							navigator.clipboard
-								.write([new ClipboardItem({ "image/png": blob })])
-								.catch(() => {});
-						} catch {}
-					}
-				});
-			}
-		}
+		const target = layerEntriesRef.current
+			.map((l) => l.instance)
+			.find((l) => l.selection);
+		const copyCanvas = target?.copySelection();
+		if (!copyCanvas) return false;
+		copyToClipboard(copyCanvas);
+		return true;
 	};
 
 	const handleCut = () => {
@@ -1629,8 +1610,7 @@ export default function DrawingEditor({
 	useEffect(() => {
 		const onCopy = (e: ClipboardEvent) => {
 			if (notDrawing(e)) return;
-			e.preventDefault();
-			handleCopy();
+			if (handleCopy()) e.preventDefault();
 		};
 
 		const onPaste = async (e: ClipboardEvent) => {
@@ -1638,19 +1618,8 @@ export default function DrawingEditor({
 			const active =
 				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 			if (!active?.editable) return;
-			const imageItem = Array.from(e.clipboardData?.items || []).find(
-				(v) => v.kind === "file" && v.type.startsWith("image/"),
-			);
-			let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
-			if (imageItem) {
-				const blob = imageItem.getAsFile();
-				if (!blob) return;
-				bitmap = await createImageBitmap(blob);
-			} else if (internalClipboardRef.current) {
-				bitmap = internalClipboardRef.current;
-			} else {
-				return;
-			}
+			const bitmap = await readPasteImage(e, true);
+			if (!bitmap) return;
 			e.preventDefault();
 			active.paste(bitmap);
 			if (active.modified()) active.trace();
@@ -1681,8 +1650,7 @@ export default function DrawingEditor({
 					return;
 				}
 				if (key === "c" || e.code === "KeyC") {
-					e.preventDefault();
-					handleCopy();
+					if (handleCopy()) e.preventDefault();
 					return;
 				}
 				if (key === "x" || e.code === "KeyX") {

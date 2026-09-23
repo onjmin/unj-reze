@@ -55,6 +55,7 @@ import {
 	resizeCanvas,
 } from "@/lib/export-drawing";
 import { api } from "@/lib/api";
+import { copyToClipboard, readPasteImage } from "@/lib/oekaki-clipboard";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
@@ -173,7 +174,6 @@ export default function DotDrawingEditor({
 	const [zoom, setZoom] = useState(1);
 	const [flipped, setFlipped] = useState(false);
 	const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
-	const internalClipboardRef = useRef<HTMLCanvasElement | null>(null);
 	const selectDragModeRef = useRef<"new" | "move" | "resize" | "rotate" | null>(
 		null,
 	);
@@ -693,38 +693,19 @@ export default function DotDrawingEditor({
 		if (blob) pasteImage(blob, opts.opacity);
 	};
 
+	/**
+	 * 選択範囲をクリップボードにコピーする。選択が無ければ何もしない
+	 *
+	 * @returns コピーしたか
+	 */
 	const handleCopy = () => {
-		const active =
-			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-		const target =
-			layerEntriesRef.current
-				.map((l) => l.instance)
-				.find((l) => l.selection) || active;
-		if (!target) return;
-		let copyCanvas: HTMLCanvasElement | null = null;
-		if (target.selection) {
-			copyCanvas = target.copySelection();
-		} else if (target.canvas) {
-			copyCanvas = document.createElement("canvas");
-			copyCanvas.width = target.canvas.width;
-			copyCanvas.height = target.canvas.height;
-			const ctx = copyCanvas.getContext("2d");
-			if (ctx) ctx.drawImage(target.canvas, 0, 0);
-		}
-		if (copyCanvas) {
-			internalClipboardRef.current = copyCanvas;
-			if (navigator.clipboard?.write && window.isSecureContext) {
-				copyCanvas.toBlob((blob) => {
-					if (blob) {
-						try {
-							navigator.clipboard
-								.write([new ClipboardItem({ "image/png": blob })])
-								.catch(() => {});
-						} catch {}
-					}
-				});
-			}
-		}
+		const target = layerEntriesRef.current
+			.map((l) => l.instance)
+			.find((l) => l.selection);
+		const copyCanvas = target?.copySelection();
+		if (!copyCanvas) return false;
+		copyToClipboard(copyCanvas);
+		return true;
 	};
 
 	const handleCut = () => {
@@ -746,23 +727,8 @@ export default function DotDrawingEditor({
 		const active =
 			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 		if (!active?.editable) return;
-		let imageItem: DataTransferItem | null = null;
-		for (const v of e.clipboardData?.items ?? []) {
-			if (v.kind === "file" && v.type.startsWith("image/")) {
-				imageItem = v;
-				break;
-			}
-		}
-		let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
-		if (imageItem) {
-			const file = imageItem.getAsFile();
-			if (!file) return;
-			bitmap = await createImageBitmap(file);
-		} else if (internalClipboardRef.current) {
-			bitmap = internalClipboardRef.current;
-		} else {
-			return;
-		}
+		const bitmap = await readPasteImage(e, true);
+		if (!bitmap) return;
 		e.preventDefault();
 		active.paste(bitmap);
 		if (active.modified()) active.trace();
@@ -2353,8 +2319,7 @@ export default function DotDrawingEditor({
 	useEffect(() => {
 		const onCopy = (e: ClipboardEvent) => {
 			if (notDrawing(e)) return;
-			e.preventDefault();
-			handleCopy();
+			if (handleCopy()) e.preventDefault();
 		};
 
 		const handler = (e: KeyboardEvent) => {
@@ -2378,8 +2343,7 @@ export default function DotDrawingEditor({
 					return;
 				}
 				if (key === "c" || e.code === "KeyC") {
-					e.preventDefault();
-					handleCopy();
+					if (handleCopy()) e.preventDefault();
 					return;
 				}
 				if (key === "x" || e.code === "KeyX") {
