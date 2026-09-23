@@ -285,7 +285,10 @@ export default function SpriteImage({
 			)
 		: 0;
 	const yPos = rows > 1 ? (100 * rowIndex) / (rows - 1) : 0;
-	const keyframesName = `sprite-anim-steps-${frames}`;
+	// @keyframes はドキュメント全体で名前が共有されるため、向き(行)ごとに別名にする。
+	// frames だけで命名すると、後から描画された投稿の yPos で同名の keyframes が上書きされ、
+	// 十字ボタンを押した投稿の向きがフィード上の全歩行グラに伝染する。
+	const keyframesName = `sprite-anim-steps-${frames}-r${rowIndex}of${rows}`;
 	const playing = animate && !isSheet;
 
 	return (

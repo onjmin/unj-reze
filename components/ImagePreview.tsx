@@ -80,7 +80,7 @@ export default function ImagePreview({
 			)
 		: 0;
 	const yPos = rows > 1 ? (100 * rowIndex) / (rows - 1) : 0;
-	const keyframesName = "sprite-preview-anim-steps";
+	const keyframesName = `sprite-preview-anim-steps-${frames}-r${rowIndex}of${rows}`;
 
 	const clampOffset = useCallback((ox: number, oy: number, z: number) => {
 		if (z <= 1) return { x: 0, y: 0 };
@@ -293,10 +293,12 @@ export default function ImagePreview({
 						aria-label={alt || ""}
 						className="max-w-[90vw] max-h-[90vh] select-none"
 						style={{
+							// 背景画像divは<img>のobject-fitが効かないので、幅と高さを両方
+							// 90vw/90vhに固定すると箱がビューポート比になりコマが歪む
+							// （縦長のコマで縮尺が狂う）。コマ比を保ったまま収まる幅だけ決める。
 							aspectRatio: cellRatio ?? 1,
-							width: "90vw",
-							height: "90vh",
-							objectFit: "contain",
+							width: `min(90vw, calc(90vh * ${cellRatio ?? 1}))`,
+							height: "auto",
 							backgroundImage: `url(${src})`,
 							backgroundSize: `${frames * 100}% ${rows * 100}%`,
 							backgroundPosition: `0% ${yPos}%`,
