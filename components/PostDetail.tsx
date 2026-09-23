@@ -58,7 +58,7 @@ import { startMvRemix } from "@/lib/remix";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
-import { showToast } from "@/lib/toast";
+import { showToast, triggerHeartPop } from "@/lib/toast";
 import {
 	isCollabAllowed,
 	ORIGIN_TYPE_OPTIONS,
@@ -1595,59 +1595,65 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						suppressGenericEmbedIf={(p) => !!(p.hasImage || p.hasGame)}
 					/>
 
-					<div className="flex justify-between items-center text-gray-500 mt-2 max-w-[320px]">
-						<button
-							onClick={() => handleLike(post.id)}
-							className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? "text-blue-400 font-bold" : ""}`}
-						>
-							<ThumbsUp size={14} />
-							<span className="text-[11px]">{post.likes || ""}</span>
-						</button>
-						<button
-							onClick={() => handleDislike(post.id)}
-							className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? "text-red-500 font-bold" : ""}`}
-						>
-							<ThumbsDown size={14} />
-							<span className="text-[11px]">{post.dislikes || ""}</span>
-						</button>
-						<button
-							onClick={() => openComposer(null)}
-							className="flex items-center space-x-1 hover:text-green-400 transition-colors"
-						>
-							<MessageCircle size={14} />
-							<span className="text-[11px]">{post.repliesCount || ""}</span>
-						</button>
-						<button
-							onClick={() => handleRepost(post.id)}
-							className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? "text-purple-400" : ""}`}
-						>
-							<Repeat size={14} />
-							<span className="text-[11px]">{post.reposts || ""}</span>
-						</button>
+					<div className="flex justify-between items-center text-gray-500 mt-2">
+						<div className="flex items-center space-x-4">
+							<button
+								onClick={() => handleLike(post.id)}
+								className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? "text-blue-400 font-bold" : ""}`}
+							>
+								<ThumbsUp size={14} />
+								<span className="text-[11px]">{post.likes || ""}</span>
+							</button>
+							<button
+								onClick={() => handleDislike(post.id)}
+								className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? "text-red-500 font-bold" : ""}`}
+							>
+								<ThumbsDown size={14} />
+								<span className="text-[11px]">{post.dislikes || ""}</span>
+							</button>
+							<button
+								onClick={() => openComposer(null)}
+								className="flex items-center space-x-1 hover:text-green-400 transition-colors"
+							>
+								<MessageCircle size={14} />
+								<span className="text-[11px]">{post.repliesCount || ""}</span>
+							</button>
+							<button
+								onClick={() => handleRepost(post.id)}
+								className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? "text-purple-400" : ""}`}
+							>
+								<Repeat size={14} />
+								<span className="text-[11px]">{post.reposts || ""}</span>
+							</button>
+							<button
+								onClick={(e) => {
+									e.stopPropagation();
+									const targetSlug = post.slug || post.displayName;
+									if (targetSlug) {
+										router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+									}
+								}}
+								className="flex items-center hover:text-blue-400 transition-colors"
+								title="DMを送る"
+							>
+								<Mail size={14} />
+							</button>
+							<ShareButton
+								url={postShareUrl(post.id)}
+								text={buildPostShareText(post)}
+							/>
+						</div>
+						{/* タイムライン（PostContainer）と同じく、ハートは右端に独立配置 */}
 						<button
 							onClick={(e) => {
-								e.stopPropagation();
-								const targetSlug = post.slug || post.displayName;
-								if (targetSlug) {
-									router.push(`/messages/${encodeURIComponent(targetSlug)}`);
-								}
+								triggerHeartPop(e.clientX, e.clientY);
+								handleHeart(post.id);
 							}}
-							className="flex items-center hover:text-blue-400 transition-colors"
-							title="DMを送る"
+							className="flex items-center space-x-1 -mr-1.5 py-1.5 pl-2.5 pr-3 rounded-full hover:bg-pink-500/10 hover:text-pink-400 active:scale-90 transition-all"
 						>
-							<Mail size={14} />
+							<Heart size={16} className="fill-current text-pink-600/65" />
+							<span className="text-[11px]">{post.heartsTotal || "0"}</span>
 						</button>
-						<button
-							onClick={() => handleHeart(post.id)}
-							className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
-						>
-							<Heart size={12} className="fill-current text-pink-600/65" />
-							<span className="text-[10px]">{post.heartsTotal || "0"}</span>
-						</button>
-						<ShareButton
-							url={postShareUrl(post.id)}
-							text={buildPostShareText(post)}
-						/>
 					</div>
 				</div>
 			</div>
@@ -2475,56 +2481,60 @@ function ReplyTreeItem({
 						userId={userId}
 					/>
 
-					<div className="flex justify-between items-center text-gray-500 mt-2 max-w-[280px]">
-						<button
-							onClick={() => handleLike(localPost.id)}
-							className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${localPost.liked ? "text-blue-400 font-bold" : ""}`}
-						>
-							<ThumbsUp size={14} />
-							<span className="text-[11px]">{localPost.likes || ""}</span>
-						</button>
-						<button
-							onClick={() => handleDislike(localPost.id)}
-							className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? "text-red-500 font-bold" : ""}`}
-						>
-							<ThumbsDown size={14} />
-							<span className="text-[11px]">{localPost.dislikes || ""}</span>
-						</button>
-						<button
-							onClick={() => onReply(localPost)}
-							className="flex items-center space-x-1 hover:text-green-400 transition-colors"
-						>
-							<MessageCircle size={14} />
-							<span className="text-[11px]">{children.length || ""}</span>
-						</button>
-						<button
-							onClick={() => handleRepost(localPost.id)}
-							className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? "text-purple-400" : ""}`}
-						>
-							<Repeat size={14} />
-							<span className="text-[11px]">{localPost.reposts || ""}</span>
-						</button>
+					<div className="flex justify-between items-center text-gray-500 mt-2">
+						<div className="flex items-center space-x-4">
+							<button
+								onClick={() => handleLike(localPost.id)}
+								className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${localPost.liked ? "text-blue-400 font-bold" : ""}`}
+							>
+								<ThumbsUp size={14} />
+								<span className="text-[11px]">{localPost.likes || ""}</span>
+							</button>
+							<button
+								onClick={() => handleDislike(localPost.id)}
+								className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? "text-red-500 font-bold" : ""}`}
+							>
+								<ThumbsDown size={14} />
+								<span className="text-[11px]">{localPost.dislikes || ""}</span>
+							</button>
+							<button
+								onClick={() => onReply(localPost)}
+								className="flex items-center space-x-1 hover:text-green-400 transition-colors"
+							>
+								<MessageCircle size={14} />
+								<span className="text-[11px]">{children.length || ""}</span>
+							</button>
+							<button
+								onClick={() => handleRepost(localPost.id)}
+								className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? "text-purple-400" : ""}`}
+							>
+								<Repeat size={14} />
+								<span className="text-[11px]">{localPost.reposts || ""}</span>
+							</button>
+							<button
+								onClick={(e) => {
+									e.stopPropagation();
+									const targetSlug = localPost.slug || localPost.displayName;
+									if (targetSlug) {
+										router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+									}
+								}}
+								className="flex items-center hover:text-blue-400 transition-colors"
+								title="DMを送る"
+							>
+								<Mail size={14} />
+							</button>
+						</div>
+						{/* タイムライン（PostContainer）と同じく、ハートは右端に独立配置 */}
 						<button
 							onClick={(e) => {
-								e.stopPropagation();
-								const targetSlug = localPost.slug || localPost.displayName;
-								if (targetSlug) {
-									router.push(`/messages/${encodeURIComponent(targetSlug)}`);
-								}
+								triggerHeartPop(e.clientX, e.clientY);
+								handleHeart(localPost.id);
 							}}
-							className="flex items-center hover:text-blue-400 transition-colors"
-							title="DMを送る"
+							className="flex items-center space-x-1 -mr-1.5 py-1.5 pl-2.5 pr-3 rounded-full hover:bg-pink-500/10 hover:text-pink-400 active:scale-90 transition-all"
 						>
-							<Mail size={14} />
-						</button>
-						<button
-							onClick={() => handleHeart(localPost.id)}
-							className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
-						>
-							<Heart size={12} className="fill-current text-pink-600/65" />
-							<span className="text-[10px]">
-								{localPost.heartsTotal || "0"}
-							</span>
+							<Heart size={16} className="fill-current text-pink-600/65" />
+							<span className="text-[11px]">{localPost.heartsTotal || "0"}</span>
 						</button>
 					</div>
 
