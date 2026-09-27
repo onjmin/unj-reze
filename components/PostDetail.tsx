@@ -52,6 +52,7 @@ import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import type { TalkManifest } from "@/lib/talk-config";
 import { getDistinctTitle } from "@/lib/post-title";
 import { cachePost } from "@/lib/post-cache";
+import { playPostSfx } from "@/lib/post-sfx";
 import { cacheProfileSeed } from "@/lib/profile-cache";
 import { chThread } from "@/lib/realtime/channels";
 import { startMvRemix } from "@/lib/remix";
@@ -2242,12 +2243,25 @@ function ReplyTreeItem({
 	const isSelf =
 		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;
 
+	// タイムラインの PostContainer と同じ投稿演出（ポップイン＋効果音）。temp-id は自分が
+	// この場で送った楽観的返信にしか付かず、key が id なので本物の id に差し替わると
+	// 別要素として再マウントされる＝鳴るのは挿入の瞬間の一度だけ。
+	const isFreshOwnReply = localPost.id.startsWith("temp-");
+
+	useEffect(() => {
+		if (isFreshOwnReply) playPostSfx();
+		// マウント時（＝この楽観的返信が挿入された瞬間）にだけ一度鳴らす
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	return (
 		<div
 			style={{ marginLeft: depth * 12 }}
 			className={depth > 0 ? "pl-3 border-l-2 border-gray-800/40" : ""}
 		>
-			<div className="flex p-3 space-x-2.5">
+			<div
+				className={`flex p-3 space-x-2.5 ${isFreshOwnReply ? "rounded-lg ring-2 ring-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.6)] kusa-pop-in" : ""}`}
+			>
 				<div
 					onClick={(e) => {
 							e.stopPropagation();

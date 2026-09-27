@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { api } from "@/lib/api";
 import { mergePostCounters } from "@/lib/post-merge";
+import { playPostSfx } from "@/lib/post-sfx";
 import { showToast } from "@/lib/toast";
 import { Post } from "@/lib/types";
 
@@ -169,6 +170,9 @@ export function usePostActions(
 			repliesCount: p.repliesCount + 1,
 			replies: [...p.replies, optimisticReply],
 		}));
+		// タイムライン投稿と同じ効果音（カード内の返信欄は返信を1件ずつ描かないので、
+		// 挿入側で鳴らす）
+		playPostSfx();
 		try {
 			const reply = await api.posts.replies.create(postId, {
 				content: replyText,

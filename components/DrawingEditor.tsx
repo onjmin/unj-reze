@@ -145,11 +145,12 @@ export default function DrawingEditor({
 	// バケツの許容誤差と、線画の下へもぐり込ませる量
 	const [fillTolerance, setFillTolerance] = useState(24);
 	const [fillGrow, setFillGrow] = useState(2);
-	// バケツの領域判定を全レイヤーの見た目で行うか（線画と塗りを分けている絵の定石）
-	const [fillRefAll, setFillRefAll] = useState(true);
+	// バケツの領域判定を全レイヤーの見た目で行うか。既定はアクティブなレイヤーだけで判定する
+	// （線画と塗りを分けている時だけONにすると、上のレイヤーの線画の囲みで塗れる）
+	const [fillRefAll, setFillRefAll] = useState(false);
 	const fillToleranceRef = useRef(24);
 	const fillGrowRef = useRef(2);
-	const fillRefAllRef = useRef(true);
+	const fillRefAllRef = useRef(false);
 	const [showGrid, setShowGrid] = useState(false);
 	const [recentColors, setRecentColors] = useState<string[]>([]);
 	const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
@@ -989,8 +990,8 @@ export default function DrawingEditor({
 				if (!rgb || !active) return;
 				const w = active.canvas.width;
 				const h = active.canvas.height;
-				// 領域の判定は見た目（全レイヤー合成）で行い、色は今のレイヤーにだけ置く。
-				// 線画が上のレイヤーにあっても、その囲みの内側だけを塗れる
+				// 領域の判定は既定では今のレイヤーだけ。「全レイヤー参照」ON なら見た目（全レイヤー合成）で行う。
+				// どちらでも色は今のレイヤーにだけ置く。
 				let reference = active.data;
 				if (fillRefAllRef.current) {
 					const merged = oekaki

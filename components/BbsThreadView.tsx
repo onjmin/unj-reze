@@ -19,6 +19,7 @@ import {
 	useOlderReplies,
 	useScrollToNewestReply,
 } from "@/lib/hooks/useOlderReplies";
+import { playPostSfx } from "@/lib/post-sfx";
 import { getDistinctTitle } from "@/lib/post-title";
 import {
 	extractMmlFromContent,
@@ -362,6 +363,8 @@ export default function BbsThreadView({
 			replies: [...p.replies, optimisticReply],
 			repliesCount: p.repliesCount + 1,
 		}));
+		// タイムライン投稿と同じ効果音（行側は temp-id でポップインさせる）
+		playPostSfx();
 		const capturedImage = replyImage;
 		const capturedImageIsDrawn = replyImageIsDrawn;
 		const capturedMml = replyMml;
@@ -726,7 +729,11 @@ export default function BbsThreadView({
 				{allPosts.map((p, idx) => {
 					const num = numberOf(p, idx);
 					return (
-						<div key={p.id} id={`res-${num}`} className="px-3 py-3">
+						<div
+						key={p.id}
+						id={`res-${num}`}
+						className={`px-3 py-3 ${p.id.startsWith("temp-") ? "ring-2 ring-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.6)] kusa-pop-in" : ""}`}
+					>
 							{/* Header line */}
 							<div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5 mb-1.5 text-xs">
 								<span className="text-gray-500 font-bold tabular-nums w-5 text-right shrink-0">
