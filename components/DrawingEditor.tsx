@@ -56,6 +56,7 @@ import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
 import LayerPanel from "./LayerPanel";
+import ZoomScrollArea from "./ZoomScrollArea";
 
 function getEditorFrames(
 	instances: oekaki.LayeredCanvas[][],
@@ -129,7 +130,6 @@ export default function DrawingEditor({
 	collabImageUrl,
 }: DrawingEditorProps) {
 	const mountRef = useRef<HTMLDivElement>(null);
-	const canvasAreaRef = useRef<HTMLDivElement>(null);
 	const toolRef = useRef<Tool>("pen");
 	const colorRef = useRef("#ffffff");
 	const collabRef = useRef(collabImageUrl);
@@ -654,7 +654,8 @@ export default function DrawingEditor({
 	useEffect(() => {
 		const el = mountRef.current;
 		if (!el) return;
-		const parent = el.parentElement;
+		// 拡大用の箱（ZoomScrollArea）の中にいるので、見える領域の大きさで決める
+		const parent = el.closest<HTMLElement>("[data-zoom-area]");
 		const availW = parent ? parent.clientWidth : 640;
 		const availH = parent ? parent.clientHeight : 480;
 		const cap = 1024;
@@ -1148,19 +1149,6 @@ export default function DrawingEditor({
 		return () => upperCanvas.removeEventListener("pointermove", onPointerMove);
 	}, []);
 
-	useEffect(() => {
-		const el = canvasAreaRef.current;
-		if (!el) return;
-		const onWheel = (e: WheelEvent) => {
-			e.preventDefault();
-			setZoom((v) => {
-				const next = e.deltaY < 0 ? v + 0.25 : v - 0.25;
-				return Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
-			});
-		};
-		el.addEventListener("wheel", onWheel, { passive: false });
-		return () => el.removeEventListener("wheel", onWheel);
-	}, []);
 
 	const clearCanvas = () => {
 		const active =
@@ -1953,21 +1941,17 @@ export default function DrawingEditor({
 				</div>
 			)}
 
-			<div
-				ref={canvasAreaRef}
-				className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center"
+			<ZoomScrollArea
+				zoom={zoom}
+				setZoom={setZoom}
+				mountRef={mountRef}
+				className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner relative"
+				padClassName=""
 				onPointerDown={handleMultiTouchPointerDown}
 				onPointerMove={handleMultiTouchPointerMove}
 				onPointerUp={handleMultiTouchPointerUp}
 				onPointerCancel={handleMultiTouchPointerUp}
-				onContextMenu={(e) => e.preventDefault()}
-			>
-				<div
-					ref={mountRef}
-					className="inline-block"
-					style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
-				/>
-			</div>
+			/>
 
 			{/* eslint-disable react-hooks/refs */}
 			{animMode && (

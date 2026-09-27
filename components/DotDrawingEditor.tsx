@@ -64,6 +64,7 @@ import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
 import LayerPanel from "./LayerPanel";
+import ZoomScrollArea from "./ZoomScrollArea";
 import WalkCyclePanel from "./WalkCyclePanel";
 
 function getEditorFrames(
@@ -144,7 +145,6 @@ export default function DotDrawingEditor({
 	initialGridH,
 }: DotDrawingEditorProps) {
 	const mountRef = useRef<HTMLDivElement>(null);
-	const canvasAreaRef = useRef<HTMLDivElement>(null);
 	const toolRef = useRef<Tool>("pen");
 	const colorRef = useRef("#000000");
 	const collabRef = useRef(collabImageUrl);
@@ -1666,19 +1666,6 @@ export default function DotDrawingEditor({
 		return () => upperCanvas.removeEventListener("pointermove", onPointerMove);
 	}, []);
 
-	useEffect(() => {
-		const el = canvasAreaRef.current;
-		if (!el) return;
-		const onWheel = (e: WheelEvent) => {
-			e.preventDefault();
-			setZoom((v) => {
-				const next = e.deltaY < 0 ? v + 0.25 : v - 0.25;
-				return Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
-			});
-		};
-		el.addEventListener("wheel", onWheel, { passive: false });
-		return () => el.removeEventListener("wheel", onWheel);
-	}, []);
 
 	const changeSize = (w: number, h: number) => {
 		setGridW(w);
@@ -2674,24 +2661,20 @@ export default function DotDrawingEditor({
 				</div>
 			)}
 
-			<div
-				ref={canvasAreaRef}
+			<ZoomScrollArea
+				zoom={zoom}
+				setZoom={setZoom}
+				mountRef={mountRef}
+				mountClassName="unj-canvas-grid"
 				className={
-					"flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4" +
+					"flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner" +
 					(isDragover ? " ring-4 ring-blue-400/60" : "")
 				}
 				onPointerDown={handleMultiTouchPointerDown}
 				onPointerMove={handleMultiTouchPointerMove}
 				onPointerUp={handleMultiTouchPointerUp}
 				onPointerCancel={handleMultiTouchPointerUp}
-				onContextMenu={(e) => e.preventDefault()}
-			>
-				<div
-					ref={mountRef}
-					className="inline-block unj-canvas-grid"
-					style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
-				/>
-			</div>
+			/>
 
 			{/* eslint-disable react-hooks/refs */}
 			{animMode && (
