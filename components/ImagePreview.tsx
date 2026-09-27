@@ -14,6 +14,8 @@ interface ImagePreviewProps {
 	animFrames?: number | null;
 	animFps?: number | null;
 	walkPreset?: string | null;
+	/** 既定は z-60。モーダルの上に重ねる時（エディタの履歴モーダル等）に上げる */
+	zIndex?: number;
 }
 
 export default function ImagePreview({
@@ -23,6 +25,7 @@ export default function ImagePreview({
 	animFrames,
 	animFps,
 	walkPreset,
+	zIndex,
 }: ImagePreviewProps) {
 	const [zoom, setZoom] = useState(1);
 	const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -225,6 +228,7 @@ export default function ImagePreview({
 				background:
 					"radial-gradient(ellipse, rgba(255,255,255,1) 0%, rgba(255,255,255,0.8) 100%)",
 				opacity: closing ? 0 : 1,
+				zIndex,
 			}}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) handleClose();

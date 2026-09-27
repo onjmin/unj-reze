@@ -4,11 +4,14 @@ import { Calendar, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
 	clearHistory,
+	composeDrawingPreview,
+	type DrawingEditorState,
 	deleteHistoryItem,
 	getHistory,
 	HistoryItem,
 	saveHistory,
 } from "@/lib/history";
+import ImagePreview from "./ImagePreview";
 
 interface HistoryModalProps<T = unknown> {
 	isOpen: boolean;
@@ -39,6 +42,27 @@ export default function HistoryModal<T = unknown>({
 	};
 
 	const [confirmingClear, setConfirmingClear] = useState(false);
+	// お絵描き履歴は表示レイヤーを合成した見た目（id → dataURL）でサムネと拡大表示を出す
+	const [composed, setComposed] = useState<Record<string, string>>({});
+	const [zoomSrc, setZoomSrc] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!isOpen || (type !== "drawing" && type !== "dotdrawing")) return;
+		let cancelled = false;
+		(async () => {
+			for (const item of historyItems) {
+				if (cancelled) return;
+				const url = await composeDrawingPreview(
+					item.data as DrawingEditorState,
+				);
+				if (cancelled) return;
+				if (url) setComposed((prev) => ({ ...prev, [item.id]: url }));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [isOpen, type, historyItems]);
 
 	useEffect(() => {
 		if (isOpen) {
@@ -239,9 +263,16 @@ export default function HistoryModal<T = unknown>({
 							>
 								{/* Thumbnail Preview for Drawings */}
 								{item.previewUrl && (
-									<div className="w-10 h-10 bg-[#1a1b26] border border-gray-700 rounded overflow-hidden shrink-0 flex items-center justify-center gimp-checkered-background-white">
+									<button
+										type="button"
+										onClick={() =>
+											setZoomSrc(composed[item.id] ?? item.previewUrl ?? null)
+										}
+										title="拡大して確認"
+										className="w-14 h-14 bg-[#1a1b26] border border-gray-700 hover:border-blue-400 rounded overflow-hidden shrink-0 flex items-center justify-center gimp-checkered-background-white cursor-zoom-in transition-colors"
+									>
 										<img
-											src={item.previewUrl}
+											src={composed[item.id] ?? item.previewUrl}
 											alt="preview"
 											className="max-w-full max-h-full object-contain"
 											style={{
@@ -249,7 +280,7 @@ export default function HistoryModal<T = unknown>({
 													type === "dotdrawing" ? "pixelated" : "auto",
 											}}
 										/>
-									</div>
+									</button>
 								)}
 
 								<div className="flex-1 min-w-0">
@@ -284,6 +315,14 @@ export default function HistoryModal<T = unknown>({
 					)}
 				</div>
 			</div>
+			{zoomSrc && (
+				<ImagePreview
+					src={zoomSrc}
+					alt="履歴の拡大表示"
+					zIndex={120}
+					onClose={() => setZoomSrc(null)}
+				/>
+			)}
 		</div>
 	);
 }

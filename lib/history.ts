@@ -71,6 +71,44 @@ const layerToDataUrl = (
 	return canvas.toDataURL("image/png");
 };
 
+/** お絵描き履歴の見た目（先頭フレームの表示レイヤーを下から合成）を dataURL で返す。
+ *  保存時の previewUrl は最下層レイヤー1枚だけなので、下地が白一色だと全部同じに見える。 */
+export const composeDrawingPreview = async (
+	state: DrawingEditorState,
+): Promise<string | null> => {
+	if (typeof document === "undefined") return null;
+	const layers =
+		state.layers && state.layers.length > 0
+			? state.layers
+			: state.frames?.[0]?.layers.length
+				? state.frames[0].layers
+				: (state.walkLayers?.[0]?.[1] ?? []);
+	const visible = layers.filter((l) => l.visible && l.dataUrl);
+	if (visible.length === 0 || !state.width || !state.height) return null;
+	const canvas = document.createElement("canvas");
+	canvas.width = state.width;
+	canvas.height = state.height;
+	const ctx = canvas.getContext("2d");
+	if (!ctx) return null;
+	const images = await Promise.all(
+		visible.map(
+			(l) =>
+				new Promise<HTMLImageElement | null>((resolve) => {
+					const img = new Image();
+					img.onload = () => resolve(img);
+					img.onerror = () => resolve(null);
+					img.src = l.dataUrl;
+				}),
+		),
+	);
+	images.forEach((img, i) => {
+		if (!img) return;
+		ctx.globalAlpha = (visible[i].opacity ?? 100) / 100;
+		ctx.drawImage(img, 0, 0);
+	});
+	return canvas.toDataURL("image/png");
+};
+
 const dataUrlToLayerData = async (
 	dataUrl: string,
 	w: number,
