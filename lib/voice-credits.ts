@@ -4,7 +4,7 @@
 // @onjmin/koe の UTAU 音源で声を作る。音源には配布元の利用規約があり、**再生する側にも
 // 規約へ辿れる導線が要る**ので、埋め込み（MvBox / TalkBox）とエディタのプレビューに
 // クレジットを出す。文言と規約 URL の対応表はライブラリ側（dtm の KOE_VOICEBANK_TERMS /
-// KOE_VOICEBANK_LABELS）が持っている——音源を増やすのは dtm なので、こちらへ写さない。
+// KOE_VOICEBANK_NAMES）が持っている——音源を増やすのは dtm なので、こちらへ写さない。
 //
 // dtm は動的インポート必須（静的インポートは Edge/サーバー評価時にクラッシュする。
 // lib/mv-engine.ts と同じ理由）。
@@ -40,14 +40,19 @@ export async function voiceCreditsOf(
 		(m) => m && !SYNTH_MODELS.has(m.toLowerCase()),
 	);
 	if (keys.length === 0) return [];
-	const { KOE_VOICEBANK_LABELS, KOE_VOICEBANK_NAMES, KOE_VOICEBANK_TERMS } =
-		await import("@onjmin/dtm");
+	const { KOE_VOICEBANK_NAMES, KOE_VOICEBANK_TERMS } = await import(
+		"@onjmin/dtm"
+	);
 	const out: VoiceCredit[] = [];
 	for (const model of keys) {
 		const key = model.toLowerCase();
-		const builtin = KOE_VOICEBANK_LABELS[key] ?? KOE_VOICEBANK_NAMES[key];
+		const builtin = KOE_VOICEBANK_NAMES[key];
 		if (builtin) {
-			out.push({ model: key, label: builtin, termsUrl: KOE_VOICEBANK_TERMS[key] });
+			out.push({
+				model: key,
+				label: builtin,
+				termsUrl: KOE_VOICEBANK_TERMS[key],
+			});
 			continue;
 		}
 		const custom = customLabels[model] ?? customLabels[key];
@@ -71,7 +76,8 @@ export async function collectMvVoiceCredits(
 	try {
 		const dtm = await import("@onjmin/dtm");
 		const customLabels: Record<string, string> = {};
-		for (const def of dtm.parseCustomVocals(mml)) customLabels[def.key] = def.key;
+		for (const def of dtm.parseCustomVocals(mml))
+			customLabels[def.key] = def.key;
 		const lyrics = dtm.parseLyrics(dtm.stripCustomVocals(mml));
 		const models = [...lyrics.values()].map((t) => t.model);
 		return await voiceCreditsOf(models, customLabels);
