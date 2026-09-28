@@ -2000,8 +2000,12 @@ export const pgStore: DataStore = {
 			userId,
 		]);
 		if (!userRows.length) return null;
+		// 引き換える側のセッションはページを開いた時点で新規ユーザーに紐づいている
+		// （getOrCreateAnonymousUser）。DO NOTHING だとその紐づけが残って引き換えが空振りする
+		// ので、既存の行を移行元のユーザーへ付け替える（mock の sessionToUser.set と同じ）。
 		await q(
-			`INSERT INTO auth_tokens (user_id, token, kind) VALUES ($1,$2,'reze') ON CONFLICT (token) DO NOTHING`,
+			`INSERT INTO auth_tokens (user_id, token, kind) VALUES ($1,$2,'reze')
+       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, last_used_at = CURRENT_TIMESTAMP`,
 			[userId, newSessionId],
 		);
 		await q(`DELETE FROM migration_tokens WHERE token = $1`, [token]);
