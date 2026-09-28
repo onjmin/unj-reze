@@ -2485,6 +2485,17 @@ export const pgStore: DataStore = {
 		);
 	},
 
+	async recordPresetOpen(preset: string) {
+		// 日付は JST で切る（now() は timestamptz なのでセッションの TimeZone に依らない）。
+		// 1行=プリセット×日なので行数は開いた回数では増えない。RETURNING なしで転送量も最小。
+		await q(
+			`INSERT INTO preset_opens (preset, day, opens)
+       VALUES ($1, (now() AT TIME ZONE 'Asia/Tokyo')::date, 1)
+       ON CONFLICT (preset, day) DO UPDATE SET opens = preset_opens.opens + 1`,
+			[preset],
+		);
+	},
+
 	// ゴーストプレイヤーの位置はDBに持たない（lib/db/interface.ts参照）。
 };
 

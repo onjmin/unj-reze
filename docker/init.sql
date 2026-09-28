@@ -16,6 +16,7 @@
 -- 本番へスキーマ変更を入れたら、その場でこのファイルも同じ内容に更新すること。
 -- ============================================================================
 
+DROP TABLE IF EXISTS preset_opens CASCADE;
 DROP TABLE IF EXISTS game_votes CASCADE;
 DROP TABLE IF EXISTS game_schedule CASCADE;
 DROP TABLE IF EXISTS migration_tokens CASCADE;
@@ -374,4 +375,15 @@ CREATE TABLE game_votes (
     ip_address TEXT NOT NULL,
     hour_slot TEXT NOT NULL,
     UNIQUE (ip_address, hour_slot)
+);
+
+-- ========== preset_opens テーブル（ゲームエディタの見本プリセット／テンプレートが開かれた回数、日別） ==========
+-- unj-reze の POST /api/games/preset-open が書く。preset は見本プリセットID（例: 'touhou'）・
+-- 'blank'・エンジンテンプレート（例: 'template:rpg'）。day は JST の日付。
+-- 1行=プリセット×日なので、行数は開いた回数ではなく「種類数×日数」でしか増えない。個人は一切記録しない（IP・ユーザーIDを持たない）。
+CREATE TABLE preset_opens (
+    preset TEXT NOT NULL,
+    day DATE NOT NULL,
+    opens INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (preset, day)
 );

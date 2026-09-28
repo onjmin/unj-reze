@@ -27,7 +27,8 @@ const TILES_PER_CHUNK = 160;
 // モジュール変数で覚えておき、再度開いたときも同じサブタブ（キャラ/各シート）を表示する。
 let lastLocalSection = "mv";
 
-// 内蔵素材タブ: リポジトリ同梱のスプライトシート（MV素材 + DQ風キャラ + 16pxタイルセット）。
+// 内蔵素材タブ: リポジトリ同梱のスプライトシート（MV素材 + RPGEN の内蔵キャラ + 16pxタイルセット）。
+// 表示名に市販ゲームの題名（「DQ風」など）を出さない（docs/game-presets.md §5）。内部名 DQ_CHARACTERS はそのまま。
 export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 	const [section, setSectionState] = useState<string>(lastLocalSection);
 	const [failedChars, setFailedChars] = useState<Set<number>>(new Set());
@@ -78,7 +79,7 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 			) : section === "chars" ? (
 				<>
 					<p className="text-[10px] text-gray-600 px-0.5">
-						DQ風キャラ（RPGEN 16px・2フレーム×4方向）
+						内蔵キャラ（RPGEN 16px・2フレーム×4方向）
 					</p>
 					<div className="grid grid-cols-6 gap-1.5">
 						{DQ_CHARACTERS.filter((c) => !failedChars.has(c.surface)).map(

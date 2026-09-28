@@ -1,6 +1,7 @@
 "use client";
 
 import type { GameManifestDraft } from "@/components/GameMaker";
+import type { EngineKind, PresetId } from "@/components/game-presets/shared";
 import type { MvManifest, MvPresetKind } from "./mv-config";
 import type { TalkManifest } from "./talk-config";
 import type { GameRecord, MvRecord, TalkRecord } from "./types";
@@ -181,6 +182,29 @@ async function cleanupPrevious(
 		await deleteObject(prev.deleteId, prev.deleteHash);
 	} catch (e) {
 		console.warn("[uploader] 旧manifestの削除に失敗（孤児として残ります）", e);
+	}
+}
+
+/**
+ * ギャラリーで見本プリセット／まっさらテンプレートを開いたことを数える
+ * （POST /api/games/preset-open → preset_opens 表、日別）。
+ * key は見本プリセットID（'touhou' など）・'blank'・`template:${EngineKind}`（例 'template:rpg'）。
+ *
+ * 投げっぱなし: 待たない・結果も見ない・失敗しても何もしない（数え漏れが1件出るだけ）。
+ * keepalive なので、直後に画面を移っても届く。
+ */
+export function recordPresetOpen(
+	key: PresetId | "blank" | `template:${EngineKind}`,
+): void {
+	try {
+		fetch("/api/games/preset-open", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ preset: key }),
+			keepalive: true,
+		}).catch(() => {});
+	} catch {
+		// fetch 自体が投げる環境（静的エクスポートのプレビュー等）でも黙って諦める
 	}
 }
 

@@ -16,6 +16,10 @@
 //    mml:post:123        既存MML投稿(id=123)を参照
 //    mml:T120 cdefg      インラインMML
 //    none / 空           なし
+//  BGM参照の末尾には再生パラメータ `#loop=bar:2,bar:4&vol=40&start=12` を付けられる
+//  （parseBgmParams / updateRefBgmParams）。インラインMMLは本文に `#` を含む（`#inst=…;` の
+//  ヘッダ・`#end;`・シャープの `c#`）ので、mml: だけは「最後の # より後ろが既知のキーだけで
+//  できているとき」に限ってパラメータとみなす（splitBgmRef）。
 
 import type { BgmAsset } from "./game-config";
 import { parseTimeToSeconds } from "./embed";
@@ -129,12 +133,45 @@ export interface BgmParams {
 	start?: number;
 }
 
+/** 再生パラメータ部の1項目（updateRefBgmParams が書く形だけ）。 */
+const BGM_PARAM_PAIR =
+	"(?:loop=(?:bar|step|seconds):[\\d.]+(?:,(?:none|bar|step|seconds):[\\d.]+)?|vol=[\\d.]+|(?:start|s|t)=[\\d.]+)";
+const BGM_PARAMS_RE = new RegExp(`^${BGM_PARAM_PAIR}(?:&${BGM_PARAM_PAIR})*$`);
+
+/**
+ * BGM参照を「本体」と「末尾の再生パラメータ部（`#` の後ろ。無ければ null）」に分ける。
+ *
+ * mml: は本文そのものに `#` が入る（`#inst=…#volume=…;` のヘッダ、`#end;`、シャープ `c#4`）ので、
+ * 最初の `#` で切ると MML が壊れる。パラメータ部は必ず末尾に付き `#` を含まないので、
+ * 最後の `#` より後ろが既知のキー（loop/vol/start/s/t）だけでできているときだけパラメータとみなす。
+ * MML 側の `#loop=on` や `#audiovol=` はこの形に当たらないので本文に残る。
+ * mml: 以外は従来どおり最初の `#` で分ける。
+ */
+export function splitBgmRef(ref: string): {
+	base: string;
+	hash: string | null;
+} {
+	if (ref.startsWith("mml:")) {
+		const idx = ref.lastIndexOf("#");
+		if (idx !== -1 && BGM_PARAMS_RE.test(ref.slice(idx + 1)))
+			return { base: ref.slice(0, idx), hash: ref.slice(idx + 1) };
+		return { base: ref, hash: null };
+	}
+	const idx = ref.indexOf("#");
+	if (idx === -1) return { base: ref, hash: null };
+	return { base: ref.slice(0, idx), hash: ref.slice(idx + 1) };
+}
+
+/** BGM参照から末尾の再生パラメータ部を外した本体（`mml:<MML本文>` など）。 */
+export function stripBgmRefParams(ref: string): string {
+	return splitBgmRef(ref).base;
+}
+
 export function parseBgmParams(ref?: string): BgmParams {
 	const result: BgmParams = {};
 	if (!ref) return result;
-	const hashIdx = ref.indexOf("#");
-	if (hashIdx === -1) return result;
-	const hash = ref.slice(hashIdx + 1);
+	const { hash } = splitBgmRef(ref);
+	if (!hash) return result;
 
 	const parts = hash.split("&");
 	for (const part of parts) {
@@ -174,7 +211,7 @@ export function parseBgmParams(ref?: string): BgmParams {
 }
 
 export function updateRefBgmParams(ref: string, params: BgmParams): string {
-	const base = ref.split("#")[0];
+	const base = stripBgmRefParams(ref);
 	const hashParts: string[] = [];
 
 	if (params.loop) {
@@ -248,18 +285,18 @@ export function bgmRefToAsset(
 	volume?: number;
 	start?: number;
 } | null {
-	const ref = parseRef(raw);
+	// 再生パラメータ部（#loop=…&vol=…）を外してから scheme を読む。インラインMMLの
+	// `#inst=…;` ヘッダや `#end;` は本文なので残す（splitBgmRef）。
+	const base = stripBgmRefParams(raw);
+	if (base === "none") return null; // buildManifest が「BGMなし」に書く値（コロン無し）
+	const ref = parseRef(base);
 	if (!ref || ref.scheme === "none" || !ref.value) return null;
 
 	const loopOption = getLoopOption(raw);
 	const volume = getBgmVolume(raw);
 	const start = getBgmStart(raw);
 
-	let valStr = ref.value;
-	const hashIdx = valStr.indexOf("#");
-	if (hashIdx !== -1) {
-		valStr = valStr.slice(0, hashIdx);
-	}
+	const valStr = ref.value;
 
 	if (ref.scheme === "youtube")
 		return { type: "youtube", src: toYoutubeWatchUrl(valStr), volume, start };

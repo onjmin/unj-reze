@@ -545,7 +545,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 
 	const draft: GameManifestDraft = {
 		engine: "rpg",
-		preset: "onjReze",
+		// どの見本とも無関係なので 'blank'（読み込み側は rpg エンジンのまっさらテンプレートを土台にする）
+		preset: "blank",
 		name: "RPGEN Imported Game",
 		gravity: 0,
 		friction: 0,

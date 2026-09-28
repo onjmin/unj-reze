@@ -77,7 +77,7 @@ export default function Mmo3dEditorPanel({
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
 				<p className="text-[11px] font-bold text-gray-300">レンダラー</p>
 				<p className="text-[10px] text-gray-500 leading-tight">
-					three-stdlibとbabylon-mmdは同じ画面上で共存できないため、ゲームごとにどちらか一方を選びます。
+					three.jsとBabylon.jsは同じ画面上で共存できないため、ゲームごとにどちらか一方を選びます。
 				</p>
 				<div className="flex gap-1.5">
 					<button

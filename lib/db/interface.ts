@@ -489,6 +489,12 @@ export interface DataStore {
 		myVote: number | null;
 	}>;
 	voteGame(gameId: number, ipAddress: string): Promise<void>;
+	/**
+	 * ゲームエディタのギャラリーで見本プリセット／まっさらテンプレートが開かれた回数を
+	 * 日別（JST）に1加算する。どの見本が使われているかを見て、残す・直す・消すを決めるための集計。
+	 * `preset` の妥当性は呼び出し側（app/api/games/preset-open）で検証済みであること。
+	 */
+	recordPresetOpen(preset: string): Promise<void>;
 	// ゴーストプレイヤーの位置同期はDBに一切持たない。ハブ（Koyeb）のメモリ上のみで
 	// 完結する仕組みに一本化した（components/LiveGameView.tsx）。ハブ未設定時は
 	// プレゼンス機能自体を出さない。DB書き込みへのフォールバックは意図的に作らない。

@@ -1,5 +1,5 @@
 // mmo3d の Babylon.js バックエンド（lib/mmo3d.ts の three.js版と対になる実装）。
-// three-stdlib と babylon-mmd は同じ<canvas>のWebGLコンテキストを共有できないため、
+// three.js と Babylon.js は同じ<canvas>のWebGLコンテキストを共有できないため、
 // ゲームごとに `Mmo3dRenderer`（components/game-presets/shared.ts）でどちらか片方だけを選ぶ。
 //
 // フェーズ2: 地面 + プレースホルダーキャラクター。

@@ -192,6 +192,23 @@ export const parseGameEmbedRPGEN = (url: URL): string | undefined => {
 	if (!id) return;
 	return `https://rpgen.org/dq/?map=${id}`;
 };
+/** 所有者の旧作（GitHub Pages）。ここに挙げたディレクトリ配下だけをフィードで遊べるようにする。 */
+const ONJMIN_GITHUB_GAMES = new Set(["rpg", "roguelike", "walksim"]);
+export const parseGameEmbedOnjminGithub = (url: URL): string | undefined => {
+	// http で貼られても埋め込みは https で組み直す（GitHub Pages は https 前提）
+	if (url.protocol !== "https:" && url.protocol !== "http:") return;
+	// pathname は URL パーサが `..` を畳んだ後の値なので、先頭の区切りだけ見れば足りる
+	const [, dir, ...rest] = url.pathname.split("/");
+	if (!dir || !ONJMIN_GITHUB_GAMES.has(dir)) return;
+	// ホスト以外（ユーザー情報など）を持ち越さないよう、既知のオリジンから組み直す
+	const embed = new URL(
+		`/${dir}/${rest.join("/")}`,
+		"https://onjmin.github.io",
+	);
+	embed.search = url.search;
+	embed.hash = url.hash;
+	return embed.toString();
+};
 
 const parseVideoFileEmbed = (url: URL): string | undefined => {
 	if (!url.pathname.match(/\.(mp4|webm|ogg)$/i)) return;
@@ -251,6 +268,12 @@ const sites: SiteInfo[] = [
 	{ id: 3203, name: "Suno", type: "audio", parser: parseAudioEmbedSuno },
 	{ id: 6401, name: "RPGEN", type: "game", parser: parseGameEmbedRPGEN },
 	{
+		id: 6402,
+		name: "onjmin.github.io",
+		type: "game",
+		parser: parseGameEmbedOnjminGithub,
+	},
+	{
 		id: 2001,
 		name: "Karotter",
 		type: "video_file",
@@ -289,6 +312,7 @@ function matchSite(url: URL): SiteInfo | undefined {
 		"open.spotify.com": [3202],
 		"suno.com": [3203],
 		"rpgen.org": [6401],
+		"onjmin.github.io": [6402],
 		"api.karotter.com": [2001],
 		"twitter.com": [12801],
 		"x.com": [12801],

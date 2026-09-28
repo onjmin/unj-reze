@@ -1,7 +1,7 @@
-// ゆめにっき3D（Buildエンジン風 2.5D）プリセット。
+// 「まよいゆめ」（Buildエンジン風 2.5D）見本プリセット。
 // マップの実体は layout25d（床グリッド＋薄板壁＋ビルボード）で、既存の map/tiles は使わない。
 
-import { soundUrl as su } from "@/lib/rpgen-assets";
+import { YUME_DREAM } from "./bgm-library";
 import {
 	type Billboard25D,
 	COLS,
@@ -235,7 +235,7 @@ const layout25d: Layout25D = {
 
 export const yume: PresetData = {
 	id: "yume",
-	name: "ゆめにっき3D",
+	name: "まよいゆめ",
 	engine: "yume25d",
 	gravity: 0,
 	friction: 0,
@@ -254,24 +254,26 @@ export const yume: PresetData = {
 	tiles: { 0: { name: "なし", color: "#000000", passable: true } },
 	map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
 	objects: [],
-	// 「謎の曲(ループ対応)」。direct 音源はループ再生される。
-	bgm: {
-		ref: "https://www.youtube.com/watch?v=DXSlbNAOQO0",
-		src: "https://www.youtube.com/watch?v=DXSlbNAOQO0",
-		type: "youtube",
-	},
+	// オリジナル MML（bgm-library.ts）。覚めない夢の中を歩く、拍感の薄い環境音楽。
+	bgm: YUME_DREAM,
 	// yume25d は効果音を自前の定数（足音・食事・システム床）で鳴らすため preset.sfx は参照しない。
 	// ここに書いても鳴らないので空のままにしておく。
 	sfx: {},
 	titleScreen: {
 		enabled: true,
-		heading: "ゆめにっき3D",
+		heading: "まよいゆめ",
 		subtitle: "方向キーで歩く ／ ドラッグで見まわす ／ 近づいて調べる",
 		textColor: "#c9b6f0",
 		menu: [{ kind: "newGame", label: "ゆめをみる" }],
 	},
 	// ending は置かない：yume25d にクリア条件が無く、エンディング画面を出す経路が存在しない
-	// （ゆめにっき同様、目的のない徘徊がゲーム性。終わりは deathScreen＝「めがさめる」だけ）。
+	// （目的のない徘徊がゲーム性。終わりは deathScreen＝「めがさめる」だけ）。
 	layout25d,
-	deathScreen: defaultDeathScreen(),
+	deathScreen: {
+		...defaultDeathScreen(),
+		heading: "……めがさめた。",
+		retryLabel: "もういちど ねむる",
+		exitLabel: "タイトルへ",
+		textColor: "#c9b6f0",
+	},
 };

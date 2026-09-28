@@ -1,8 +1,10 @@
+import { gameSfxRef } from "@/lib/game-sfx";
 import {
 	sAnimUrl as sa,
 	spriteUrl as sp,
 	soundUrl as su,
 } from "@/lib/rpgen-assets";
+import { ONJREZE_BOSS, ONJREZE_FIELD } from "./bgm-library";
 import {
 	COLS,
 	newObject,
@@ -167,7 +169,9 @@ const tiles: PresetData["tiles"] = {
 
 // ── シーン1：都会の街（レゼの街） ────────────────────────────────────────
 // 20×15 の都会フィールド。中央十字の車道＋歩道でブロック分割された街並み。
-// 北西=宿屋、北東=道具屋、南西=喫茶店（レゼが働いていた思い出の店）、南東=花屋（原作でデンジがレゼに贈った花を扱う店）。南端中央が出口。
+// 北西=宿屋、北東=道具屋、南西=喫茶店（レゼが通っていた思い出の店）、南東=雑貨屋（夏の風鈴を扱う店）。南端中央が出口。
+// レゼはこのゲームでは「花火屋の孫娘」。花火大会が中止になった夏に、祖父の花火玉を投げて回る。
+// （名前はサイトの由来なので残すが、人物像・経緯は既存作品と重ならないオリジナルにしてある。）
 const townMap = Array.from({ length: ROWS }, (_, y) =>
 	Array.from({ length: COLS }, (_, x) => {
 		if (x === 0 || x === COLS - 1 || y === 0) return BWALL;
@@ -187,13 +191,13 @@ const townMap = Array.from({ length: ROWS }, (_, y) =>
 			return FLOOR;
 		}
 		if (x === 15 && y === 5) return DOOR;
-		// 喫茶店（南西・レゼの思い出の店）: cols 2-6, rows 10-12
+		// 喫茶店（南西・レゼが通っていた思い出の店）: cols 2-6, rows 10-12
 		if (x >= 2 && x <= 6 && y >= 10 && y <= 12) {
 			if (x === 2 || x === 6 || y === 10) return BWALL;
 			return FLOOR;
 		}
 		if (x === 4 && y === 13) return DOOR;
-		// 花屋（南東・原作でデンジがレゼに贈った花を扱う店）: cols 13-17, rows 10-12
+		// 雑貨屋（南東・レゼが好きだった風鈴を扱う店）: cols 13-17, rows 10-12
 		if (x >= 13 && x <= 17 && y >= 10 && y <= 12) {
 			if (x === 13 || x === 17 || y === 10) return BWALL;
 			return FLOOR;
@@ -288,11 +292,11 @@ const scene1: SceneDef = {
 			spriteUrl: sa("4KtOzD"),
 			shopItems: [
 				{ itemId: "herb", price: 8 },
-				{ itemId: "antidote", price: 10 },
-				{ itemId: "holyWater", price: 20 },
+				{ itemId: "bandage", price: 10 },
+				{ itemId: "sportsDrink", price: 20 },
+				{ itemId: "shavedIce", price: 25 },
 				{ itemId: "coffee", price: 35 },
 				{ itemId: "bombPowder", price: 60 },
-				{ itemId: "wingBoots", price: 80 },
 			],
 			pages: [
 				{
@@ -335,7 +339,7 @@ const scene1: SceneDef = {
 			behavior: "still",
 			hazard: false,
 			message:
-				"この街の喫茶店で働いとったレゼ、実は爆弾の混血で、組織の鍵を持って街を出てもうてな。\n今はフィールドで暴れとるらしいで。気をつけてな。",
+				"花火屋の孫のレゼな、今年の花火大会が中止になってから姿を見せへんのや。\nじいさんの残した花火玉を持ち出して、フィールドで爆弾みたいに投げとるらしいで。気をつけてな。",
 			spriteRef: wr("qhy37c"),
 			spriteUrl: sa("qhy37c"),
 		}),
@@ -346,13 +350,13 @@ const scene1: SceneDef = {
 			behavior: "still",
 			hazard: false,
 			message:
-				"レゼ、爆弾を投げてくるから離れて戦うんやで……直撃はもちろん、爆風の範囲も危ないから距離感ミスったらあかんで！\nやくそうは多めに持って行きや！",
+				"レゼ、花火玉を投げてくるから離れて戦うんやで……直撃はもちろん、爆風の範囲も危ないから距離感ミスったらあかんで！\n麦茶は多めに持って行きや！",
 			spriteRef: wr("nabqyI"),
 			spriteUrl: sa("nabqyI"),
 		}),
 		// ── 喫茶店の思い出（レゼ回想イベント）──
-		// 話しかけるたびにセルフスイッチが進み、出会い→甘い罠→兵器としての正体、と
-		// レゼの人物像が変化していく様を辿れる。セリフは各章で最も印象的な一節のみを厳選。
+		// 話しかけるたびにセルフスイッチが進み、窓ぎわの常連→花火大会中止の貼り紙→花火師としての素顔、と
+		// レゼの人物像が変化していく様を辿れる。セリフはすべてこのゲームのオリジナル。
 		// レゼ本人以外にこれらの台詞を言わせない（他NPCは間接的な噂話に留める）。
 		newObject({
 			emoji: "🖼️",
@@ -365,73 +369,79 @@ const scene1: SceneDef = {
 			spriteUrl: sp("lIjiPk"),
 			pages: [
 				{
-					name: "第1章 出会いと誘惑編",
+					name: "第1章 窓ぎわの席",
 					conditions: {},
 					commands: [
 						{
 							type: "message",
-							text: "（この喫茶店で、かつてレゼが働いていた……）",
+							text: "（この喫茶店の窓ぎわは、レゼの指定席だった……）",
 						},
 						{
 							type: "message",
-							text: "レゼ「デンジ君みたいな面白い人　はじめて」",
+							text: "レゼ「また会ったね。この席、花火大会の日は川の上がいちばんよく見えるんだよ」",
 						},
 						{
 							type: "message",
-							text: "レゼ「教えてあげる！　デンジ君の知らない事　できない事　私が全部教えてあげる」",
+							text: "レゼ「キミ、毎年見に来てたでしょ。……私？ 私は打ち上げる側。じいちゃんの手伝いだけどね」",
 						},
 						{ type: "setSelfSwitch", id: "A", value: true },
 					],
 				},
 				{
-					name: "第2章 甘い罠と価値観編",
+					name: "第2章 中止のお知らせ",
 					conditions: { selfSwitchId: "A", selfSwitchValue: true },
 					commands: [
 						{
 							type: "message",
-							text: "（レゼが花火大会の夜に語っていた言葉が蘇る……）",
+							text: "（閉店まぎわ、ふたりで店先の貼り紙を見上げた夜のことを思い出す……）",
 						},
 						{
 							type: "message",
-							text: "レゼ「デンジ君はさ　田舎のネズミと都会のネズミ　どっちがいい？」",
+							text: "レゼ「『今年の花火大会は中止します』だって。……じいちゃんの最後の玉、まだ蔵に残ってるのに」",
 						},
-						{ type: "message", text: "レゼ「だって私…デンジ君が好きだから」" },
+						{
+							type: "message",
+							text: "レゼ「見上げる人がいないと、花火ってただの火薬なんだよね。……なんてね。しんみりした？」",
+						},
 						{ type: "setSelfSwitch", id: "B", value: true },
 					],
 				},
 				{
-					name: "第3章 冷酷な兵器・ボム編",
+					name: "第3章 花火師の素顔",
 					conditions: { selfSwitchId: "B", selfSwitchValue: true },
 					commands: [
 						{
 							type: "message",
-							text: "（甘い記憶の奥から、ソ連の爆弾兵器としての本性が覗く……）",
+							text: "（やさしい記憶の奥から、花火師としての素顔がのぞく……）",
 						},
-						{ type: "message", text: "レゼ「デンジ君の心臓貰うね？」" },
 						{
 							type: "message",
-							text: "レゼ「おいでデンジ君　私達の戦い方ってのを教えてあげる」",
+							text: "レゼ「だから決めたの。誰も打ち上げないなら、私がぜんぶ投げてやるって」",
 						},
-						// 花屋で買った💐花束を、彼女が働いていたテーブルに供える（花束の唯一の使い道）
+						{
+							type: "message",
+							text: "レゼ「止めたいなら、追いかけておいで。……手加減は、しないから」",
+						},
+						// 雑貨屋で買った🎐風鈴を、彼女がいつも拭いていた窓辺に吊るす（風鈴の唯一の使い道）
 						{
 							type: "ifItem",
-							itemId: "flower",
+							itemId: "windChime",
 							has: true,
 							then: [
 								{
 									type: "message",
-									text: "（花屋で買った花束を、彼女がいつも立っていたテーブルに置いた。）",
+									text: "（雑貨屋で買った風鈴を、彼女がいつも拭いていた窓辺に吊るした。）",
 								},
-								{ type: "removeItem", itemId: "flower", count: 1 },
+								{ type: "removeItem", itemId: "windChime", count: 1 },
 								{ type: "restoreHp" },
 								{ type: "restoreMp" },
 								{
 									type: "message",
-									text: "ふしぎと 気持ちが 落ち着いた。\nHP と MP が全回復した！",
+									text: "ちりん、と すずしい音がした。\nHP と MP が全回復した！",
 								},
 								{
 									type: "message",
-									text: "（……次に会うときは、爆弾じゃなくて この花を渡そう。）",
+									text: "（……次に会うときは、花火玉の音じゃなくて この音を聞かせよう。）",
 								},
 							],
 						},
@@ -470,23 +480,23 @@ const scene1: SceneDef = {
 			spriteRef: ir("b7EYZPh"),
 			spriteUrl: sp("b7EYZPh"),
 		}), // 桜の花（テーブルの花瓶）
-		// ── 花屋（レゼへ贈る花を扱う店）──
+		// ── 雑貨屋（夏の風鈴を扱う店）──
 		newObject({
-			emoji: "💐",
+			emoji: "🎐",
 			col: 15,
 			row: 11,
 			behavior: "still",
 			hazard: false,
 			spriteRef: wr("oLrlUq"),
 			spriteUrl: sa("oLrlUq"),
-			shopItems: [{ itemId: "flower", price: 15 }],
+			shopItems: [{ itemId: "windChime", price: 15 }],
 			pages: [
 				{
 					conditions: {},
 					commands: [
 						{
 							type: "message",
-							text: "いらっしゃい！好きな子に花を贈るんか？　選んだるで。",
+							text: "いらっしゃい！夏はやっぱり風鈴やで。花火屋の孫娘も、よう聞きに来とったわ。",
 						},
 					],
 				},
@@ -503,7 +513,7 @@ const scene1: SceneDef = {
 			spriteRef: wr("oLrlUq"),
 			spriteUrl: sa("oLrlUq"),
 		}),
-		// ── 花屋の内装 ──
+		// ── 雑貨屋の内装 ──
 		newObject({
 			kind: "tile",
 			col: 14,
@@ -541,7 +551,7 @@ const scene1: SceneDef = {
 			behavior: "still",
 			hazard: false,
 			message:
-				"フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nやくそうは多めに持って行きや！",
+				"フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\n麦茶は多めに持って行きや！",
 			spriteRef: wr("4KtOzD"),
 			spriteUrl: sa("4KtOzD"),
 		}),
@@ -1075,6 +1085,9 @@ const scene2: SceneDef = {
 	name: "フィールド",
 	map: fieldMap,
 	overlayMap: fieldOverlayMap,
+	// レゼは街を出た瞬間から追ってくる（behavior: chase・索敵範囲なし）ので、フィールド全体が決戦の場。
+	// onjReze エンジンは bossBgm を鳴らさないため、決戦曲はシーン BGM として持たせる（街は共通 BGM）。
+	bgm: ONJREZE_BOSS,
 	objects: [
 		// ── 街帰還ワープ（元データのプレイヤー座標=col26,row21 付近を街入口とする） ──
 		newObject({
@@ -1107,7 +1120,7 @@ const scene2: SceneDef = {
 			warpEntryCol: 10,
 			warpEntryRow: ROWS - 3,
 		}),
-		// ── レゼ（爆弾を投げてくる敵）──
+		// ── レゼ（花火玉＝爆弾を投げてくる敵）──
 		// isBoss: true が onjReze エンジンのクリア判定（フィールド上の isBoss を全滅させたら
 		// outroDialogue → エンディング）を発火させる。これが無いとゲームがクリア不能になる。
 		newObject({
@@ -1123,6 +1136,7 @@ const scene2: SceneDef = {
 			exp: 60,
 			hazard: true,
 			isBoss: true,
+			ai: "bomber",
 			...mon(MON.reze),
 			outroDialogue: [
 				{
@@ -1133,18 +1147,23 @@ const scene2: SceneDef = {
 				{
 					speaker: "レゼ",
 					emoji: "🧨",
-					text: "ねえ、いっしょに　いかない？\nここじゃない　どこかへ。",
+					text: "さいごの　いっぱつ、のこしといたんだ。\n……いっしょに　見てくれる？",
 				},
 				{
 					speaker: "なんJ民",
 					emoji: "🧑",
 					side: "right",
-					text: "……悪いけど、ワイにはこの街があるんや。",
+					text: "……しゃーないな。\n河川敷の特等席、空けといたるわ。",
 				},
 				{
 					speaker: "レゼ",
 					emoji: "🧨",
-					text: "そっか。……ざんねん。\nでも、たのしかったよ。ありがとう。",
+					text: "やった。……来年は、ちゃんと\n大会で　打ち上げるからね。",
+				},
+				{
+					speaker: "レゼ",
+					emoji: "🧨",
+					text: "たのしかったよ。ありがとう。",
 				},
 			],
 		}),
@@ -1155,7 +1174,7 @@ const scene2: SceneDef = {
 			row: 19,
 			behavior: "still",
 			hazard: false,
-			message: "道の先にレゼがおるって噂や。爆弾を投げてくるから気をつけてな。",
+			message: "道の先にレゼがおるって噂や。花火玉を投げてくるから気をつけてな。",
 			spriteRef: wr("qhy37c"),
 			spriteUrl: sa("qhy37c"),
 		}),
@@ -1168,7 +1187,7 @@ const scene2: SceneDef = {
 			hazard: false,
 			objType: "item",
 			itemId: "herb",
-			message: "宝箱を開けた！「やくそう」を手に入れた！",
+			message: "宝箱を開けた！ よく冷えた「麦茶」を手に入れた！",
 			spriteRef: ir("lzUOisL"),
 			spriteUrl: sp("lzUOisL"),
 		}),
@@ -1179,8 +1198,8 @@ const scene2: SceneDef = {
 			behavior: "still",
 			hazard: false,
 			objType: "item",
-			itemId: "holyWater",
-			message: "草むらの中に「せいすい」が落ちていた！",
+			itemId: "sportsDrink",
+			message: "草むらの中に 未開封の「スポーツドリンク」が落ちていた！",
 			spriteRef: ir("lzUOisL"),
 			spriteUrl: sp("lzUOisL"),
 		}),
@@ -1342,40 +1361,42 @@ export const onjReze: PresetData = {
 	items: [
 		{
 			id: "herb",
-			name: "やくそう",
-			emoji: "🌿",
-			description: "HPを約30回復する薬草",
+			name: "麦茶",
+			emoji: "🍵",
+			description: "よく冷えた夏の麦茶。HPを約30回復する",
 			healHp: 30,
 			category: "consumable",
 		},
 		{
-			id: "antidote",
-			name: "どくけしそう",
-			emoji: "🍃",
-			description: "毒を回復する草",
+			id: "bandage",
+			name: "ばんそうこう",
+			emoji: "🩹",
+			description: "すり傷に貼る。HPを約15回復する",
 			healHp: 15,
 			category: "consumable",
 		},
 		{
-			id: "holyWater",
-			name: "せいすい",
-			emoji: "💧",
-			description: "周囲の魔物を一定時間遠ざける聖水",
+			id: "sportsDrink",
+			name: "スポーツドリンク",
+			emoji: "🥤",
+			description: "夏の必需品。HPを約50回復する",
 			healHp: 50,
 			category: "consumable",
 		},
 		{
-			id: "wingBoots",
-			name: "キメラのつばさ",
-			emoji: "🪽",
-			description: "使うと街に瞬間移動できる翼",
-			category: "key",
+			id: "shavedIce",
+			name: "かき氷",
+			emoji: "🍧",
+			description: "頭がキーンとする夏の味。HPを約40、MPを約20回復する",
+			healHp: 40,
+			healMp: 20,
+			category: "consumable",
 		},
 		{
-			id: "flower",
-			name: "花束",
-			emoji: "💐",
-			description: "花屋で買った花束。誰かに贈りたい",
+			id: "windChime",
+			name: "風鈴",
+			emoji: "🎐",
+			description: "雑貨屋で買ったガラスの風鈴。どこかに吊るしたい",
 			category: "key",
 		},
 		{
@@ -1399,7 +1420,7 @@ export const onjReze: PresetData = {
 	titleScreen: {
 		enabled: true,
 		heading: "おんｊレゼ",
-		subtitle: "なんJ民として、爆弾を投げてくるレゼたちに立ち向かおう！",
+		subtitle: "なんJ民として、花火玉を投げてくるレゼに立ち向かおう！",
 		textColor: "#ffaacc",
 		menu: [{ kind: "newGame", label: "ぼうけんをはじめる" }],
 	},
@@ -1407,51 +1428,30 @@ export const onjReze: PresetData = {
 		enabled: true,
 		heading: "THE END",
 		message:
-			"レゼは 街を去っていった。\nもう爆弾の音がしない朝が、また来る。\n\n——なんJ民の夏は、これでおしまい。",
+			"その夜、河川敷から レゼの最後の一発が上がった。\n街じゅうの人が、ひさしぶりに空を見上げた。\nどこかの軒先で、風鈴が ちりんと鳴った。\n\n——なんJ民の夏は、これでおしまい。",
 		textColor: "#ffaacc",
 	},
-	bgm: {
-		ref: "https://www.youtube.com/watch?v=0_jEpB40aYw",
-		src: "https://www.youtube.com/watch?v=0_jEpB40aYw",
-		type: "youtube",
-	},
+	// 街＝共通 BGM（夏の町の冒険曲）。フィールドはシーン BGM の決戦曲（scene2.bgm）。
+	bgm: ONJREZE_FIELD,
 	// bossBgm は onjReze エンジンでは鳴らない（ターン制戦闘 or touhou のボスフェーズ専用）ので置かない。
-	// SE は必ず src まで埋める（src が無いと playSfx が即 return して無音になる）
+	// SE は必ず src まで埋める（src が無いと playSfx が即 return して無音になる）。
+	// 市販ゲームから抜いた音（RPGEN の題名が「ﾄﾞﾗｸｴ…」「[ポケ]…」「桃/…」のもの）は使わず、
+	// エンジン内蔵のオリジナル合成音（lib/game-sfx）に置き換えた。残る2つは出自の書かれていない RPGEN 素材。
 	sfx: {
 		shot: {
 			ref: `direct:${su("3JcWxQ")}`,
 			src: su("3JcWxQ"),
 			type: "direct" as const,
-		}, // 爆弾を投げる
-		damage: {
-			ref: `direct:${su("bC3ZP1")}`,
-			src: su("bC3ZP1"),
-			type: "direct" as const,
-		},
-		levelup: {
-			ref: `direct:${su("JrcaUb")}`,
-			src: su("JrcaUb"),
-			type: "direct" as const,
-		},
-		purchase: {
-			ref: `direct:${su("PEeN5M")}`,
-			src: su("PEeN5M"),
-			type: "direct" as const,
-		},
-		inn: {
-			ref: `direct:${su("L5Npni")}`,
-			src: su("L5Npni"),
-			type: "direct" as const,
-		},
+		}, // 爆弾を投げる（RPGEN「斬撃」）
+		damage: gameSfxRef("hurt"),
+		levelup: gameSfxRef("levelUp"),
+		purchase: gameSfxRef("menuConfirm"),
+		inn: gameSfxRef("heal"),
 		save: {
 			ref: `direct:${su("Kyp5z7")}`,
 			src: su("Kyp5z7"),
 			type: "direct" as const,
-		},
-		clear: {
-			ref: `direct:${su("CvnSzp")}`,
-			src: su("CvnSzp"),
-			type: "direct" as const,
-		},
+		}, // RPGEN「決定」
+		clear: gameSfxRef("clear"),
 	},
 };

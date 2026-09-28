@@ -19,6 +19,7 @@ import {
 	type Tex25D,
 } from "@/components/game-presets/shared";
 import { parseWalkRef, type WalkRef } from "@/lib/asset-ref";
+import { gameSfxUrl } from "@/lib/game-sfx";
 import { applyMasterVolume } from "@/lib/master-volume";
 import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 import {
@@ -327,7 +328,10 @@ const HUNGER_REGEN_COST = 0.6;
 const STARVE_INTERVAL = 2.0; // 空腹0の飢餓ダメージ間隔（秒）
 const STARVE_MIN_HP = 2; // 飢餓では1ハートまでしか減らない（Minecraftノーマル相当＝飢えでは死なない）
 const FOOD_DEFAULT_VALUE = 6; // 食べ物1個の回復量（🍗3個ぶん）
-const SYS_FOOD_SFX = "https://rpgen-search.pages.dev/audio/sound/lFPiWw.mp3";
+// 食事・被ダメージ・着地の既定音はエンジン内蔵のオリジナル合成音（lib/game-sfx.ts）。
+const SYS_FOOD_SFX = gameSfxUrl("eat");
+const SYS_HURT_SFX = gameSfxUrl("hurt");
+const SYS_LAND_SFX = gameSfxUrl("land");
 // 波：水面はプレーンな板ではなく分割メッシュで、動き（プレイヤー・NPC・ボールの移動）があるとき
 // だけ頂点変位のさざ波を立てる。静止すると凪に戻る。波の陰影は水面専用のライトレイヤーで付ける
 // （ワールドは環境光のみなので、専用ライトが無いと頂点変位が見えない）。
@@ -3494,7 +3498,7 @@ export class Yume25DEngine {
 		if (this.hp <= 0) return;
 		this.hp = Math.max(0, this.hp - amount);
 		this.onHpChange?.(this.hp, this.maxHp);
-		playSysSfx("https://rpgen-search.pages.dev/audio/sound/XaNbgp.mp3");
+		playSysSfx(SYS_HURT_SFX);
 
 		if (this.hp <= 0) {
 			// onDeath が登録されている場合は呼び出し元が死亡画面を管理する（リセットは resetToStart() を呼ぶ）
@@ -4385,9 +4389,7 @@ export class Yume25DEngine {
 
 					if (!inWater && !hovering) {
 						if (fallDist > 1.2) {
-							playSysSfx(
-								"https://rpgen-search.pages.dev/audio/sound/PUMNHM.mp3",
-							);
+							playSysSfx(SYS_LAND_SFX);
 						}
 						if (fallDist > 3.0) {
 							const damage = Math.floor((fallDist - 3.0) * 2.0);

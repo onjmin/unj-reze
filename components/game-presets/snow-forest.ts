@@ -1,4 +1,5 @@
 import { sAnimUrl as sa } from "@/lib/rpgen-assets";
+import { SNOWFOREST_FIELD } from "./bgm-library";
 import {
 	newObject,
 	type PresetData,
@@ -16,12 +17,14 @@ import {
 // 「雪 木・地面装飾」「雪 崖」セクション）。木・氷ブロック・雪だるまは格子1マスに収めず、
 // 現物より大きいオブジェクトとして自由サイズで配置する（動画の"あえて大きく描く"演出に合わせる）。
 // 敵の歩行アニメのみ rpgen-search（CC相当のフリー素材DB）から調達。
+// 終盤は「はしごの崖」と「すり抜け床」の見本区間（どちらもアクションエンジンのタイル特殊）。
+// はしご・すり抜け床の見た目も同じ Base.png の雪チップ（縄ばしご・雪の桟橋の縁）を使う。
+
+// BGM: bgm-library.ts のオリジナル MML（SNOWFOREST_FIELD）。以前は既存曲のアレンジ動画（YouTube）を
+// 参照していたが、見本の BGM は YouTube に頼らない方針（docs/game-presets.md §5）なので差し替えた。
 
 const PLAYER_SPRITE_URL = "https://i.imgur.com/4LCRj5M.png";
 const BASE_URL = "/assets/rpg-reze/Base.png"; // 16pxグリッドの同梱タイルシート
-
-// BGM: ユーザー指定のYouTube動画（着想元楽曲の「エリアBGM風アレンジ」）を直接参照。
-const BGM_YOUTUBE_URL = "https://www.youtube.com/watch?v=ugPZI3ldPhk";
 
 // ── rpgen-search 素材（歩行アニメのみ）───────────────────────────────────────
 const R = {
@@ -67,6 +70,33 @@ const tiles: PresetData["tiles"] = {
 		color: "#ff8800",
 		passable: true,
 		special: "checkpoint",
+	},
+	// はしご：通行可＋special:'ladder'。体の中心がこのマスにある間、↑（またはジャンプ長押し）で登る。
+	// 離すと重力が戻って落ちるので、上端のマスは崖の天面より1段上に置く（登り切ったら横へ降りられる）。
+	5: {
+		name: "はしご",
+		color: "#c9a25a",
+		passable: true,
+		special: "ladder",
+		imageRef: `url:${BASE_URL}`,
+		imageUrl: tileChip(6, 209),
+	},
+	6: {
+		name: "はしご(上端)",
+		color: "#c9a25a",
+		passable: true,
+		special: "ladder",
+		imageRef: `url:${BASE_URL}`,
+		imageUrl: tileChip(6, 208),
+	},
+	// すり抜け床：下からは跳んで通り抜け、落ちてくるときだけ上に乗れる。チップは上端の薄い雪の縁だけ。
+	7: {
+		name: "すり抜け床",
+		color: "#e9f2f7",
+		passable: true,
+		special: "oneway",
+		imageRef: `url:${BASE_URL}`,
+		imageUrl: tileChip(1, 222),
 	},
 };
 
@@ -149,7 +179,7 @@ const CROP = {
 };
 
 // ── マップ生成（地面のみタイル。氷ブロック/木はオブジェクトとして別途配置） ─────
-const WCOLS = 80;
+const WCOLS = 96;
 const GROUND_TOP = ROWS - 2; // 13（rows 13,14 が地面本体）
 
 const map: number[][] = Array.from({ length: ROWS }, () =>
@@ -178,6 +208,20 @@ const placeCheckpoint = (col: number, topRow: number) => {
 const placeGoal = (col: number, topRow: number) => {
 	map[topRow][col] = 3;
 };
+/** 地面から立ち上がる崖（天面 topRow〜地面の1段上まで）。 */
+const cliff = (c0: number, c1: number, topRow: number) => {
+	fillRect(c0, c1, topRow, topRow, 1);
+	fillRect(c0, c1, topRow + 1, GROUND_TOP - 1, 2);
+};
+/** はしご（topRow が上端のマス、bottomRow まで）。 */
+const placeLadder = (col: number, topRow: number, bottomRow: number) => {
+	map[topRow][col] = 6;
+	fillRect(col, col, topRow + 1, bottomRow, 5);
+};
+/** すり抜け床（1段・横 c0〜c1）。 */
+const onewayLedge = (c0: number, c1: number, row: number) => {
+	fillRect(c0, c1, row, row, 7);
+};
 
 // 序盤：出発点
 groundSeg(0, 7);
@@ -186,18 +230,32 @@ groundSeg(22, 29);
 // 中間の休憩地帯（うさぎがはねている）
 groundSeg(38, 45);
 placeCheckpoint(40, GROUND_TOP);
-// フィナーレ：ゴール地点
-groundSeg(63, 79);
-placeGoal(77, GROUND_TOP);
+// フィナーレ：はしごの崖 → すり抜け床 → 見晴らし台のゴール（この区間に落とし穴は無い）
+groundSeg(63, WCOLS - 1);
+// はしごの崖：高さ8マス（256px）。ふつうのジャンプ（長押しで約225px）では届かず、
+// ダッシュ長押し（約270px）でやっと届く高さ。はしごは天面(5段目)より1段上の4段目から地面の1段上まで。
+const CLIFF_TOP = 5;
+cliff(68, 73, CLIFF_TOP);
+placeLadder(67, CLIFF_TOP - 1, GROUND_TOP - 1);
+// すり抜け床を2段（10段目・7段目＝どちらも3マス差、軽いジャンプ約120pxで下から抜けて乗れる）。
+// その先の見晴らし台は高さ9マス（288px）で、地面からはダッシュでも届かない＝すり抜け床を登るのが正攻法。
+onewayLedge(78, 81, 10);
+onewayLedge(78, 81, 7);
+const LOOKOUT_TOP = 4;
+cliff(82, WCOLS - 1, LOOKOUT_TOP);
+placeGoal(92, LOOKOUT_TOP);
 
 // ── 背景の遠景木（淡く・小さく・密集） ────────────────────────────────────────
+// オブジェクトは地形より手前に描かれるので、終盤の崖・見晴らし台に重なる位置には置かない
+// （崖の壁面に遠景の木が浮いて見えてしまう）。
+const overCliff = (col: number) => (col > 65.5 && col < 74.5) || col > 80.5;
 const bgTrees = (() => {
 	const arr: ReturnType<typeof deco>[] = [];
 	let col = -1;
 	let i = 0;
 	while (col < WCOLS + 2) {
 		const crop = i % 2 === 0 ? CROP.frostTree : CROP.pineBig;
-		arr.push(deco(crop, col, 4, 90 + (i % 3) * 12));
+		if (!overCliff(col)) arr.push(deco(crop, col, 4, 90 + (i % 3) * 12));
 		col += 2 + (i % 3);
 		i++;
 	}
@@ -211,7 +269,7 @@ const midTrees = [
 	deco(CROP.frostTree, 34, 3, 145),
 	deco(CROP.pineBig, 50, 3, 200),
 	deco(CROP.frostTree, 62, 3, 150),
-	deco(CROP.greenBig, 72, 3, 175),
+	deco(CROP.greenBig, 76, 3, 175),
 ];
 
 // ── 前景の大きな松（動画のように画面手前で画面いっぱいに大きく描く） ────────────
@@ -220,7 +278,7 @@ const midTrees = [
 const fgTrees = [
 	deco(CROP.pineBig, 1, GROUND_TOP - 1, TILE_SIZE * 8),
 	deco(CROP.frostTree, 44, GROUND_TOP - 1, TILE_SIZE * 6.5),
-	deco(CROP.greenBig, 66, GROUND_TOP - 1, TILE_SIZE * 7),
+	deco(CROP.greenBig, 64.5, GROUND_TOP - 1, TILE_SIZE * 7),
 ];
 
 // ── 地面まわりの小物 ──────────────────────────────────────────────────────
@@ -228,7 +286,21 @@ const groundDeco = [
 	deco(CROP.bush, 6, GROUND_TOP - 1, TILE_SIZE),
 	deco(CROP.log, 9, GROUND_TOP - 1, TILE_SIZE * 0.6),
 	deco(CROP.bush, 42, GROUND_TOP - 1, TILE_SIZE),
-	deco(CROP.snowman, 74, GROUND_TOP - 1, TILE_SIZE * 2, "⛄"),
+	deco(CROP.snowman, 76, GROUND_TOP - 1, TILE_SIZE * 2, "⛄"),
+];
+
+// ── 崖の上・見晴らし台の上に立つ小物（下端を天面 surfaceRow の上端にそろえる） ──────
+const standOn = (
+	crop: [col: number, row: number, w: number, h: number],
+	centerCol: number,
+	surfaceRow: number,
+	heightPx: number,
+	emoji?: string,
+) => deco(crop, centerCol, surfaceRow - heightPx / TILE_SIZE, heightPx, emoji);
+const highDeco = [
+	standOn(CROP.bush, 70, CLIFF_TOP, TILE_SIZE),
+	standOn(CROP.frostTree, 86, LOOKOUT_TOP, TILE_SIZE * 4),
+	standOn(CROP.snowman, 94.5, LOOKOUT_TOP, TILE_SIZE * 2, "⛄"),
 ];
 
 // ── 浮遊する氷ブロック（動画のジグザグに跳び渡る構成） ────────────────────────
@@ -274,48 +346,46 @@ const creatures = [
 		spriteRef: `walk:auto:u:${R.rabbitWalk}`,
 		spriteUrl: R.rabbitWalk,
 	}),
+	// もう1匹：はしごの崖と見晴らし台のあいだの谷を跳ねている（すり抜け床の下もくぐる）
+	newObject({
+		emoji: "🐇",
+		col: 75,
+		row: 12,
+		behavior: "patrolH",
+		speed: 1.5,
+		hazard: false,
+		hp: 1,
+		bullet: "none",
+		name: "ゆきうさぎ",
+		spriteRef: `walk:auto:u:${R.rabbitWalk}`,
+		spriteUrl: R.rabbitWalk,
+	}),
 ];
 
+// 雪の結晶（row は結晶が乗る面の1段上）
+const crystal = (col: number, row: number) =>
+	newObject({
+		emoji: "❄️",
+		col,
+		row,
+		objType: "item",
+		hazard: false,
+		hp: 1,
+		speed: 0,
+		behavior: "still",
+		bullet: "none",
+		itemId: "snowCrystal",
+		message: "",
+	});
+
 const items = [
-	newObject({
-		emoji: "❄️",
-		col: 14,
-		row: 8,
-		objType: "item",
-		hazard: false,
-		hp: 1,
-		speed: 0,
-		behavior: "still",
-		bullet: "none",
-		itemId: "snowCrystal",
-		message: "",
-	}),
-	newObject({
-		emoji: "❄️",
-		col: 48,
-		row: 9,
-		objType: "item",
-		hazard: false,
-		hp: 1,
-		speed: 0,
-		behavior: "still",
-		bullet: "none",
-		itemId: "snowCrystal",
-		message: "",
-	}),
-	newObject({
-		emoji: "❄️",
-		col: 53,
-		row: 6,
-		objType: "item",
-		hazard: false,
-		hp: 1,
-		speed: 0,
-		behavior: "still",
-		bullet: "none",
-		itemId: "snowCrystal",
-		message: "",
-	}),
+	crystal(14, 8),
+	crystal(48, 9),
+	crystal(53, 6),
+	// はしごを登り切った崖の上
+	crystal(72, CLIFF_TOP - 1),
+	// すり抜け床の2段目の左端（見晴らし台へ跳ぶ前に少し寄り道して取る）
+	crystal(78, 6),
 ];
 
 const objects = [
@@ -323,6 +393,7 @@ const objects = [
 	...midTrees,
 	...icePlatforms,
 	...groundDeco,
+	...highDeco,
 	...fgTrees,
 	...creatures,
 	...items,
@@ -355,12 +426,21 @@ export const snowForest: PresetData = {
 		// y=32〜64（横向き3コマ・歩行サイクル）と y=96〜128（ジャンプ用3コマ：1枚目＝空中の
 		// 構え、2/3枚目＝着地直後だけの着地モーション）の2種類のアニメーションが別の行に
 		// 入っている。歩行は y=32 の1行だけを横ストリップとして切り出し、左移動時は水平反転
-		// (smc規格のflipH)で表現する（GameMaker.tsx側で gameData.id==='snowForest' 限定で
-		// 空中/着地直後は y=96 の行の該当コマへ差し替え表示する）。
+		// (smc規格のflipH)で表現する。空中/着地直後は airSpriteRef / landSpriteRefs で
+		// y=96 の行の該当コマへ差し替える。
 		// renderScale で見た目だけ2倍に拡大（当たり判定(w/h)は変えない＝1タイル級のまま）。
 		spriteRef: `walk:smc:u:${PLAYER_SPRITE_URL}#0,32,72,32,3,0,2`,
 		spriteUrl: PLAYER_SPRITE_URL,
+		airSpriteRef: `walk:smc:u:${PLAYER_SPRITE_URL}#0,96,24,32,1,0,2`,
+		landSpriteRefs: [
+			`walk:smc:u:${PLAYER_SPRITE_URL}#24,96,24,32,1,0,2`,
+			`walk:smc:u:${PLAYER_SPRITE_URL}#48,96,24,32,1,0,2`,
+		],
+		// プレイヤーに寄り添う光の精霊
+		companionLight: true,
 	},
+	// 画面全体を冷たいティール/紫トーンへ寄せる（乗算合成）
+	screenTint: { color: "#91a5dc", alpha: 0.5 },
 	tiles,
 	map: JSON.parse(JSON.stringify(map)),
 	objects: [...objects],
@@ -389,11 +469,7 @@ export const snowForest: PresetData = {
 		message: "森の終わりに着いた。\n静かな雪の音だけが残る。",
 		textColor: "#eaf6ff",
 	},
-	bgm: {
-		ref: BGM_YOUTUBE_URL,
-		src: BGM_YOUTUBE_URL,
-		type: "youtube",
-	},
+	bgm: SNOWFOREST_FIELD,
 	sfx: {
 		// 軽く弾む2音の上昇（ジャンプの踏み切り）
 		jump: { ref: "mml:t150o6l32ce", src: "t150o6l32ce", type: "mml" },

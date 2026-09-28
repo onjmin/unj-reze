@@ -3,6 +3,7 @@
 export type { WeatherConfig, WeatherKind } from "@/lib/pixel-weather";
 import type { WeatherConfig } from "@/lib/pixel-weather";
 import type { MvAudioMode } from "@/lib/mv-config";
+import { gameSfxUrl } from "@/lib/game-sfx";
 export type WeatherDef = WeatherConfig;
 export type { MvAudioMode };
 
@@ -17,16 +18,20 @@ export const VIEW_ROWS = 11;
 export const VIEW_W = VIEW_COLS * TILE_SIZE; // 480 px
 export const VIEW_H = VIEW_ROWS * TILE_SIZE; // 352 px
 
+/** ゲームの出どころ。見本プリセットのID、またはエンジンのまっさらテンプレートから作った
+ *  （もしくは「まっさらにする」「エンジン変換」を通った）ゲームを表す 'blank'。
+ *  'blank' のゲームは PRESETS に実体を持たず、読み込み時は engine のテンプレート
+ *  （templates.ts の createEngineTemplate）を土台にする。 */
 export type PresetId =
-	| "dq"
+	| "blank"
 	| "snowForest"
-	| "rockman"
 	| "touhou"
 	| "onjReze"
-	| "undertale"
-	| "deltarune"
+	| "fusatsu"
 	| "yume"
 	| "mmo3d";
+/** 見本プリセット（PRESETS に実体があるもの）。 */
+export type SamplePresetId = Exclude<PresetId, "blank">;
 export type EngineKind =
 	| "action"
 	| "rpg"
@@ -35,7 +40,7 @@ export type EngineKind =
 	| "yume25d"
 	| "mmo3d";
 
-/** mmo3d専用: レンダラーバックエンド。three-stdlib（MMDLoader）と babylon-mmd は
+/** mmo3d専用: レンダラーバックエンド。three.js と Babylon.js（babylon-mmd）は
  *  同じ<canvas>上のWebGLコンテキストを共有できないため、ゲームごとに片方だけを選ぶ。
  *  比較は docs/mmo3d-feature-design.md の表を参照。既定は 'three'。 */
 export type Mmo3dRenderer = "three" | "babylon";
@@ -62,6 +67,11 @@ export type SfxTrigger =
 	| "inn"
 	| "coin"
 	| "save"
+	// メニュー・セリフのUI音（フィールドの持ち物／選択肢／ショップ／タイトル、NPCの頭上セリフ）。
+	// 未設定なら confirm/cancel は共通のメッセージ送り音、text は無音。cursor（下）もここで鳴る。
+	| "confirm"
+	| "cancel"
+	| "text"
 	// ターン制戦闘（battle 定義時）専用のSE
 	// attackStart/attack はプレイヤーの通常攻撃（振りかぶり/命中）専用。enemyAttack は敵の攻撃宣言（振りかぶり）専用で、
 	// プレイヤーの攻撃SEと混同しないよう分けている。着弾（プレイヤーの被弾）は damage を使う。
@@ -77,7 +87,7 @@ export type SfxTrigger =
 	| "flee";
 /** 戦闘開始時のエンカウント演出。'none'＝演出なしで即開始, 'flash'＝黒フラッシュ明滅,
  *  'whirl'＝回転しながら黒が広がる, 'iris'＝円が中心へ閉じる, 'stripes'＝横帯が交互に閉じる,
- *  'undertale'＝頭上の「！」→ハートがコマンド位置へ移動（UNDERTALE風）。 */
+ *  'undertale'＝頭上の「！」→ハートがコマンド位置へ移動（内部IDのまま。表示名は「！→ハート」）。 */
 export type EncounterEffect =
 	| "none"
 	| "flash"
@@ -489,8 +499,6 @@ export interface PlayerDef {
 	bombSpellName?: string;
 	/** touhou: ボムカットインのキャラクター名 */
 	bombCutinCharName?: string;
-	/** action: 武器スロット（武器IDの配列） */
-	weapons?: string[];
 	/** touhou: ボムカットインの立ち絵URL */
 	bombCutinImageUrl?: string;
 	/** touhou: 立ち絵水平オフセット px（設計座標、画面中央基準） */
@@ -499,6 +507,14 @@ export interface PlayerDef {
 	bombCutinImageY?: number;
 	/** touhou: 立ち絵拡大率 */
 	bombCutinScale?: number;
+	/** action: 空中（上昇中・落下中とも）に spriteRef の代わりに出す見た目（spriteRef 形式）。
+	 *  歩行グラと同じシートの別コマを `walk:smc:u:<url>#x,y,w,h,1,...` で指す想定。未指定なら歩行グラのまま。 */
+	airSpriteRef?: string;
+	/** action: 着地した直後だけ順に出すコマ（spriteRef 形式）。着地から LAND_POSE_FRAMES フレームを
+	 *  コマ数で等分して前から順に出す。未指定/空なら着地コマは無し。 */
+	landSpriteRefs?: string[];
+	/** 2D エンジン: プレイヤーの肩口にふわふわ寄り添う光の玉を描く（当たり判定なしの純粋な演出）。 */
+	companionLight?: boolean;
 }
 export interface BgmState {
 	ref: string;
@@ -692,6 +708,10 @@ export interface ObjectDef {
 	/** true のとき、この NPC/敵は壁・オブジェクトの衝突判定を無視してすり抜ける。
 	 *  未指定/false は従来どおり壁に接触して反転・停止する。 */
 	through?: boolean;
+	/** 特殊な行動AI（onjReze エンジン）。未指定なら behavior どおりに動くだけ。
+	 *  'bomber'＝爆弾投げ：近づくと加速・一定間隔でプレイヤーめがけて爆弾（自分の上半身）を投げ、
+	 *  爆発後はしばらく突撃／回り込みに切り替える。 */
+	ai?: ObjectAi;
 	/** 見下ろし型エンジンでの初期の向き（歩行グラのどの行を出すか）。未指定は 'down'（正面）。
 	 *  移動を始めると実際の移動方向で上書きされる。 */
 	dir?: Dir4Name;
@@ -703,6 +723,9 @@ export interface ObjectDef {
 	 *  未指定なら従来どおり毎フレーム連続移動する。 */
 	moveChance?: number;
 }
+
+/** ObjectDef.ai の種類（onjReze エンジンの特殊行動）。 */
+export type ObjectAi = "bomber";
 
 /** 見下ろし型エンジンの4方向（ObjectDef.dir / RPGENの人物の向き）。2.5Dの数値 Dir4 とは別物。 */
 export type Dir4Name = "up" | "down" | "left" | "right";
@@ -929,8 +952,7 @@ export interface EffectPreset {
 	sfx?: SfxRef;
 }
 
-/** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。
- *  tlDR Engine のスプライト（lib/deltarune-tldr-assets.ts の TldrAnim）と構造互換。 */
+/** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。 */
 export interface BattleSpriteAnim {
 	frames: string[];
 	fps?: number;
@@ -1031,10 +1053,12 @@ export interface BattleConfig {
 	mercyThreshold?: number;
 	/** みのがし可能になる敵HP割合 %（デフォルト20）。 */
 	hpSpareThreshold?: number;
-	/** エンカウント演出（戦闘開始時の画面遷移演出）。未指定時はプリセット既定
-	 *  （undertale／deltarune はそれぞれ専用演出、それ以外は演出なし）。
-	 *  演出中に鳴らすSEは gameData.sfx.encounter。 */
+	/** エンカウント演出（戦闘開始時の画面遷移演出）。未指定時は 'none'（演出なしで即開始）。
+	 *  演出中に鳴らすSEは gameData.sfx.encounter（'undertale' 演出は未設定なら内蔵の「！」音）。 */
 	encounterEffect?: EncounterEffect;
+	/** 弾幕よけ（style 'undertale'/'deltarune'）でハートをタッチ／マウスの位置へ直接動かせるか。
+	 *  未指定は true。false なら方向キー（と画面上の十字キー）だけで動かす。 */
+	dodgePointer?: boolean;
 }
 
 // ── 2.5Dエンジン（yume25d）レイアウト ────────────────────────────────────
@@ -1284,6 +1308,13 @@ export interface SceneDef {
 	weather?: WeatherDef;
 }
 
+/** 画面全体に乗算合成で掛ける色（PresetData.screenTint）。素材そのものは着色せず、見た目だけを
+ *  寒色・夕焼けなどのトーンへ寄せる。alpha は 0〜1（0＝効果なし）。 */
+export interface ScreenTint {
+	color: string;
+	alpha: number;
+}
+
 export interface PresetData {
 	id: PresetId;
 	name: string;
@@ -1302,6 +1333,8 @@ export interface PresetData {
 	overheadMap?: number[][];
 	/** 初期マップの天候設定 */
 	weather?: WeatherDef;
+	/** 画面全体の色味（2D エンジン）。ワールド描画の後・HUD の前に乗算合成で1回だけ掛ける。 */
+	screenTint?: ScreenTint;
 	objects: ObjectDef[];
 	bgm?: BgmState;
 	battleBgm?: BgmState;
@@ -1402,6 +1435,32 @@ export const defaultDeathScreen = (): DeathScreenConfig => ({
 	textColor: "#ffffff",
 });
 
+/** 「戦闘を有効にする」で作る戦闘設定の既定値（rpg エンジン）。
+ *  スタイルは素直なコマンド戦闘（'classic'）。技は攻撃と回復を1つずつだけ置き、
+ *  あとはエディタの戦闘タブ／キャラクタータブで足していく前提。 */
+export const createDefaultBattleConfig = (): BattleConfig => ({
+	playerName: "しゅじんこう",
+	maxHp: 30,
+	maxMp: 10,
+	atk: 10,
+	def: 6,
+	agility: 8,
+	gold: 0,
+	style: "classic",
+	moves: [
+		{ name: "ほのおのたま", cost: 3, power: 14 },
+		{ name: "かいふく", cost: 4, power: 30, heal: true },
+	],
+	labels: {
+		attack: "こうげき",
+		move: "まほう",
+		flee: "にげる",
+		item: "どうぐ",
+	},
+	encounterEffect: "flash",
+	growthType: "standard",
+});
+
 /** メニュー項目の種別ラベル。 */
 export const SCREEN_MENU_LABELS: Record<ScreenMenuKind, string> = {
 	newGame: "はじめる",
@@ -1436,8 +1495,8 @@ const chestChipCrop = (col: number, row: number) =>
 	`${col * 16},${row * 16},16,16`;
 const CHEST_SPRITE_CLOSED = `walk:smc:u:${CHEST_CHIP_URL}#${chestChipCrop(18, 15)}`;
 const CHEST_SPRITE_OPEN = `walk:smc:u:${CHEST_CHIP_URL}#${chestChipCrop(19, 15)}`;
-const CHEST_OPEN_SOUND =
-	"https://rpgen-search.pages.dev/data/audio/sound/1Jl7OF.mp3";
+// 開けた音はエンジン内蔵のオリジナル合成音（lib/game-sfx.ts）。
+const CHEST_OPEN_SOUND = gameSfxUrl("chestOpen");
 
 /** 一度だけ開けられる宝箱（セルフスイッチ A）。近づくと開き、頭上メッセージでアイテムを渡す。
  *  openCmds が giveItem/changeGold を含んでいれば、その入手メッセージが自動で頭上に出るため、
@@ -1565,13 +1624,11 @@ export const SYSTEM_SPRITE_TEMPLATES: SystemSpriteTemplate[] = [
 	},
 ];
 
-/** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */
-export const SYS_TILE_WARP_SFX =
-	"https://rpgen-search.pages.dev/data/audio/sound/vfCmoe.mp3";
-export const SYS_TILE_DAMAGE_SFX =
-	"https://rpgen-search.pages.dev/audio/sound/4z7O4A.mp3";
-export const SYS_TILE_DOOR_SFX =
-	"https://rpgen-search.pages.dev/audio/sound/HMyV1k.mp3";
+/** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う）。エンジン内蔵のオリジナル合成音
+ *  （lib/game-sfx.ts）。以前は rpgen-search の mp3 への直リンクで、出どころを確かめていなかった。 */
+export const SYS_TILE_WARP_SFX = gameSfxUrl("warp");
+export const SYS_TILE_DAMAGE_SFX = gameSfxUrl("floorDamage");
+export const SYS_TILE_DOOR_SFX = gameSfxUrl("door");
 
 export const chest = (
 	col: number,

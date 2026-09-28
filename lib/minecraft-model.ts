@@ -1041,30 +1041,7 @@ export const MINECRAFT_SKIN_PRESETS: MinecraftSkinPreset[] = [
 		author: "setomu@yuly",
 		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
 	},
-	{
-		name: "シオカラーズ（Splatoon） (アオリ)",
-		url: "https://setomumcskin.ehoh.net/images/hoka/Aori_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "シオカラーズ（Splatoon） (アオリ　フェスカラー（ごはん）)",
-		url: "https://setomumcskin.ehoh.net/images/hoka/Aori_F_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "シオカラーズ（Splatoon） (ホタル)",
-		url: "https://setomumcskin.ehoh.net/images/hoka/Hotaru_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "シオカラーズ（Splatoon） (ホタル　フェスカラー（パン）)",
-		url: "https://setomumcskin.ehoh.net/images/hoka/Hotaru_F_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
+	// 市販ゲームのキャラクター（Splatoon・アイドルマスター）のスキンは置かない（docs/game-presets.md §5）。
 	{
 		name: "ドロンジョ／レパード（夜ノヤッターマン）",
 		url: "https://setomumcskin.ehoh.net/images/hoka/doronjo_Alex.png",
@@ -1074,30 +1051,6 @@ export const MINECRAFT_SKIN_PRESETS: MinecraftSkinPreset[] = [
 	{
 		name: "ドロンジョ／レパード（夜ノヤッターマン）",
 		url: "https://setomumcskin.ehoh.net/images/hoka/leopard_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "ハルシュタイン（アイドルマスター／無尽合体キサラギ）",
-		url: "https://setomumcskin.ehoh.net/images/hoka/harusyu_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "ハルシュタイン（アイドルマスター／無尽合体キサラギ） (マント着脱有り)",
-		url: "https://setomumcskin.ehoh.net/images/hoka/harusyu2_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "ヤヨイ（アイドルマスター／無尽合体キサラギ）",
-		url: "https://setomumcskin.ehoh.net/images/hoka/yayoi.mujin_Alex.png",
-		author: "setomu@yuly",
-		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
-	},
-	{
-		name: "マコト（アイドルマスター／無尽合体キサラギ）",
-		url: "https://setomumcskin.ehoh.net/images/hoka/makoto.mujin_Alex.png",
 		author: "setomu@yuly",
 		authorUrl: "https://setomumcskin.ehoh.net/otr.html",
 	},

@@ -24,6 +24,8 @@ import type {
 const gameStore = new Map<number, DbGameRecord>();
 const mvStore = new Map<number, DbMvRecord>();
 const talkStore = new Map<number, DbTalkRecord>();
+/** preset_opens 相当。キーは `${preset}\0${JSTの日付}` */
+const presetOpenStore = new Map<string, number>();
 
 export const mockStore: DataStore = {
 	async getPosts(
@@ -519,4 +521,13 @@ export const mockStore: DataStore = {
 	},
 
 	async voteGame(_gameId: number, _ipAddress: string) {},
+
+	async recordPresetOpen(preset: string) {
+		// pg と同じく JST の日付で束ねる
+		const day = new Date(Date.now() + 9 * 60 * 60 * 1000)
+			.toISOString()
+			.slice(0, 10);
+		const key = `${preset}\u0000${day}`;
+		presetOpenStore.set(key, (presetOpenStore.get(key) ?? 0) + 1);
+	},
 };

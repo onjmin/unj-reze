@@ -7,9 +7,20 @@ import type { AssetManifest, BgmAsset } from "./game-config";
 import { parseTimeToSeconds } from "./embed";
 import { applyMasterVolume, subscribeMasterVolume } from "./master-volume";
 import { getStudio } from "./dtm";
+import { readMmlVolume } from "./mml";
 import type { MvAudioMode } from "./mv-config";
 
 type LoopPointInput = { bar?: number; step?: number; seconds?: number };
+
+/** MML BGM に渡す実効音量。dtm は MML に `#volume=` があると options.volume を無視してそちらを使い、
+ *  setVolume() はそれを絶対値で上書きする。そのままだと `#volume=` 付きの曲（内蔵BGMなど）は
+ *  鳴り始めはBGM音量・サイト音量が効かず、音量を動かした瞬間に曲の音量が捨てられる。
+ *  曲の音量を「BGM音量50＝そのまま」として拡縮する。`#volume=` の無いMMLは従来どおり。 */
+function mmlPlaybackVolume(mml: string, volume: number): number {
+	const v = applyMasterVolume(volume);
+	if (!/#volume=\d+/.test(mml)) return v;
+	return Math.round((readMmlVolume(mml) * v) / 50);
+}
 
 /** BgmAsset['loop'] は全項目optionalな緩い形。dtm側は「1キーのみ持つ判別union」なので変換する。 */
 function toDtmLoopPoint(p?: LoopPointInput): DtmLoopPoint | undefined {
@@ -328,6 +339,7 @@ class BgmManager {
 				volume: applyMasterVolume(volume),
 				loop: loopOption,
 			});
+			bgm.setVolume(mmlPlaybackVolume(mml, volume));
 
 			this.current = {
 				stop: () => {
@@ -341,7 +353,7 @@ class BgmManager {
 				},
 				setBaseVolume: (v) => {
 					try {
-						bgm.setVolume(applyMasterVolume(v));
+						bgm.setVolume(mmlPlaybackVolume(mml, v));
 					} catch {}
 				},
 			};
@@ -376,6 +388,7 @@ class BgmManager {
 			} else {
 				bgm = studio.play(mml, opts);
 			}
+			bgm.setVolume(mmlPlaybackVolume(mml, volume));
 
 			this.current = {
 				stop: () => {
@@ -388,7 +401,7 @@ class BgmManager {
 				},
 				setBaseVolume: (v) => {
 					try {
-						bgm.setVolume(applyMasterVolume(v));
+						bgm.setVolume(mmlPlaybackVolume(mml, v));
 					} catch {}
 				},
 			};

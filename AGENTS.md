@@ -24,14 +24,16 @@ RPGEN (`unj-reze`) is an anonymous, login-less SNS with heavy creation tooling a
 The whole app is a client-side SPA driven from `app/page.tsx`, talking to route handlers
 under `app/api/`.
 
-## Game engines
+## Game engines & presets
 
-`components/GameMaker.tsx` is the single live engine host (~19k lines), covering **two** runtimes
-selected by `gameData.engine` (`EngineKind` in `components/game-presets/shared.ts`:
-`'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d'`) — canvas 2D inline in `GameMaker.tsx` for
-every non-`yume25d` kind, and first-person 2.5D via three.js for `yume25d`
-(`components/Yume25DMaker.tsx`, `lib/yume25d.ts`). Presets live in `components/game-presets/`;
-`components/MiniScriptVM.ts` is the small DSL VM used by bullet-hell/spell scripting.
+`components/GameMaker.tsx` (~21k lines) hosts every engine, picked by `gameData.engine` (`EngineKind`,
+`components/game-presets/shared.ts`): canvas 2D inline for `action`/`rpg`/`touhou`/`onjReze`, three.js
+2.5D for `yume25d` (`Yume25DMaker.tsx`, `lib/yume25d.ts`), `mmo3d` (`Mmo3dMaker.tsx`, `next/dynamic`,
+hidden from the gallery). `MiniScriptVM.ts` runs touhou bullet patterns and dodge-battle attacks.
+Sample presets and neutral engine templates (preset `'blank'`) are separate — see
+[docs/game-presets.md](docs/game-presets.md). **IP policy: nothing the site ships (presets, templates,
+engine defaults) may use ripped/hotlinked game assets or commercial titles/character names (exceptions:
+Touhou under its fan-work guideline, the site-origin name レゼ); never gate behaviour on a preset id.**
 
 ---
 
@@ -173,7 +175,7 @@ Verify that no execution-context leaks, state desynchronizations, or deadlocks a
 then run `pnpm typecheck` and `pnpm lint`.
 
 > `eslint.config.mjs` disables the React Compiler-backed `react-hooks/*` rules **for
-> `components/GameMaker.tsx` only** — the compiler OOMs on a 19k-line component even at an 8 GB
+> `components/GameMaker.tsx` only** — the compiler OOMs on a 21k-line component even at an 8 GB
 > heap. Removing that override makes `pnpm lint` crash instead of fail. `exhaustive-deps` is not
 > compiler-backed and stays enabled everywhere.
 
@@ -186,6 +188,7 @@ then run `pnpm typecheck` and `pnpm lint`.
 - [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.
 - [docs/dsl-current-state.md](docs/dsl-current-state.md) — asset-reference / DSL layering.
 - [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding (`games` table).
+- [docs/game-presets.md](docs/game-presets.md) — sample presets vs engine templates, manifest null rules, third-party IP policy & history, built-in SE/effect generators, `preset_opens`.
 - [docs/mv-feature-design.md](docs/mv-feature-design.md) — music-video feature: layer/section model, audio modes,音→絵モジュレータ, `mvs` table.
 - [docs/mmo3d-feature-design.md](docs/mmo3d-feature-design.md) — 3D MMO preset (`mmo3d`): why it's separate from `yume25d`, realtime hub extension plan, phased rollout.
 - [docs/talk-video-feature-design.md](docs/talk-video-feature-design.md) — かけあい動画（`talk`）: 台本ベース時間軸の YMM 風解説動画、MV とは別種別、koe UtauTTS で読み上げ。

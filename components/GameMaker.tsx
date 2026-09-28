@@ -12,8 +12,7 @@ import { collectVoiceNeeds, prepareGameVoice, speakGameMessage, loadVoiceModelGr
 import { tryCapturePointer } from '@/lib/pointer-capture';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
-import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
-import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
+import { GAME_SFX, gameSfxRef } from '@/lib/game-sfx';
 import {
   detectStandard, standardById, animatedCell, animatedCellInRect, rowAnimCellInRect, dirFromDelta, resolveSpriteRect,
   type WayKey, type WalkStandard,
@@ -49,7 +48,7 @@ import {
   type EffectPreset,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig, type DeathScreenConfig, type DeathScreenStyle,
-  defaultTitleScreen, defaultEndingScreen, defaultDeathScreen,
+  defaultTitleScreen, defaultEndingScreen, defaultDeathScreen, createDefaultBattleConfig,
   type Layout25D, type Billboard25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
@@ -57,8 +56,16 @@ import {
   type MvAudioMode,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit, EncounterGroup, EncounterEnemy } from './game-presets/shared';
-import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
-import SpellEditor, { defaultBlock } from './SpellEditor';
+import {
+  PRESETS, PRESET_ORDER, PRESET_TAGLINE, isSamplePresetId,
+  createEngineTemplate, TEMPLATE_ENGINES, ENGINE_LABELS, ENGINE_TAGLINES,
+  type SamplePresetId, type TemplateEngine,
+} from './game-presets';
+import {
+  type GameManifestDraft,
+  manifestToPresetData, buildGameManifest,
+  hydrateUrlFromRef, hydrateBgmFromRef, emptyGridLike,
+} from './game-manifest';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
@@ -66,16 +73,25 @@ import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList
 import Yume25DEditorPanel from './Yume25DEditorPanel';
 import UserSheetPanel from './UserSheetPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
-import Mmo3dMaker from './Mmo3dMaker';
 import Mmo3dEditorPanel from './Mmo3dEditorPanel';
 import GameThreadBoard from './GameThreadBoard';
-import type { Mmo3dRenderer, WeatherDef } from './game-presets/shared';
+import type { Mmo3dRenderer, WeatherDef, ObjectAi } from './game-presets/shared';
 import { ensureSessionId } from '@/lib/session';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/pixel-weather';
 import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv-config';
 import { useSaveShortcut } from '@/lib/hooks/useSaveShortcut';
+import { recordPresetOpen } from '@/lib/game-mv-client';
+import dynamic from 'next/dynamic';
 
 export type { PresetId };
+export type { GameManifestDraft };
+
+// mmo3d のプレイビューは Babylon.js / babylon-mmd を抱えるので、mmo3d のゲームを開いたときだけ読み込む
+// （静的 import だと 2D/yume25d のゲームでも GameMaker のチャンクに丸ごと入る）。
+const Mmo3dMaker = dynamic(() => import('./Mmo3dMaker'), {
+  ssr: false,
+  loading: () => <div className="w-full h-full grid place-items-center text-[11px] text-gray-500">3Dエンジンを読み込み中…</div>,
+});
 
 /** ランダムエンカウントの抽選。encounterGroups があれば weight で重み付き抽選→グループ内は均等抽選、
  *  無ければ旧形式の randomEncounters から均等抽選する。 */
@@ -169,78 +185,6 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
 
 type EditorTab = 'map' | 'mapSettings' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect' | 'sheets';
 
-/** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
- *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
-const hydrateUrlFromRef = (ref?: string): string | undefined => {
-  if (!ref) return undefined;
-  const url = imageRefToUrl(ref);
-  return url && (url.startsWith('http') || url.startsWith('/') || url.startsWith('data:')) ? url : undefined;
-};
-
-const hydrateBgmFromRef = (ref?: string): { ref: string; src?: string; type?: 'youtube' | 'mml' | 'direct' } | undefined => {
-  if (!ref || ref === 'none') return undefined;
-  const type = ref.startsWith('mml:') ? 'mml' : ref.startsWith('direct:') ? 'direct' : 'youtube';
-  const src = type === 'mml' ? ref.replace(/^mml:/, '') : type === 'direct' ? ref.replace(/^direct:/, '') : `https://www.youtube.com/watch?v=${ref.replace(/^youtube:/, '')}`;
-  return { ref, type, src };
-};
-
-
-/** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
-export interface GameManifestDraft {
-  preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
-  /** つるつる床の強制スライド速度（px/frame）。未指定時は既定値。 */
-  iceSlideSpeed?: number;
-  player: {
-    emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string; minecraftSkin?: string;
-    bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
-  };
-  tiles: Record<number, {
-    name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string;
-    warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number; damageAmount?: number;
-    touchRetrigger?: boolean
-  }>;
-  map: number[][];
-  overlayMap?: number[][];
-  overheadMap?: number[][];
-  objects: Array<Omit<ObjectDef, 'spriteUrl'>>;
-  bgm: string;
-  battleBgm?: string;
-  bossBgm?: string;
-  /** MML BGMの鳴らし方（ゲーム全体で1つ）。省略時は軽量な内蔵シンセ（"light"）。 */
-  mmlAudioMode?: MvAudioMode;
-  sfx: Partial<Record<SfxTrigger, string>>;
-  mapBgRef?: string;
-  scroll?: { worldCols: number; worldRows?: number };
-  switches?: SwitchDef[];
-  items?: ItemDef[];
-  weapons?: EquipmentDef[];
-  armors?: EquipmentDef[];
-  /** 汎用エフェクトアニメーション一覧。imageUrl は post: 参照の解決済みキャッシュのため保存しない。 */
-  effects?: Array<Omit<EffectPreset, 'imageUrl'> & { imageUrl?: string }>;
-  phases?: StagePhase[];
-  titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
-  ending?: Omit<EndingScreenConfig, 'bgUrl'>;
-  deathScreen?: DeathScreenConfig;
-  /** 2.5Dエンジン（yume25d）のレイアウト。 */
-  layout25d?: Layout25D;
-  /** 3D MMOエンジン（mmo3d）の設定。renderer未指定時は'three'。 */
-  mmo3dConfig?: {
-    renderer: Mmo3dRenderer;
-    boardPostId?: string;
-    boards?: { x: number; z: number; threadPostId: string }[];
-    dummies?: { x: number; z: number }[];
-    obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string; walkable?: boolean }[];
-    pmxUrl?: string;
-    vmdUrl?: string;
-    vmdWalkUrl?: string;
-    vmdRunUrl?: string;
-    npcs?: { x: number; z: number; name: string; message: string }[];
-  };
-  /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
-  scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
-  battle?: BattleConfig;
-}
-
 /** ズームビューポート：画面に表示するタイル数。canvas は PLAY_W×PLAY_H px 固定のまま ctx.scale で拡大。 */
 const VIEW_COLS = 15;
 const VIEW_ROWS = 11;
@@ -253,8 +197,6 @@ const SCALE_Y = PLAY_H / VIEW_H;        // 480/352 = 15/11
  *  こちらのキャンバスの相対位置へ読み替えるための基準。 */
 const RPGEN_SCREEN_W = 480;
 const RPGEN_SCREEN_H = 384;
-
-const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
 
 /**
  * 正十二面体モチーフの弾幕プリセット（12方向対称）。
@@ -553,7 +495,6 @@ function buildWorldLayout(scenes: SceneDef[]): {
   return { map, overlayMap, overheadMap, layouts, worldCols: maxC, worldRows: maxR };
 }
 
-/** map と同サイズの空グリッド（overlayMap の既定値）を作る。 */
 /** エディタで「置くもの」。ドロップダウンの1項目＝1つの配置物。 */
 type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | 'npc' | 'item' | 'chest' | 'warp' | 'look' | 'event';
 
@@ -564,18 +505,18 @@ const EDITOR_MARKER = {
   look: '/assets/rpgen/map.png#352,128,16,16',    // (22, 8) しらべるポイント
 } as const;
 
-const emptyGridLike = (map: number[][]): number[][] =>
-  map.map(row => new Array(row.length).fill(0));
-
 const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', randomDash: 'ランダムダッシュ', randomHop: 'ランダムジャンプ', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
+/** ObjectDef.ai（onjReze の特殊行動）の表示名。 */
+const OBJECT_AI_LABELS: Record<ObjectAi, string> = { bomber: '爆弾投げ（近づくと加速・上半身を爆弾にして投げる）' };
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ', encounter: 'エンカウント', attackStart: '攻撃開始（自分）', attack: '攻撃命中（自分）', enemyAttack: '敵の攻撃', miss: '攻撃ミス', spell: '呪文/とくぎ', cursor: 'カーソル移動', victory: '戦闘勝利', defeat: '全滅', flee: '逃走成功' };
-/** エンカウント演出の実行中フェーズ。'alert' は UNDERTALE 演出の「！」表示、それ以外は画面遷移アニメ本体。 */
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ', cursor: 'カーソル移動', confirm: '決定', cancel: 'キャンセル', text: '文字送り（頭上セリフ）', encounter: 'エンカウント', attackStart: '攻撃開始（自分）', attack: '攻撃命中（自分）', enemyAttack: '敵の攻撃', miss: '攻撃ミス', spell: '呪文/とくぎ', victory: '戦闘勝利', defeat: '全滅', flee: '逃走成功' };
+/** エンカウント演出の実行中フェーズ。'alert' は「！→ハート」演出の「！」表示、それ以外は画面遷移アニメ本体。 */
 type EncounterPhase = 'alert' | 'flash' | 'whirl' | 'iris' | 'stripes';
-/** ターン制戦闘（battle 定義時）でしか鳴らないSE。オーディオ設定では battle 有りのときだけ出す。 */
-const BATTLE_SFX_TRIGGERS: SfxTrigger[] = ['encounter', 'attackStart', 'attack', 'enemyAttack', 'miss', 'spell', 'cursor', 'victory', 'defeat', 'flee'];
+/** ターン制戦闘（battle 定義時）でしか鳴らないSE。オーディオ設定では battle 有りのときだけ出す。
+ *  cursor はフィールドのメニューでも鳴るのでここには入れない。 */
+const BATTLE_SFX_TRIGGERS: SfxTrigger[] = ['encounter', 'attackStart', 'attack', 'enemyAttack', 'miss', 'spell', 'victory', 'defeat', 'flee'];
 /** エンカウント演出のプリセット一覧（戦闘設定のセレクトに出る順）。 */
 const ENCOUNTER_EFFECT_OPTIONS: { value: EncounterEffect; label: string }[] = [
   { value: 'none', label: 'なし（すぐ戦闘へ）' },
@@ -583,7 +524,7 @@ const ENCOUNTER_EFFECT_OPTIONS: { value: EncounterEffect; label: string }[] = [
   { value: 'whirl', label: 'うずまき（回転しながら閉じる）' },
   { value: 'iris', label: 'アイリスイン（円が中心へ閉じる）' },
   { value: 'stripes', label: 'ブラインド（横帯が交互に閉じる）' },
-  { value: 'undertale', label: '「！」＋ハート移動（アンダーテール風）' },
+  { value: 'undertale', label: '！→ハート（頭上に「！」→ハートがコマンドへ飛ぶ）' },
 ];
 
 // ── システムタイル（宝箱以外）: ワープ床・どく沼/ダメージ床・つるつる床 ──────────
@@ -597,64 +538,6 @@ const ICE_DIRS: Record<string, [number, number]> = {
 const DEFAULT_ICE_SLIDE_SPEED = 6;
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
-
-/** 保存/エクスポートされたマニフェストから編集用 PresetData を再構築する
- *  （既存ゲームの初期ロード・履歴復元・JSONインポートの共通処理）。
- *  欠けている項目はプリセットの既定値で補い、古い/部分的なマニフェストでも読み込めるようにする。 */
-const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId; data: PresetData } => {
-  const presetId = PRESETS[manifest.preset] ? manifest.preset : 'dq';
-  const base = clone(PRESETS[presetId]);
-  const map = manifest.map ?? base.map;
-  const data: PresetData = {
-    ...base,
-    engine: manifest.engine ?? base.engine,
-    name: manifest.name ?? base.name,
-    gravity: manifest.gravity ?? base.gravity,
-    friction: manifest.friction ?? base.friction,
-    iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
-    player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player?.spriteRef) },
-    tiles: manifest.tiles
-      ? Object.fromEntries(
-        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
-      )
-      : base.tiles,
-    map,
-    overlayMap: manifest.overlayMap ?? emptyGridLike(map),
-    overheadMap: manifest.overheadMap ?? emptyGridLike(map),
-    objects: (manifest.objects ?? []).map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-    mapBgRef: manifest.mapBgRef,
-    mapBgUrl: undefined,
-    scroll: manifest.scroll ?? base.scroll,
-    switches: manifest.switches ?? base.switches,
-    items: manifest.items ?? base.items,
-    weapons: manifest.weapons ?? base.weapons,
-    armors: manifest.armors ?? base.armors,
-    effects: (manifest.effects ?? base.effects)?.map(ef => ({
-      ...ef,
-      imageUrl: ef.imageRef?.startsWith('url:') ? (imageRefToUrl(ef.imageRef) ?? undefined) : (hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl),
-    })),
-    phases: manifest.phases ?? base.phases,
-    titleScreen: manifest.titleScreen ?? base.titleScreen,
-    ending: manifest.ending ?? base.ending,
-    deathScreen: manifest.deathScreen ?? base.deathScreen,
-    battle: manifest.battle ?? base.battle,
-    layout25d: manifest.layout25d ?? base.layout25d,
-    scenes: manifest.scenes?.map(s => ({
-      ...s,
-      overheadMap: s.overheadMap ?? emptyGridLike(s.map),
-      objects: (s.objects ?? []).map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-      bgm: hydrateBgmFromRef(s.bgm),
-    })),
-    bgm: hydrateBgmFromRef(manifest.bgm),
-    battleBgm: hydrateBgmFromRef(manifest.battleBgm),
-    bossBgm: hydrateBgmFromRef(manifest.bossBgm),
-    mmlAudioMode: manifest.mmlAudioMode ?? base.mmlAudioMode,
-    sfx: Object.fromEntries(
-      Object.entries(manifest.sfx ?? {}).map(([k, v]) => [k, v ? { ref: v } : undefined])
-    ) as PresetData['sfx'],
-  };
-  return { presetId, data };
-};
 
 /** 現在のワールド幅／高さ（タイル数）。scroll 優先、無ければマップ実寸。 */
 const curWorldCols = (d: PresetData): number => d.scroll?.worldCols ?? d.map[0]?.length ?? COLS;
@@ -760,7 +643,7 @@ interface Entity {
   spellState?: SpellExecState;
   moveTarget?: MoveTarget;
   scriptCtx?: { cancelled: boolean };
-  /** レゼ専用：上半身を投げてから爆発するまで true（再投擲不可・自身は下半分のみ表示）。 */
+  /** 爆弾投げAI（ai='bomber'）：上半身を投げてから爆発するまで true（再投擲不可・自身は下半分のみ表示）。 */
   bombThrown?: boolean;
   rezeState?: 'charge' | 'flank' | 'normal';
   rezeStateTimer?: number;
@@ -787,8 +670,8 @@ const SWORD_SPRITE_URL = 'https://rpgen-search.pages.dev/data/images/sprites/BkI
 const ACTION_MAX_FALL = 20;
 /** ジャンプ力に対する踏みつけ跳ね返り比（敵を踏んだ瞬間の上昇速度）。 */
 const STOMP_BOUNCE_RATIO = 0.7;
-/** こおりの森：着地直後に専用コマ（2,3枚目）を出す長さ（フレーム数、前半/後半で折半）。 */
-const SNOWFOREST_LAND_FRAMES = 12;
+/** 着地直後に player.landSpriteRefs のコマを出す長さ（フレーム数。コマ数で等分して前から順に出す）。 */
+const LAND_POSE_FRAMES = 12;
 
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; color?: string; bounce?: boolean; }
 interface EnemyBullet {
@@ -1652,13 +1535,16 @@ function EffectSpriteAnim({
   );
 }
 
-/** 組み込みのエフェクトアニメーションプリセット（id は追加時に uid() で採番）。RPGEN のスペルシートを流用。 */
+/** 組み込みのエフェクトアニメーションプリセット（id は追加時に uid() で採番）。
+ *  絵は scripts/make-effect-sheets.mjs で描き起こしたオリジナル（24x24px のコマを横一列。フィールド48px=2倍・戦闘72px=3倍）、
+ *  SE は scripts/make-game-sfx.mjs の合成音。コマ数・fps を変えたらスクリプト側の EFFECTS 表と合わせること。 */
 const BUILT_IN_EFFECT_PRESETS: Omit<EffectPreset, 'id'>[] = [
-  { name: '火の玉', imageRef: 'url:https://rpgen.org/dq/spells/7/spell.png', imageUrl: 'https://rpgen.org/dq/spells/7/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', type: 'direct' } },
-  { name: '炎', imageRef: 'url:https://rpgen.org/dq/spells/18/spell.png', imageUrl: 'https://rpgen.org/dq/spells/18/spell.png', frameCount: 8, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3', type: 'direct' } },
-  { name: '爆発', imageRef: 'url:https://rpgen.org/dq/spells/6/spell.png', imageUrl: 'https://rpgen.org/dq/spells/6/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3', type: 'direct' } },
-  { name: '風', imageRef: 'url:https://rpgen.org/dq/spells/3/spell.png', imageUrl: 'https://rpgen.org/dq/spells/3/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/1Pv71N.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/1Pv71N.mp3', type: 'direct' } },
-  { name: '氷', imageRef: 'url:https://rpgen.org/dq/spells/15/spell.png', imageUrl: 'https://rpgen.org/dq/spells/15/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', type: 'direct' } },
+  { name: '火の玉', imageRef: 'url:/assets/game-effects/fireball.png', imageUrl: '/assets/game-effects/fireball.png', frameCount: 10, fps: 15, sfx: gameSfxRef('effectFire') },
+  { name: '炎', imageRef: 'url:/assets/game-effects/flame.png', imageUrl: '/assets/game-effects/flame.png', frameCount: 12, fps: 15, sfx: gameSfxRef('effectFire') },
+  { name: '爆発', imageRef: 'url:/assets/game-effects/explosion.png', imageUrl: '/assets/game-effects/explosion.png', frameCount: 10, fps: 15, sfx: gameSfxRef('effectExplosion') },
+  { name: '風', imageRef: 'url:/assets/game-effects/wind.png', imageUrl: '/assets/game-effects/wind.png', frameCount: 16, fps: 20, sfx: gameSfxRef('effectWind') },
+  { name: '氷', imageRef: 'url:/assets/game-effects/ice.png', imageUrl: '/assets/game-effects/ice.png', frameCount: 14, fps: 20, sfx: gameSfxRef('effectIce') },
+  { name: '回復', imageRef: 'url:/assets/game-effects/heal.png', imageUrl: '/assets/game-effects/heal.png', frameCount: 12, fps: 15, sfx: gameSfxRef('effectHeal') },
 ];
 
 let cachedBlastCanvas: HTMLCanvasElement | null = null;
@@ -1761,27 +1647,6 @@ function DigitReel({ digit, dir, cellH = 16 }: { digit: number; dir: 'up' | 'dow
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.45), rgba(0,0,0,0.08) 30%, rgba(255,255,255,0.15) 50%, rgba(0,0,0,0.08) 70%, rgba(0,0,0,0.45))' }} />
     </span>
   );
-}
-
-/** 弾幕よけキャンバス用の画像キャッシュ（UNDERTALEハートなど）。 */
-const dodgeImgCache: Record<string, HTMLImageElement> = {};
-function getDodgeImg(url: string): HTMLImageElement {
-  let img = dodgeImgCache[url];
-  if (!img) {
-    img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onerror = () => {
-      const proxied = wrapCorsProxyUrl(url);
-      if (proxied !== url && !img.dataset.proxied) {
-        img.dataset.proxied = 'true';
-        notifyCorsProxyUsed();
-        img.src = proxied;
-      }
-    };
-    img.src = url;
-    dodgeImgCache[url] = img;
-  }
-  return img;
 }
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, gameId, onRemix, danmakuComments, onComment }: GameMakerProps) {
@@ -2347,17 +2212,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   dtTurnIdxRef.current = dtTurnIdx;
   /** このラウンドで「まもる」を選んだメンバーID（次の被弾ダメージを軽減）。 */
   const dtDefendedRef = useRef<Set<string>>(new Set());
-  /** デルタルーン戦闘専用の追加SE（tlDR Engine 由来。undertale 側には対応音源が無いものたち）。 */
-  const DT_SFX = {
-    weaponPull: { ref: 'direct:dt-weaponpull', src: tldrSfxUrl('weaponPull'), type: 'direct' as const },
-    attack: { ref: 'direct:dt-attack', src: tldrSfxUrl('attack'), type: 'direct' as const },
-    crit: { ref: 'direct:dt-crit', src: tldrSfxUrl('criticalSwing'), type: 'direct' as const },
-    graze: { ref: 'direct:dt-graze', src: tldrSfxUrl('graze'), type: 'direct' as const },
-    spellCast: { ref: 'direct:dt-spellcast', src: tldrSfxUrl('spellCast'), type: 'direct' as const },
-    cure: { ref: 'direct:dt-cure', src: tldrSfxUrl('spellCure'), type: 'direct' as const },
-    spare: { ref: 'direct:dt-spare', src: tldrSfxUrl('spare'), type: 'direct' as const },
-    mercyAdd: { ref: 'direct:dt-mercyadd', src: tldrSfxUrl('mercyAdd'), type: 'direct' as const },
-  };
 
   const [, forceRender] = useState(0);
 
@@ -2510,7 +2364,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     forceRender(n => n + 1);
   };
 
+  /** ギャラリー（入口ヒーロー）でいま選ばれている見本／テンプレート（D16 の数え上げ用）。
+   *  JSON インポートや履歴の復元で別のゲームに差し替わったら null（ギャラリーで選んだものではないので数えない）。 */
+  const introChoiceRef = useRef<SamplePresetId | `template:${TemplateEngine}` | null>(null);
+
   const loadManifest = (manifest: GameManifestDraft, titleOverride?: string) => {
+    introChoiceRef.current = null; // ギャラリーで選んだゲームではなくなる（D16 で数えない）
     const { presetId: preset, data } = manifestToPresetData(manifest);
     applyPresetData(preset, data, titleOverride || manifest.name || data.name);
   };
@@ -2598,50 +2457,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (milkyTickTimerRef.current) clearInterval(milkyTickTimerRef.current);
   }, []);
 
-  /** エンカウント和音用の AudioContext（遅延生成・単一インスタンス）とデコード済み音源キャッシュ。
-   *  レンダリングのたびに new AudioContext() すると同時生成数のブラウザ上限（Chrome で約6個）に
-   *  当たって以降の生成が例外になり音が出なくなるため、ref で一度だけ作って使い回す。
-   *  バッファは Promise ごとキャッシュして、並行呼び出し時のフェッチ重複も防ぐ。 */
-  const dtChordCtxRef = useRef<AudioContext | null>(null);
-  const dtChordBufRef = useRef<Promise<AudioBuffer> | null>(null);
-
-  /** デルタルーンのエンカウント演出音：単一の音源（snd_tensionhorn）を Web Audio API の
-   *  AudioBufferSourceNode.playbackRate で再生する。HTMLMediaElement の playbackRate と違い
-   *  ピッチ補正（タイムストレッチ）が入らないため、速度＝音程として確実にピッチが変わる。
-   *  tlDR Engine 準拠：o_enc_anim の Create_0（pitch 1.0）→ alarm[0]=8 フレーム後の
-   *  Alarm_0（pitch 1.1）＝ 30fps の 8f ≈ 266ms 遅れで高い方を重ねる。 */
-  const playDtEncounterChord = async () => {
-    const volume = applyMasterVolume(getBgmVolume('direct:dt-tensionhorn-chord')) / 100 * 0.7;
-    try {
-      const ctx = (dtChordCtxRef.current ??= new AudioContext());
-      // ユーザー操作前に生成されていた場合は autoplay 制限で suspended のままなので起こす
-      if (ctx.state === 'suspended') await ctx.resume();
-
-      // 初回だけフェッチ＋デコードし、以降はデコード済みバッファを即座に使い回す
-      dtChordBufRef.current ??= fetch(tldrSfxUrl('tensionHorn'))
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
-        .then(ab => ctx.decodeAudioData(ab));
-      const audioBuffer = await dtChordBufRef.current;
-
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = volume;
-      gainNode.connect(ctx.destination);
-
-      const startTime = ctx.currentTime;
-      for (const { rate, delay } of [{ rate: 1.0, delay: 0 }, { rate: 1.1, delay: 0.266 }]) {
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.playbackRate.value = rate;
-        source.connect(gainNode);
-        source.start(startTime + delay);
-      }
-    } catch (err: unknown) {
-      // フェッチ/デコード失敗を Promise ごとキャッシュしたままにすると二度と鳴らなくなるので捨てる
-      dtChordBufRef.current = null;
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`Unable to fetch or play the audio file. Error: ${message}`);
-    }
-  };
   /** デルタルーン風パーティ戦闘：全員のコマンド選択が終わるまでは実行せず、選び終わってから
    *  action_order（tlDR Engine 準拠：こうどう→アイテム→まほう→たたかう→まもる）で1件ずつ処理する。
    *  'select'＝選択中（メニューを回している）／'execute'＝選択済みキューを順に実行中。 */
@@ -2779,11 +2594,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** rpg: 直前フレームのプレイヤー描画位置（静止判定に使用）*/
   const lastDrawnPlayerPosRef = useRef<{ x: number; y: number } | null>(null);
   const actionShootCoolRef = useRef(0);        // action エンジン：射撃クールダウン
-  const actionWeaponsRef = useRef<string[]>([]);
-  const actionWeaponIdxRef = useRef<number>(0);
-  const actionWeaponEnergyRef = useRef<Record<string, number>>({});
-  const MAX_WEAPON_ENERGY = 28;
-  const prevNextWeaponRef = useRef(false);
   const blockAnimsRef = useRef<{
     col: number;
     row: number;
@@ -2807,7 +2617,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const isWallSlidingRef = useRef(false);
   const wallSlideDirRef = useRef(0); // -1: 左壁, 1: 右壁, 0: なし
   const prevGroundedRef = useRef(false);
-  const snowForestLandFramesRef = useRef(0); // こおりの森：着地直後だけ専用の2,3コマ目を出す残りフレーム数
+  const landPoseFramesRef = useRef(0); // 着地直後だけ player.landSpriteRefs のコマを出す残りフレーム数
   const particlesRef = useRef<{
     x: number;
     y: number;
@@ -3019,7 +2829,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const triggerEnemyDefeatFx = (foeIdx: number) => {
     const id = ++enemyFxIdRef.current;
     setDyingFoes(p => ({ ...p, [foeIdx]: { id } }));
-    if (undertaleSfx) playSfx(undertaleSfx.defeat);
+    // 崩れて消える音は弾幕よけ戦闘（undertale/deltarune）の演出の一部。コマンド戦闘では鳴らさない
+    if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) playSfx(GAME_SFX.enemyVanish);
     setTimeout(() => {
       withViewTransition(() => {
         setDyingFoes(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p));
@@ -3028,7 +2839,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
-  /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅しつつ
+  /** 「！→ハート」エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅しつつ
    *  バトル画面のコマンド位置へ直線移動 → バトル開始 */
   const encounterAlertRef = useRef<{
     startTime: number; fire: () => void; phase: EncounterPhase;
@@ -3043,40 +2854,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const ENCOUNTER_PHASE_MS: Record<EncounterPhase, number> = {
     alert: ENCOUNTER_ALERT_MS, flash: ENCOUNTER_FLASH_MS, whirl: 600, iris: 500, stripes: 550,
   };
-  const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
-  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（UNDERTALE戦闘系以外のプリセット用）。 */
-  const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
-  /** UNDERTALE戦闘（FIGHT/ACT/ITEM/MERCY・弾幕よけ）を持つプリセットごとの専用SE一式。
-   *  アンダーテールとデルタルーンはどちらも同じ battle.style==='undertale' を使うが、
-   *  出典が異なる音源（それぞれのエンジンのCDN）を鳴らし分ける。 */
-  const UNDERTALE_SFX_BY_PRESET = {
-    undertale: {
-      encounter: { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const },
-      enemyDamage: { ref: 'direct:undertale-enemy-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const },
-      battleStart: { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_undertale_move'), type: 'direct' as const },
-      menuSwitch: { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const },
-      menuConfirm: { ref: 'direct:undertale-menu-confirm', src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const },
-      menuCancel: { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const },
-      textTyper: { ref: 'direct:undertale-text-typer', src: undertaleSfxUrl('snd_text_voice_typer'), type: 'direct' as const },
-      textVoice: { ref: 'direct:undertale-text-voice', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const },
-      defeat: { ref: 'direct:undertale-defeat', src: undertaleSfxUrl('snd_vaporize'), type: 'direct' as const },
-    },
-    deltarune: {
-      encounter: { ref: 'direct:deltarune-encounter', src: tldrSfxUrl('exclamation'), type: 'direct' as const },
-      enemyDamage: { ref: 'direct:deltarune-enemy-damage', src: tldrSfxUrl('damage'), type: 'direct' as const },
-      battleStart: { ref: 'direct:deltarune-battlestart', src: tldrSfxUrl('tensionHorn'), type: 'direct' as const },
-      menuSwitch: { ref: 'direct:deltarune-menu-switch', src: tldrSfxUrl('uiMove'), type: 'direct' as const },
-      menuConfirm: { ref: 'direct:deltarune-menu-confirm', src: tldrSfxUrl('uiSelect'), type: 'direct' as const },
-      menuCancel: { ref: 'direct:deltarune-menu-cancel', src: tldrSfxUrl('uiCancel'), type: 'direct' as const },
-      textTyper: { ref: 'direct:deltarune-text-typer', src: tldrSfxUrl('text'), type: 'direct' as const },
-      textVoice: { ref: 'direct:deltarune-text-voice', src: tldrSfxUrl('text'), type: 'direct' as const },
-      defeat: { ref: 'direct:deltarune-defeat', src: tldrSfxUrl('break1'), type: 'direct' as const },
-    },
-  } as const;
-  const undertaleSfx = UNDERTALE_SFX_BY_PRESET[presetId as keyof typeof UNDERTALE_SFX_BY_PRESET];
-  const isUndertalePreset = !!undertaleSfx;
+  /** メッセージウィンドウ送り、および sfx.confirm / sfx.cancel が未設定のときのメニュー決定・キャンセル音。 */
+  const MSG_ADVANCE_SFX = GAME_SFX.msgAdvance;
+  // 弾幕よけ戦闘（undertale/deltarune）とパーティ戦のメニュー・ログ・演出の音は、エンジン内蔵の
+  // オリジナルSE（lib/game-sfx.ts の GAME_SFX）で鳴らす。プリセットごとの鳴らし分けはしない。
   /** 戦闘SEを鳴らす。オーディオ設定（gameData.sfx）で未設定のトリガーは無音＝何も起きない。
-   *  プリセット既定音はここではなく各プリセットの sfx に持たせる（dq.ts 参照）。 */
+   *  プリセット既定音はここではなく各プリセットの sfx に持たせる。 */
   const playBattleSfx = (key: SfxTrigger) => playSfx(gameDataRef.current.sfx?.[key]);
 
   /** 被弾したメンバーのステータス欄を揺らす期間（ms）。この間 statusShakeMap に載る。 */
@@ -3098,20 +2881,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }), STATUS_SHAKE_MS);
   };
 
-  /** メニューで選択を決定したときのSE。UNDERTALE戦闘系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
-  const playMenuConfirmSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuConfirm : MSG_ADVANCE_SFX);
-  /** メニューをキャンセル・後退したときのSE。UNDERTALE戦闘系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
-  const playMenuCancelSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuCancel : MSG_ADVANCE_SFX);
+  /** フィールドのメニュー（持ち物・選択肢・ショップ・タイトル）で決定したときのSE。
+   *  ゲームの sfx.confirm があればそれ、無ければ共通のメッセージ送り音。 */
+  const playMenuConfirmSfx = () => playSfx(gameDataRef.current.sfx?.confirm ?? MSG_ADVANCE_SFX);
+  /** フィールドのメニューでキャンセル・後退したときのSE。sfx.cancel が無ければ共通のメッセージ送り音。 */
+  const playMenuCancelSfx = () => playSfx(gameDataRef.current.sfx?.cancel ?? MSG_ADVANCE_SFX);
+  /** フィールドのメニューでカーソルが動いたときのSE。sfx.cursor が未設定なら鳴らさない。 */
+  const playMenuCursorSfx = () => playSfx(gameDataRef.current.sfx?.cursor);
   /** エンカウント演出（戦闘開始時の画面遷移演出）を挟んでから fire() でバトルを開始する。
-   *  battle.encounterEffect が未設定のときは従来どおりプリセット既定の挙動
-   *  （undertale＝「！」＋ハート移動 / deltarune＝和音＋黒フラッシュ / それ以外＝演出なしで即開始）。
-   *  明示指定があればそのプリセット演出を使い、演出開始時に sfx.encounter を鳴らす。 */
+   *  battle.encounterEffect が未設定なら演出なしで即開始。演出開始時に sfx.encounter を鳴らす
+   *  （'undertale'＝「！→ハート」演出だけは、未設定でも内蔵の「！」音を鳴らす）。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
-    const configured = gameDataRef.current.battle?.encounterEffect;
-    const effect: EncounterEffect = configured ?? (presetId === 'undertale' ? 'undertale' : presetId === 'deltarune' ? 'flash' : 'none');
-    // deltarune 既定：'flash' だが専用の和音＋剣を抜く音を伴う（本編の遭遇演出に準拠）
-    const deltaruneDefault = !configured && presetId === 'deltarune';
+    const effect: EncounterEffect = gameDataRef.current.battle?.encounterEffect ?? 'none';
     if (effect === 'none') { fire(); return; }
     const begin = (phase: EncounterPhase, heart = false, from = { x: 0, y: 0 }, to = { x: 0, y: 0 }) => {
       encounterAlertRef.current = { startTime: performance.now(), fire, phase, heart, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y };
@@ -3124,17 +2906,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       begin('alert', true,
         { x: p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2, y: p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2 },
         { x: camXRef.current + VIEW_W / 2, y: camYRef.current + VIEW_H - 26 });
-      playSfx(undertaleSfx?.encounter ?? gameDataRef.current.sfx?.encounter);
+      playSfx(gameDataRef.current.sfx?.encounter ?? GAME_SFX.encounter);
       return;
     }
     begin(effect);
     switchBgm(undefined);
-    if (deltaruneDefault) {
-      playDtEncounterChord();
-      setTimeout(() => playSfx(DT_SFX.weaponPull), 400);
-    } else {
-      playBattleSfx('encounter');
-    }
+    playBattleSfx('encounter');
   };
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
   const phaseIndexRef = useRef(-1);
@@ -3216,6 +2993,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const gameDataRef = useRef(gameData);
   const lastTouchTimeMapRef = useRef<Map<string, number>>(new Map());
   gameDataRef.current = gameData;
+  /** セーブデータ（#SV_DT / #LD_DT）の保存先キー。ゲームごとに分ける（以前は全ゲームで
+   *  'rpgen_save_data' 1つを共有していて、別のゲームのセーブを読み込めてしまった）。
+   *  投稿済みのゲームは games.id、ゲーム行の無い投稿は投稿ID、それ以外（エディタのテストプレイ）は
+   *  下書き扱いで「見本ID＋タイトル」ごとに分ける。 */
+  const saveSlotKeyRef = useRef('');
+  saveSlotKeyRef.current = `rpgen_save_data:${gameId ? `game-${gameId}` : postId ? `post-${postId}` : `draft-${gameData.id}-${title || gameData.name}`}`;
   // MML BGM/SFXの鳴らし方（内蔵シンセ/外部音源/外部音源+歌声）をゲーム全体の再生系(BgmManager)へ同期する。
   useEffect(() => {
     bgmManager.setMmlAudioMode(gameData.mmlAudioMode ?? 'light');
@@ -3431,7 +3214,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [isPlaying, gameData.bgm, gameData.scenes]);
 
   /** BGM を即時切り替えるヘルパー。src がなければ停止。
-   *  type:'direct'（tlDR CDN等の直リンクmp3/ogg/wav）も他のBGM切替箇所（ボスBGM等）と同様に
+   *  type:'direct'（直リンクのmp3/ogg/wav）も他のBGM切替箇所（ボスBGM等）と同様に
    *  bgmManager へそのまま渡す（以前は 'direct' だけ除外して停止していたため、
    *  デルタルーンの battleBgm/bossBgm が一切再生されないバグになっていた）。 */
   const switchBgm = (bgm?: { src?: string; type?: 'youtube' | 'mml' | 'direct'; ref?: string }) => {
@@ -3805,7 +3588,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       });
       if (!advanced) { clearInterval(iv); return; }
       setEnemyBubbles(next);
-      if (voiced) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textVoice);
+      if (voiced) playSfx(GAME_SFX.textVoice);
     }, ENEMY_BUBBLE_CHAR_MS);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4087,8 +3870,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const { killed, over } = damageFoe(tIdx, dmg);
     if (isDR) {
       // 剣を振る音（会心なら専用SE重ね）＋現在ターンのメンバーの攻撃モーション
-      playSfx(DT_SFX.attack);
-      if (inCritZone) playSfx(DT_SFX.crit);
+      playSfx(GAME_SFX.slash);
+      if (inCritZone) playSfx(GAME_SFX.slashCritical);
       // 担当メンバーの index はここで確定させて updater に埋め込む。updater 内で
       // dtTurnIdxRef.current を読むと、直後の dtAdvanceTurn が同期的に次のメンバーへ進めたあとに
       // React が updater を実行するため、結果が「次のメンバー」のキーに記録されてしまう
@@ -4098,7 +3881,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (attacker) dtPlayMemberAnim(attacker.id, 'attack', 700);
       setDtAttackDone(p => ({ ...p, [memberIdx]: { result: inCritZone ? 'crit' : 'hit', pos } }));
     }
-    playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
+    playSfx(GAME_SFX.enemyDamage);
     // 次も「たたかう」が控えているあいだは 'attack' のままにして、複数行のタイミングバーオーバーレイを
     // たたまずに連続表示する（reference の o_enc_fight が全員ぶんの棒を同時に見せているのを再現）。
     // ただしこの一撃で全滅させた場合は、以降の「たたかう」キューは実行されず dtAdvanceTurn も
@@ -4203,7 +3986,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (gameDataRef.current.battle?.style === 'deltarune') {
           const actor = dtParty()[dtTurnIdxRef.current];
           if (actor) dtPlayMemberAnim(actor.id, 'act', 700);
-          if (foe.mercy > before) playSfx(DT_SFX.mercyAdd);
+          if (foe.mercy > before) playSfx(GAME_SFX.mercyUp);
         }
         const line = foe.mercy >= 100
           ? `「${m.name}」！ ${foe.name}は たたかう気を なくしたようだ…`
@@ -4236,7 +4019,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (dodge && foe) {
         spawnBattleEffect(m.effectId, tIdx);
         const { killed, over } = damageFoe(tIdx, dmg);
-        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
+        playSfx(GAME_SFX.enemyDamage);
         appendLog(`${m.name}！ ${b.foes.length > 1 ? `${foe.name}に ` : ''}${dmg}のダメージ${killed ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
         if (over) return;
       } else if (!dodge) {
@@ -4293,16 +4076,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     tpRef.current = nextTp; setTp(nextTp);
     const caster = dtParty()[dtTurnIdxRef.current];
     if (caster) dtPlayMemberAnim(caster.id, 'spell', 700);
-    // 呪文固有の詠唱SE（ルードバスターの snd_rudebuster_swing 等）があれば共通音の代わりに鳴らす
+    // 呪文固有の詠唱SE（spell.castSfxUrl）があれば共通音の代わりに鳴らす
     playSfx(spell.castSfxUrl
       ? { ref: `direct:${spell.castSfxUrl}`, src: spell.castSfxUrl, type: 'direct' as const }
-      : DT_SFX.spellCast);
+      : GAME_SFX.spellCast);
     const b = battleRef.current;
     if (spell.heal) {
       const party = gameDataRef.current.battle?.party ?? [];
       let revived: string | null = null;
       party.forEach(m => { if (dtHealMember(m.id, spell.power)) revived = m.name; });
-      playSfx(DT_SFX.cure);
+      playSfx(GAME_SFX.heal);
       appendLog(revived ? `「${spell.name}」！ ${revived}が たちあがった！` : `「${spell.name}」！ なかまのHPが かいふくした`, { canAct: false });
     } else {
       const dmg = Math.max(1, Math.round(spell.power * (0.85 + Math.random() * 0.3)));
@@ -4310,10 +4093,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const foe = b.foes[tIdx];
       spawnBattleEffect(spell.effectId, tIdx);
       const { killed, over } = damageFoe(tIdx, dmg);
-      // 呪文固有の命中SE（ルードバスターの snd_rudebuster_hit 等）があれば共通音の代わりに鳴らす
+      // 呪文固有の命中SE（spell.hitSfxUrl）があれば共通音の代わりに鳴らす
       playSfx(spell.hitSfxUrl
         ? { ref: `direct:${spell.hitSfxUrl}`, src: spell.hitSfxUrl, type: 'direct' as const }
-        : (undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
+        : GAME_SFX.enemyDamage);
       appendLog(`「${spell.name}」！ ${b.foes.length > 1 && foe ? `${foe.name}に ` : ''}${dmg}のダメージ${killed && foe ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
       if (over) return;
     }
@@ -4350,7 +4133,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
       // 参考実装（o_enc の __order_action_queue）は defend を実行キューに積まず、選択した瞬間に
       // 効果を適用する：スプライトが即座に防御ポーズへ切り替わり、TP+16 も同じラウンドの
-      // 呪文選択にすぐ使える（クリスがまもる→そのTPでラルセイが呪文、が同ラウンドで成立）。
+      // 呪文選択にすぐ使える（1人目がまもる→そのTPで2人目が呪文、が同ラウンドで成立）。
       const member = dtParty()[dtTurnIdxRef.current];
       if (!member) return;
       dtDefendedRef.current.add(member.id);
@@ -4386,7 +4169,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (isDodgeBattleStyle(style)) {
       const ready = aliveFoeIdxs().filter(i => foeSpareReady(b.foes[i]));
       if (ready.length) {
-        if (style === 'deltarune') playSfx(DT_SFX.spare);
+        if (style === 'deltarune') playSfx(GAME_SFX.spare);
         ready.forEach(i => { b.foes[i].gone = 'spared'; });
         syncFoesView();
         const names = ready.map(i => b.foes[i].name).join('と ');
@@ -4427,7 +4210,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!foe || foe.gone) return false;
     const beforePct = foe.maxHp > 0 ? foe.hp / foe.maxHp : 0;
     const { killed, over } = damageFoe(tIdx, dmg);
-    playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
+    playSfx(GAME_SFX.enemyDamage);
     const tiredNow = gameDataRef.current.battle?.style === 'milky' && !killed
       && beforePct > 0.3 && foe.maxHp > 0 && foe.hp / foe.maxHp <= 0.3;
     const targetLabel = b.foes.length > 1 ? `${foe.name}に ` : '';
@@ -4911,7 +4694,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const ch = lastLogLine[i];
       i++;
       setLogRevealCount(i);
-      if (ch && ch.trim()) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textTyper);
+      if (ch && ch.trim()) playSfx(GAME_SFX.textTyper);
       if (i >= lastLogLine.length) clearInterval(id);
     }, 32);
     return () => clearInterval(id);
@@ -5184,7 +4967,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // yellow：Z/Enterで前方（上方向）に弾を発射し、敵弾を撃ち落とせる
       if (mode === 'yellow') {
         if (st.shotCool > 0) st.shotCool--;
-        if (isFire && st.shotCool <= 0) { st.shots.push({ x: st.hx, y: st.hy - 8, vy: -4.2 }); st.shotCool = 12; playSfx(UNDERTALE_SHOOT_SFX); }
+        if (isFire && st.shotCool <= 0) { st.shots.push({ x: st.hx, y: st.hy - 8, vy: -4.2 }); st.shotCool = 12; playSfx(GAME_SFX.shoot); }
         for (const s of st.shots) s.y += s.vy;
         st.shots = st.shots.filter(s => s.y > -10);
       }
@@ -5271,7 +5054,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const nextTp = Math.min(100, tpRef.current + 3);
             tpRef.current = nextTp; setTp(nextTp);
             st.grazeFx = 12;
-            playSfx(DT_SFX.graze);
+            playSfx(GAME_SFX.graze);
           }
         }
       }
@@ -5313,17 +5096,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         else ctx.fillRect(sx - 10, sy + 12, 20, 4);
       }
       if (st.invuln % 8 < 4) {
-        // デルタルーンは tlDR Engine の spr_undertale をそのまま描く（未ロード時はベジェのハートでフォールバック）
-        const undertaleImg = gameDataRef.current.battle?.style === 'deltarune' ? getDodgeImg(TLDR_UNDERTALE_SPRITE.frames[0]) : null;
-        if (undertaleImg && undertaleImg.complete && undertaleImg.naturalWidth > 0) {
-          ctx.save();
-          ctx.translate(st.hx, st.hy);
-          if (mode === 'yellow') ctx.rotate(Math.PI); // yellow は逆さ（砲台）向き
-          ctx.drawImage(undertaleImg, -8, -8, 16, 16);
-          ctx.restore();
-        } else {
-          drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
-        }
+        // yellow は逆さ（砲台）向き
+        drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
       }
       if (st.grazeFx && st.grazeFx > 0) {
         // グレイズの白いリング（外→内に収束しながらフェード）
@@ -5355,9 +5129,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inBattle, battleStyle, undertalePhase]);
 
-  /** undertale: タッチ/マウスでハートを直接動かす。UNDERTALE戦闘系プリセットでは方向キー操作のみに限定するため無効化。 */
+  /** 弾幕よけ：タッチ/マウスでハートを直接動かす。battle.dodgePointer === false のゲームは方向キー操作だけに限る。 */
   const undertalePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (isUndertalePreset) return;
+    if (gameDataRef.current.battle?.dodgePointer === false) return;
     const st = undertaleDodgeRef.current; const cv = undertaleCanvasRef.current;
     if (!st || !cv) return;
     const rect = cv.getBoundingClientRect();
@@ -5960,8 +5734,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           };
           try {
             if (cmd.type === 'saveData') {
-              const prev = JSON.parse(localStorage.getItem('rpgen_save_data') || '{}');
-              localStorage.setItem('rpgen_save_data', JSON.stringify({
+              const prev = JSON.parse(localStorage.getItem(saveSlotKeyRef.current) || '{}');
+              localStorage.setItem(saveSlotKeyRef.current, JSON.stringify({
                 ...prev,
                 // グローバルスイッチ（#ON_SW/#OF_SW）。以前はここに selfSwitches を
                 // 入れていたためスイッチの状態が一切保存されていなかった。
@@ -5973,7 +5747,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 ...(want.npc ? { player: engineRef.current.player } : {}),
               }));
             } else {
-              const raw = localStorage.getItem('rpgen_save_data');
+              const raw = localStorage.getItem(saveSlotKeyRef.current);
               if (raw) {
                 const data = JSON.parse(raw);
                 if (want.switches && data.switches) {
@@ -6610,7 +6384,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setShowTitle(false); setShowEnding(false);
   }, []);
 
-  const resetGame = useCallback((id: PresetId) => {
+  /** 見本プリセットを初期データで読み込む（ギャラリー・「ゲーム切り替え」）。 */
+  const resetGame = useCallback((id: SamplePresetId) => {
     const data = clone(PRESETS[id]);
     // シーンモードなら scenes[0] の map/objects を初期表示に使う
     if (data.scenes?.length) {
@@ -6620,21 +6395,47 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     applyPresetData(id, data, PRESETS[id].name);
   }, [applyPresetData]);
 
-  /** 設定メニューの「エンジン変更」：編集中のゲームを別プリセット（別エンジン）へ切り替える。
-   *  タイトル・プレイヤーの見た目・BGMを引き継いだうえで、マップは可能な範囲で変換する：
+  /** エンジンのまっさらテンプレートから始める（ギャラリーの「まっさらから作る」）。presetId は 'blank'。 */
+  const startFromTemplate = useCallback((engine: TemplateEngine) => {
+    const data = createEngineTemplate(engine);
+    applyPresetData('blank', data, data.name);
+  }, [applyPresetData]);
+
+  /** 設定メニューの「エンジン変換」：編集中のゲームを別エンジンへ切り替える。
+   *  エンジン固有の設定（物理・プレイヤーの大きさ・弾幕のフェーズ・2.5Dレイアウト等）は変換先エンジンの
+   *  まっさらテンプレートを土台にし、エンジンに依らない中身（タイトル・プレイヤーの見た目・BGM・効果音・
+   *  スイッチ・アイテム・装備・エフェクト・戦闘・画面）は引き継ぐ。変換後は presetId が 'blank' になる。
+   *  マップは可能な範囲で変換する：
    *  - 2Dエンジン同士：タイル・3レイヤー・オブジェクト・シーンをそのまま引き継ぐ
    *  - 2D → yume25d：床/壁/ビルボードへ近似変換（convertMapToLayout25D）
    *  - yume25d → 2D：床→タイル・ビルボード→NPCへ近似変換（薄板壁は失われる） */
-  const switchEngine = (id: PresetId) => {
+  const switchEngine = (engine: TemplateEngine) => {
     const prev = gameData;
-    const data = clone(PRESETS[id]);
-    if (data.scenes?.length) {
-      data.map = JSON.parse(JSON.stringify(data.scenes[0].map));
-      data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
-    }
+    const data = createEngineTemplate(engine);
     // ゲームの同一性に関わるタイトルと、エンジン非依存のプレイヤーの見た目・BGMは常に引き継ぐ
-    data.player = { ...data.player, emoji: prev.player.emoji, color: prev.player.color, spriteRef: prev.player.spriteRef, spriteUrl: prev.player.spriteUrl, minecraftSkin: prev.player.minecraftSkin };
+    data.player = { ...data.player, emoji: prev.player.emoji, color: prev.player.color, spriteRef: prev.player.spriteRef, spriteUrl: prev.player.spriteUrl, minecraftSkin: prev.player.minecraftSkin, companionLight: prev.player.companionLight };
     if (prev.bgm) data.bgm = prev.bgm;
+    {
+      // エンジンに依らない中身はそのまま持っていく（テンプレートの空の値で上書きしない）
+      const keep = clone(prev);
+      data.battleBgm = keep.battleBgm;
+      data.bossBgm = keep.bossBgm;
+      data.mmlAudioMode = keep.mmlAudioMode;
+      data.sfx = { ...data.sfx, ...keep.sfx };
+      data.switches = keep.switches;
+      data.items = keep.items;
+      data.weapons = keep.weapons;
+      data.armors = keep.armors;
+      data.effects = keep.effects;
+      data.battle = keep.battle;
+      data.titleScreen = keep.titleScreen;
+      data.ending = keep.ending;
+      data.weather = keep.weather;
+      data.screenTint = keep.screenTint;
+      data.mapBgRef = keep.mapBgRef;
+      data.mapBgUrl = keep.mapBgUrl;
+      data.name = keep.name;
+    }
 
     const prevIs3d = prev.engine === 'yume25d', nextIs3d = data.engine === 'yume25d';
     if (!prevIs3d && !nextIs3d) {
@@ -6661,65 +6462,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       data.scenes = undefined;
       data.player.start = conv.startPx;
     }
-    applyPresetData(id, data, title);
+    applyPresetData('blank', data, title);
   };
 
-  /** 「まっさらにする」用：エンジンは維持したまま、マップ・タイル・オブジェクト・イベント・
-   *  戦闘・BGM など編集中のコンテンツをすべて消した空データを作る。
-   *  横スクロール（action）系だけは落下しっぱなしにならないよう最下段へ地面タイルを敷き、
-   *  立つ場所とペイント用に「土」タイルを1つだけ残す（他は一切なし）。 */
-  const createBlankGameData = (id: PresetId, titleStr: string): PresetData => {
-    const data = clone(PRESETS[id]);
-    const cols = data.scroll?.worldCols ?? COLS;
-    const rows = data.scroll?.worldRows ?? ROWS;
-    const blankGrid = () => Array.from({ length: rows }, () => Array(cols).fill(0));
-    const map = blankGrid();
-    if (data.engine === 'action') {
-      for (let r = Math.max(0, rows - 2); r < rows; r++) {
-        for (let c = 0; c < cols; c++) map[r][c] = 1;
-      }
-    }
-    data.map = map;
-    data.overlayMap = blankGrid();
-    data.overheadMap = blankGrid();
-    data.tiles = { 1: { name: '土', color: '#8a5a2b', passable: true } };
-    data.objects = [];
-    data.scenes = undefined;
-    data.battle = undefined;
-    data.switches = [];
-    data.items = [];
-    data.weapons = [];
-    data.armors = [];
-    data.effects = [];
-    data.phases = undefined;
-    data.bgm = undefined;
-    data.battleBgm = undefined;
-    data.bossBgm = undefined;
-    data.sfx = {};
-    data.mapBgRef = undefined;
-    data.mapBgUrl = undefined;
-    data.titleScreen = defaultTitleScreen(titleStr?.trim() || data.name);
-    data.ending = undefined;
-    if (data.engine === 'yume25d' && data.layout25d) {
-      const layout = data.layout25d;
-      const firstFloor = Object.values(layout.textures).find(t => t.kind === 'floor');
-      // 床テクスチャは残しつつ配置物（壁・ビルボード）は空に。床は既定テクスチャで全面敷く（全面0=奈落だと落下して始められない）。
-      data.layout25d = {
-        ...layout,
-        floor: Array.from({ length: layout.rows }, () => Array(layout.cols).fill(firstFloor?.id ?? 1)),
-        walls: [],
-        billboards: [],
-      };
-      data.deathScreen = defaultDeathScreen();
-    }
+  /** 「まっさらにする」用：いまのエンジンのまっさらテンプレート（templates.ts）で作り直す。
+   *  マップ・タイル・オブジェクト・イベント・戦闘・BGM など編集中のコンテンツはすべて消え、
+   *  ゲーム名（タイトル画面の見出し）だけを引き継ぐ。 */
+  const createBlankGameData = (engine: EngineKind, titleStr: string): PresetData => {
+    const data = createEngineTemplate(engine);
+    const heading = titleStr?.trim() || data.name;
+    data.titleScreen = { ...(data.titleScreen ?? defaultTitleScreen(heading)), heading };
     return data;
   };
 
-  /** 設定パネルの「まっさらにする」：現在のエンジンを維持したまま編集内容を空にする。 */
+  /** 設定パネルの「まっさらにする」：現在のエンジンを維持したまま編集内容を空にする。presetId は 'blank' になる。 */
   const resetToBlank = () => {
-    const data = createBlankGameData(presetId, title);
-    applyPresetData(presetId, data, title);
+    const data = createBlankGameData(gameData.engine, title);
+    applyPresetData('blank', data, title);
   };
+
+  /** ヘッダー・設定パネルに出す「いま何を編集中か」。見本ならその名前、まっさらならエンジンの種類。 */
+  const presetLabel = presetId === 'blank'
+    ? `まっさら（${ENGINE_LABELS[gameData.engine] ?? gameData.engine}）`
+    : (PRESETS[presetId]?.name ?? presetId);
 
   const restart = useCallback(() => {
     isTestPlayRef.current = true;
@@ -6772,19 +6537,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     } else {
       resetGame('onjReze');
+      introChoiceRef.current = 'onjReze';
     }
   }, [initialManifest, playOnly, resetGame]);
 
   // ── 入口ヒーロー：軽量なリスト選択（プリセット名＋説明のみ、ライブデモは回さない）──
   // 選択後の「あそぶ」「改造する」を押した時点で初めてエンジンを起動する。
 
+  /** ギャラリーで開かれた見本／テンプレートを数える（D16、/api/games/preset-open）。
+   *  同じキーはこの GameMaker を開いている間に1回だけ送る（選び直し・連打では増やさない）。
+   *  サーバー側も同じIPの同じキーを10分は数えない。 */
+  const galleryOpenedKeysRef = useRef<Set<string>>(new Set());
+  const recordGalleryOpen = useCallback((key: SamplePresetId | `template:${TemplateEngine}`) => {
+    if (galleryOpenedKeysRef.current.has(key)) return;
+    galleryOpenedKeysRef.current.add(key);
+    recordPresetOpen(key);
+  }, []);
+
   /** ヒーローでプリセットを切り替える（デモは再生しない＝軽量）。 */
-  const previewPresetInIntro = useCallback((id: PresetId) => {
+  const previewPresetInIntro = useCallback((id: SamplePresetId) => {
     resetGame(id);          // isPlaying=false のまま
-  }, [resetGame]);
+    introChoiceRef.current = id;
+    recordGalleryOpen(id);
+  }, [resetGame, recordGalleryOpen]);
+
+  /** ヒーローの「まっさらから作る」でエンジンを選ぶ（テンプレートを読み込むだけ。デモは再生しない）。 */
+  const previewTemplateInIntro = useCallback((engine: TemplateEngine) => {
+    startFromTemplate(engine);
+    introChoiceRef.current = `template:${engine}`;
+    recordGalleryOpen(`template:${engine}`);
+  }, [startFromTemplate, recordGalleryOpen]);
+
+  /** ヒーローを閉じるとき、選び直さずに既定（最初に読み込まれている見本）のまま進んだ場合も1回数える。
+   *  これが無いと、既定の見本だけ「クリックされない」ぶん少なく数えられてしまう。 */
+  const recordIntroChoice = useCallback(() => {
+    if (introChoiceRef.current) recordGalleryOpen(introChoiceRef.current);
+  }, [recordGalleryOpen]);
 
   /** ヒーローから「あそぶ」。タイトル画面があればそれを、なければ即プレイ。 */
   const enterPlayFromIntro = useCallback(() => {
+    recordIntroChoice();
     isTestPlayRef.current = true;
     setIntroOpen(false);
     setActivePreviewKey(null);
@@ -6794,13 +6586,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // flushSync で false を確定コミットしてからエフェクトを再実行させる
     flushSync(() => restart());
     setIsPlaying(true);
-  }, [gameData.titleScreen, restart]);
+  }, [gameData.titleScreen, restart, recordIntroChoice]);
 
   /** ヒーローから「改造する」。デモを止めてエディタへ。 */
   const enterEditFromIntro = useCallback(() => {
+    recordIntroChoice();
     setIntroOpen(false);
     restart();              // デモ停止＋初期位置に戻す
-  }, [restart]);
+  }, [restart, recordIntroChoice]);
 
   /** ゲームオーバーリザルトから「リトライ」 */
   const handleGameOverRetry = useCallback(() => {
@@ -6845,6 +6638,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!isPlaying || !gameData.scenes?.length) {
       scenesRef.current = [];
       worldLayoutRef.current = null;
+      // シーンを使わないゲームの天候はゲーム全体の weather。停止中（エディタ）は出さない
+      // （以前はシーン無しのゲームで weather が一度も適用されず、逆に前に遊んだゲームの天候がエディタに残っていた）。
+      setCurrentWeather(isPlaying && gameData.weather && gameData.weather.kind !== 'none' ? { ...gameData.weather } : null);
       return;
     }
     // objects/exits まで複製する（浅いコピーだと entity.def が gameData.scenes[i].objects[k] と同一参照になり、
@@ -6910,7 +6706,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }) as unknown as Entity[];
     // 全シーンのスプライト画像を事前ロード（spriteUrl は Entity.def から除外されるため spriteRef も参照）
     gameData.scenes?.forEach(s => s.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl)));
-  }, [isPlaying, gameData.scenes, gameData.player.start, editSceneIdx, ensureImage, ensureImageFromRef]);
+  }, [isPlaying, gameData.scenes, gameData.weather, gameData.player.start, editSceneIdx, ensureImage, ensureImageFromRef]);
 
   // プレイ開始時に sfx を無音で一瞬再生してブラウザにデコード・バッファさせる。
   // iOS Safari は HTMLMediaElement.volume が読み取り専用で代入を黙って無視するため、
@@ -7057,11 +6853,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       ensureImage(SWORD_SPRITE_URL); // 剣の初回スイングで絵文字が一瞬映るのを防ぐため先読みしておく
       onjBombsRef.current = []; onjFliesRef.current = []; onjBlastsRef.current = [];
       onjBombCoolRef.current = 0; onjThrowCoolRef.current = 0;
-      // action エンジン：武器スロット初期化
-      actionWeaponsRef.current = [...(gameData.player.weapons ?? [])];
-      actionWeaponIdxRef.current = 0;
-      actionWeaponEnergyRef.current = {};
-      actionWeaponsRef.current.forEach(w => { actionWeaponEnergyRef.current[w] = MAX_WEAPON_ENERGY; });
 
       bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false; npcTalkRef.current = null; itemGetRef.current = null;
       bombCountRef.current = gameData.player.bombCount ?? 3;
@@ -7844,7 +7635,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             alert.phase = 'flash';
             alert.startTime = performance.now();
             switchBgm(undefined);
-            playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).battleStart);
+            playSfx(GAME_SFX.battleStart);
           } else {
             // 演出フェーズ終了 → バトル開始
             const { fire } = alert;
@@ -8062,16 +7853,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             playSfx(sfxRef.current.jump);
           }
 
-          // ── 武器切り替え ──
-          const isNextWeapon = keys.has('e') || keys.has('E');
-          const isPrevWeapon = keys.has('q') || keys.has('Q');
-          if (isNextWeapon && !prevNextWeaponRef.current) {
-            if (actionWeaponsRef.current.length > 1)
-              actionWeaponIdxRef.current = (actionWeaponIdxRef.current + 1) % actionWeaponsRef.current.length;
-          }
-          void isPrevWeapon;
-          prevNextWeaponRef.current = isNextWeapon;
-
           // ── つるつる床（システムタイル）：スライド中は入力を無視し、目標Xへ強制移動する（左右のみ対応） ──
           if (iceSlideRef.current) {
             const slide = iceSlideRef.current;
@@ -8231,10 +8012,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             scaleXRef.current = 1.3;
             scaleYRef.current = 0.7;
-            if (gameData.id === 'snowForest') snowForestLandFramesRef.current = SNOWFOREST_LAND_FRAMES;
+            if (gameData.player.landSpriteRefs?.length) landPoseFramesRef.current = LAND_POSE_FRAMES;
           }
           prevGroundedRef.current = p.isGrounded;
-          if (snowForestLandFramesRef.current > 0) snowForestLandFramesRef.current--;
+          if (landPoseFramesRef.current > 0) landPoseFramesRef.current--;
 
           if (p.isGrounded && Math.abs(p.vx) > 2.0) {
             if (sprintActive && frameCount % 6 === 0) {
@@ -8273,28 +8054,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const isShoot = keys.has('x') || keys.has('X') || touchRef.current.shoot;
           if (isPlaying && !dead && isShoot && actionShootCoolRef.current <= 0) {
             const dir = actionDirRef.current;
-            const currentWeapon = actionWeaponsRef.current[actionWeaponIdxRef.current];
-            const energy = actionWeaponEnergyRef.current;
-            // 'buster' はエネルギー無限の初期武器（ゲージを消費せず常に通常弾）
-            if (currentWeapon && currentWeapon !== 'buster' && (energy[currentWeapon] ?? 0) > 0) {
-              energy[currentWeapon] = Math.max(0, (energy[currentWeapon] ?? 0) - 1);
-              if (currentWeapon === 'airShooter') {
-                [-15, 0, 15].forEach(offset => {
-                  eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 9, vy: Math.sin(offset * Math.PI / 180) * 3, color: '#88ffcc' } as typeof eng.bullets[0]);
-                });
-              } else if (currentWeapon === 'metalBlade') {
-                for (let di = 0; di < 8; di++) {
-                  const a = di * 45 * Math.PI / 180;
-                  eng.bullets.push({ x: p.x + pData.w / 2 - 4, y: p.y + pData.h / 2 - 4, w: 8, h: 8, vx: Math.cos(a) * 8, vy: Math.sin(a) * 8, color: '#aaaaaa' } as typeof eng.bullets[0]);
-                }
-              } else if (currentWeapon === 'crashBomb') {
-                eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 8, vx: dir * 5, vy: 0, color: '#ff6600' } as typeof eng.bullets[0]);
-              } else {
-                eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 10, vy: 0 });
-              }
-            } else {
-              eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 10, vy: 0 });
-            }
+            eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 10, vy: 0 });
             actionShootCoolRef.current = 12;
             playSfx(sfxRef.current.shot);
           }
@@ -8651,9 +8411,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const k = ++spellCutinKeyCountRef.current;
               setSpellCutin({
                 key: k, mode: 'player',
-                charName: pData.bombCutinCharName ?? '魔理沙',
-                spellName: pData.bombSpellName ?? '恋符「マスタースパーク」',
-                imageUrl: pData.bombCutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png',
+                // 未設定なら汎用の名前だけ出し、立ち絵は出さない（エンジン既定に特定作品のキャラを置かない）
+                charName: pData.bombCutinCharName ?? 'プレイヤー',
+                spellName: pData.bombSpellName ?? 'ボム',
+                imageUrl: pData.bombCutinImageUrl,
                 imageX: pData.bombCutinImageX ?? 0, imageY: pData.bombCutinImageY ?? -50, imageScale: pData.bombCutinScale ?? 1,
               });
             }
@@ -8723,7 +8484,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // 消えるため、向きの更新判定より前に控えておく。
           const lockFacing = e.moveTarget?.lockDirection === true;
 
-          const sp = (gameData.engine === 'onjReze' && d.name === 'レゼ' && Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) ? 2.2 : d.speed;
+          const sp = (gameData.engine === 'onjReze' && d.ai === 'bomber' && Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) ? 2.2 : d.speed;
           if (gameData.engine === 'touhou') {
             if (d.miniScript) {
               // MiniScript 制御：moveTarget (lerp) または vx/vy で移動
@@ -8829,7 +8590,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (e.y > worldH + TILE_SIZE) { eng.entities.splice(ei, 1); continue; }
             }
           } else if (e.bombThrown) {
-            // レゼ：上半身を投げてから爆発するまでは立ち止まる（原作再現のため棒立ち）
+            // 爆弾投げAI：上半身を投げてから爆発するまでは立ち止まる（棒立ち）
             e.vx = 0; e.vy = 0;
           } else if (e.moveTarget) {
             // イベントコマンドによるスムーズな目標地点への移動（直角／斜め対応）
@@ -8963,8 +8724,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
               let s = (d.behavior === 'chase' ? 1 : -1) * sp;
 
-              // レゼ専用：爆弾爆発後の次の行動パターンに応じた移動
-              if (gameData.engine === 'onjReze' && d.name === 'レゼ' && e.rezeState) {
+              // 爆弾投げAI（ai='bomber'）：爆弾爆発後の次の行動パターンに応じた移動
+              if (gameData.engine === 'onjReze' && d.ai === 'bomber' && e.rezeState) {
                 if (e.rezeStateTimer && e.rezeStateTimer > 0) {
                   e.rezeStateTimer--;
                   if (e.rezeState === 'charge') {
@@ -9030,8 +8791,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             else if (!e.facing) e.facing = initialFacing(d);
           }
 
-          // ── レゼ（敵）: 一定間隔でプレイヤーめがけて爆弾を投げる ──
-          if (gameData.engine === 'onjReze' && d.name === 'レゼ' && isPlaying && !dead) {
+          // ── 爆弾投げAI（ai='bomber'）: 一定間隔でプレイヤーめがけて爆弾を投げる ──
+          if (gameData.engine === 'onjReze' && d.ai === 'bomber' && isPlaying && !dead) {
             const distToPlayer = Math.hypot(pcx - ecx, pcy - ecy);
             const isClose = distToPlayer < TILE_SIZE * 4;
 
@@ -9371,24 +9132,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (ot === 'item') {
               if (exactOverlap && !eventRunningRef.current) {
                 const iid = d.itemId || d.name || d.id;
-                // ロックマン系アイテムの即時効果（action エンジン汎用、itemId の規約で判定）
+                // action エンジン：拾った音（未設定ならジャンプ音）を鳴らし、HUD を更新する
                 if (gameData.engine === 'action') {
-                  const z = onjRezeHpRef.current;
-                  const wEn = actionWeaponEnergyRef.current;
-                  if (iid === 'energyCapsule') z.hp = Math.min(z.max, z.hp + 8);
-                  else if (iid === 'smallEnergyTank') z.hp = Math.min(z.max, z.hp + Math.ceil(z.max / 2));
-                  else if (iid === 'energyTank') z.hp = z.max;
-                  else if (iid === 'weaponTank') actionWeaponsRef.current.forEach(w => { if (w !== 'buster') wEn[w] = MAX_WEAPON_ENERGY; });
-                  else if (iid === 'smallWeaponTank') {
-                    const cw = actionWeaponsRef.current[actionWeaponIdxRef.current];
-                    if (cw && cw !== 'buster') wEn[cw] = Math.min(MAX_WEAPON_ENERGY, (wEn[cw] ?? 0) + Math.ceil(MAX_WEAPON_ENERGY / 2));
-                  }
-                  // ボス武器の入手：武器スロットに追加してフルチャージ（E キーで切り替え）
-                  else if (['airShooter', 'metalBlade', 'crashBomb'].includes(iid)) {
-                    if (!actionWeaponsRef.current.includes(iid)) actionWeaponsRef.current.push(iid);
-                    wEn[iid] = MAX_WEAPON_ENERGY;
-                  }
-                  playSfx(sfxRef.current.jump);
+                  playSfx(sfxRef.current.coin ?? sfxRef.current.jump);
                   forceHud(n => n + 1);
                 }
                 setInventory(p => { const n = { ...p }; n[iid] = (n[iid] ?? 0) + 1; return n; });
@@ -9676,8 +9422,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             else if (center?.info?.special === 'lava') {
               if (!debugInvincibleRef.current) { lose('溶岩に落ちた！'); dead = true; }
             }
-            else if (center?.info?.special === 'checkpoint' && isAction) {
-              if (!checkpointRef.current || checkpointRef.current.x !== p.x || checkpointRef.current.y !== p.y) {
+            else if (center?.info?.special === 'checkpoint' && gameData.engine === 'action') {
+              // 通るだけで記録する（以前は isAction＝ジャンプ/決定キーを押している間だけで、歩いて通ると
+              // 記録されなかった）。復帰は action エンジンだけなのでエンジンで絞る。
+              // 同じマスでは記録し直さない（座標で比べると、歩いている間じゅう毎フレーム記録して通知が出続ける）。
+              const cur = checkpointRef.current;
+              const cpCol = Math.floor(pcx / TILE_SIZE), cpRow = Math.floor(pcy / TILE_SIZE);
+              if (!cur || Math.floor((cur.x + pData.w / 2) / TILE_SIZE) !== cpCol || Math.floor((cur.y + pData.h / 2) / TILE_SIZE) !== cpRow) {
                 checkpointRef.current = { x: p.x, y: Math.max(0, p.y) };
                 showGameMsg('チェックポイント！', 'timed', () => { });
               }
@@ -10008,7 +9759,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 2;
           if (menuDownEdge) c += 2;
           c = ((c % n) + n) % n;
-          if (c !== invCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== invCursorRef.current) playMenuCursorSfx();
           invCursorRef.current = c; setInvCursor(c);
         }
       } else if (isPlaying && invMenuRef.current) {
@@ -10023,7 +9774,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % count) + count) % count;
-          if (c !== invMenuCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== invMenuCursorRef.current) playMenuCursorSfx();
           invMenuCursorRef.current = c; setInvMenuCursor(c);
         }
       } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style) && ptRef.current.phase === 'select') {
@@ -10037,7 +9788,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge || (isMilkySkill && menuLeftEdge)) c -= 1;
           if (menuDownEdge || (isMilkySkill && menuRightEdge)) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== ptRef.current.menuCursor) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== ptRef.current.menuCursor) playSfx(GAME_SFX.menuMove);
           ptPatch({ menuCursor: c });
         }
       } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && undertalePhaseRef.current === 'menu') {
@@ -10054,7 +9805,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (leftMove) c -= 1;
             if (rightMove) c += 1;
             c = ((c % rootCount) + rootCount) % rootCount;
-            if (c !== undertaleRootCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            if (c !== undertaleRootCursorRef.current) playSfx(GAME_SFX.menuMove);
             undertaleRootCursorRef.current = c; setUndertaleRootCursor(c);
           }
         } else if (undertaleMenuRef.current === 'target') {
@@ -10066,12 +9817,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (downMove || rightMove) n += 1;
             n = ((n % alive.length) + alive.length) % alive.length;
             const idx = alive[n];
-            if (idx !== undertaleTargetCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            if (idx !== undertaleTargetCursorRef.current) playSfx(GAME_SFX.menuMove);
             undertaleTargetCursorRef.current = idx; setUndertaleTargetCursor(idx);
           }
         } else {
           // ACT / ITEM / MERCY サブメニュー。デルタルーンの2番目のコマンドはメンバーで中身が変わる：
-          // 呪文持ち（スージー/ラルセイ）＝「まほう」で自分の呪文のみ、呪文なし（クリス）＝「こうどう」でACT技のみ
+          // 呪文持ち＝「まほう」で自分の呪文のみ、呪文なし＝「こうどう」でACT技のみ
           const bd2 = gameDataRef.current.battle;
           const rawSpells2 = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
           const curSpells = availableSpells(rawSpells2, dtTurnIdxRef.current, progressRef.current.level);
@@ -10092,7 +9843,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (downMove) c += 1;
             }
             c = ((c % count) + count) % count;
-            if (c !== undertaleSubCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            if (c !== undertaleSubCursorRef.current) playSfx(GAME_SFX.menuMove);
             undertaleSubCursorRef.current = c; setUndertaleSubCursor(c);
           }
         }
@@ -10104,7 +9855,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== eventChoiceCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== eventChoiceCursorRef.current) playMenuCursorSfx();
           eventChoiceCursorRef.current = c; setEventChoiceCursor(c);
         }
       } else if (isPlaying && shopModalRef.current) {
@@ -10115,7 +9866,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== shopCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== shopCursorRef.current) playMenuCursorSfx();
           shopCursorRef.current = c; setShopCursor(c);
         }
       } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style) && !isPartyBattleStyle(gameDataRef.current.battle?.style)) {
@@ -10152,7 +9903,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== titleCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== titleCursorRef.current) playMenuCursorSfx();
           titleCursorRef.current = c; setTitleCursor(c);
         }
       }
@@ -10209,10 +9960,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (undertaleMenuRef.current === 'root') {
             if (canMenuNow) {
               const r = undertaleRootCursorRef.current;
-              if (isDt && r === 4) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); doDefend(); }
-              else if (r === 0) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); beginTargetSelect({ kind: 'fight' }); }
+              if (isDt && r === 4) { playSfx(GAME_SFX.menuConfirm); doDefend(); }
+              else if (r === 0) { playSfx(GAME_SFX.menuConfirm); beginTargetSelect({ kind: 'fight' }); }
               else {
-                playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
+                playSfx(GAME_SFX.menuConfirm);
                 if (r === 1) setUndertaleMenu('act');
                 else if (r === 2) setUndertaleMenu('item');
                 else setUndertaleMenu('mercy');
@@ -10221,36 +9972,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           } else if (undertaleMenuRef.current === 'target') {
             // ターゲット選択の確定：保留していた行動を選んだ敵へ実行
             if (canMenuNow && undertaleTargetSelRef.current) {
-              playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
+              playSfx(GAME_SFX.menuConfirm);
               dispatchTarget(undertaleTargetSelRef.current, undertaleTargetCursorRef.current);
             }
           } else if (undertaleMenuRef.current === 'act') {
             const curMember = isDt ? gameDataRef.current.battle?.party?.[dtTurnIdxRef.current] : undefined;
             const rawSpells3 = curMember?.spells ?? [];
             const spells = availableSpells(rawSpells3, dtTurnIdxRef.current, progressRef.current.level);
-            // 呪文持ちメンバーのメニューは「まほう」＝呪文のみ（ACT技は呪文なしのクリス専用）
+            // 呪文持ちメンバーのメニューは「まほう」＝呪文のみ（ACT技は呪文なしのメンバー専用）
             const moves = isDt && rawSpells3.length ? [] : availableMoves(gameDataRef.current.battle?.moves ?? [], progressRef.current.level);
             const idx = undertaleSubCursorRef.current;
             if (idx < moves.length) {
               // 自分回復のこうどうは対象不要。それ以外（敵意/ダメージ）は対象の敵を選んでから実行
               const m = moves[idx];
-              if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); if (m.heal) doMove(m); else beginTargetSelect({ kind: 'act', move: m }); }
+              if (canMenuNow) { playSfx(GAME_SFX.menuConfirm); setUndertaleMenu('root'); if (m.heal) doMove(m); else beginTargetSelect({ kind: 'act', move: m }); }
             }
             else if (idx < moves.length + spells.length) {
               const spell = spells[idx - moves.length];
-              if (canMenuNow && tpRef.current >= spell.tpCost) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); if (spell.heal) castSpell(spell); else beginTargetSelect({ kind: 'spell', spell }); }
+              if (canMenuNow && tpRef.current >= spell.tpCost) { playSfx(GAME_SFX.menuConfirm); setUndertaleMenu('root'); if (spell.heal) castSpell(spell); else beginTargetSelect({ kind: 'spell', spell }); }
             }
-            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
+            else { playSfx(GAME_SFX.menuCancel); setUndertaleMenu('root'); }
           } else if (undertaleMenuRef.current === 'item') {
             const items = usableItems();
             const idx = undertaleSubCursorRef.current;
-            if (idx < items.length) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); useHealItem(items[idx], true); } }
-            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
+            if (idx < items.length) { if (canMenuNow) { playSfx(GAME_SFX.menuConfirm); setUndertaleMenu('root'); useHealItem(items[idx], true); } }
+            else { playSfx(GAME_SFX.menuCancel); setUndertaleMenu('root'); }
           } else if (undertaleMenuRef.current === 'mercy') {
             const idx = undertaleSubCursorRef.current;
-            if (idx === 0) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); doSpare(); } }
-            else if (idx === 1) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); doFlee(); } }
-            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
+            if (idx === 0) { if (canMenuNow) { playSfx(GAME_SFX.menuConfirm); setUndertaleMenu('root'); doSpare(); } }
+            else if (idx === 1) { if (canMenuNow) { playSfx(GAME_SFX.menuConfirm); setUndertaleMenu('root'); doFlee(); } }
+            else { playSfx(GAME_SFX.menuCancel); setUndertaleMenu('root'); }
           }
         } else if (isPlaying && eventChoiceRef.current) {
           const choice = eventChoiceRef.current;
@@ -10295,7 +10046,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (ptRef.current.phase === 'select') {
             const actions = ptMenuActions();
             const a = actions[Math.min(ptRef.current.menuCursor, actions.length - 1)];
-            if (a && !a.disabled) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); a.onClick(); }
+            if (a && !a.disabled) { playSfx(GAME_SFX.menuConfirm); a.onClick(); }
           }
         } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
           const canActNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
@@ -10355,7 +10106,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           dtTurnIdxRef.current = last.idx; setDtTurnIdx(last.idx);
           setUndertaleRootCursor(0); undertaleRootCursorRef.current = 0;
           setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
-          playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel);
+          playSfx(GAME_SFX.menuCancel);
         } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style)) {
           // パーティ制戦闘のX：サブメニュー/対象選択中なら一段もどる。ルートなら直前の選択を取り消す
           if (ptRef.current.phase === 'select') {
@@ -10665,7 +10416,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (isPlaying) {
         for (let ei = 0; ei < eng.entities.length; ei++) {
           const e = eng.entities[ei];
-          if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && e.bombThrown && e.def.spriteUrl) {
+          if (gameData.engine === 'onjReze' && e.def.ai === 'bomber' && e.bombThrown && e.def.spriteUrl) {
             // 上半身を投げて爆発を待っている間は、下半身だけを表示する
             ensureImage(e.def.spriteUrl);
             const img = imgCache.current.get(e.def.spriteUrl);
@@ -10694,8 +10445,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`, e.facing ?? initialFacing(e.def));
             }
           }
-          // レゼが近接戦闘AIに移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
-          if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && !dead) {
+          // 爆弾投げAIが近接戦闘に移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
+          if (gameData.engine === 'onjReze' && e.def.ai === 'bomber' && !dead) {
             const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
             const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
             if (Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) {
@@ -11009,22 +10760,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // n（方向転換しない）：移動量からの向き更新を止めるため、今の向きをそのまま overrideDir に渡す
         const lockedFacing = playerFacingLockRef.current ? walkInst.get('player')?.dir : undefined;
         lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
-        // ── こおりの森：ジャンプ〜着地の専用3コマ（y=96〜128）へ差し替える ──
-        // 1枚目＝空中の構え（上昇・落下とも共通）、2/3枚目＝着地直後だけの着地コマ
-        // （snowForestLandFramesRef が着地の瞬間から前半/後半で2→3枚目の順に切り替わる）。
-        let snowForestJumpRef: string | undefined;
-        if (gameData.id === 'snowForest') {
+        // ── 横スクのジャンプ〜着地コマ（player.airSpriteRef / landSpriteRefs）へ差し替える ──
+        // 空中（上昇・落下とも共通）は airSpriteRef、着地直後は landSpriteRefs を
+        // LAND_POSE_FRAMES フレームの間コマ数で等分して前から順に出す（landPoseFramesRef が残りフレーム数）。
+        // イベントで見た目を差し替えている間（p.spriteRef/p.spriteUrl あり）は元のシート前提のコマなので使わない。
+        let poseRef: string | undefined;
+        if (gameData.engine === 'action' && !p.spriteRef && !p.spriteUrl) {
           if (!p.isGrounded) {
-            snowForestJumpRef = `walk:smc:u:${pData.spriteUrl}#0,96,24,32,1,0,2`;
-          } else if (snowForestLandFramesRef.current > 0) {
-            const jf = snowForestLandFramesRef.current > SNOWFOREST_LAND_FRAMES / 2 ? 1 : 2;
-            snowForestJumpRef = `walk:smc:u:${pData.spriteUrl}#${jf * 24},96,24,32,1,0,2`;
+            poseRef = pData.airSpriteRef;
+          } else if (landPoseFramesRef.current > 0 && pData.landSpriteRefs?.length) {
+            const lands = pData.landSpriteRefs;
+            const elapsed = LAND_POSE_FRAMES - landPoseFramesRef.current;
+            poseRef = lands[Math.min(lands.length - 1, Math.floor(elapsed * lands.length / LAND_POSE_FRAMES))];
           }
         }
-        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: snowForestJumpRef ?? p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
+        const poseUrl = poseRef ? hydrateUrlFromRef(poseRef) : undefined;
+        if (poseUrl) ensureImage(poseUrl);
+        drawSprite(poseRef
+          ? { emoji: pData.emoji, spriteUrl: poseUrl ?? pData.spriteUrl, spriteRef: poseRef }
+          : { emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef },
+          p.x, p.y, pData.w, drawH, 'player',
           gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? lockedFacing ?? blockedOverride));
-        // ── こおりの森：プレイヤーに寄り添う光の精霊（当たり判定なしの純粋な演出）──
-        if (gameData.id === 'snowForest') {
+        // ── プレイヤーに寄り添う光の精霊（player.companionLight。当たり判定なしの純粋な演出）──
+        if (pData.companionLight) {
           const tSec = performance.now() / 1000;
           const orbX = p.x + pData.w / 2 - 22;
           const orbY = p.y + pData.h * 0.3 + Math.sin(tSec * 2.4) * 5;
@@ -11103,8 +10861,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const talk = npcTalkRef.current;
         const { entity: e, text, startTime, wrapped } = talk;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
-        if (isUndertalePreset && shown > talk.lastShown) {
-          if (text.slice(talk.lastShown, shown).trim()) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textVoice);
+        // 文字送り音はゲームの sfx.text が設定されているときだけ（未設定なら無音）
+        if (shown > talk.lastShown) {
+          if (text.slice(talk.lastShown, shown).trim()) playSfx(gameDataRef.current.sfx?.text);
           talk.lastShown = shown;
         }
         if (shown > 0) {
@@ -11265,7 +11024,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // onjReze：ボム・飛行ボム・爆発の描画（原作 onj-reze.html の見た目を移植）
       if (gameData.engine === 'onjReze') {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        // レゼが投げる爆弾は自身のスプライト上半分を切り離したものとして描く（それ以外は従来の絵文字）
+        // 爆弾投げAI（ai='bomber'）が投げる爆弾は自身のスプライト上半分を切り離したものとして描く（それ以外は従来の絵文字）
         const drawBombVisual = (url: string | undefined, cx: number, cy: number, fallback: string) => {
           if (url) {
             ensureImage(url);
@@ -11350,14 +11109,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       ctx.restore();
 
-      // ── こおりの森：画面全体に寒色グレーディングを掛ける（乗算合成の1回きりの矩形）──
+      // ── 画面の色味（gameData.screenTint）：画面全体に乗算合成の矩形を1回だけ掛ける ──
       // ワールド描画が終わった直後・HUD/オーバーレイより前。素材そのものは着色せず、
-      // 見た目だけ動画参照の冷たいティール/紫トーンへ寄せる。
-      if (gameData.id === 'snowForest') {
+      // 見た目だけを寒色・夕焼けなどのトーンへ寄せる。
+      const tint = gameData.screenTint;
+      if (tint && tint.alpha > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'multiply';
-        ctx.globalAlpha = 0.5;
-        ctx.fillStyle = 'rgb(145,165,220)';
+        ctx.globalAlpha = Math.min(1, tint.alpha);
+        ctx.fillStyle = tint.color;
         ctx.fillRect(0, 0, PLAY_W, PLAY_H);
         ctx.restore();
       }
@@ -11888,29 +11648,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.fillStyle = '#fde68a'; ctx.fillText(`G: ${pr.gold ?? 0}`, 12, 66);
       }
 
-      // ── action 武器エネルギーゲージ ──
-      if (isPlaying && gameData.engine === 'action' && actionWeaponsRef.current.length > 1) {
-        const wIdx = actionWeaponIdxRef.current;
-        const wId = actionWeaponsRef.current[wIdx];
-        const en = actionWeaponEnergyRef.current[wId] ?? MAX_WEAPON_ENERGY;
-        const segH = 4, segW = 12, segGap = 1;
-        const segs = MAX_WEAPON_ENERGY;
-        const filled = en;
-        const gaugeH = segs * (segH + segGap);
-        const gx2 = 28, gy2 = VIEW_H / 2 - gaugeH / 2;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(gx2 - 2, gy2 - 2, segW + 4, gaugeH + 4);
-        for (let i = 0; i < segs; i++) {
-          const sy = gy2 + (segs - 1 - i) * (segH + segGap);
-          ctx.fillStyle = i < filled ? '#ff8800' : '#2a1a00';
-          ctx.fillRect(gx2, sy, segW, segH);
-        }
-        const wItem = (gameDataRef.current.items ?? []).find(it => it.id === wId);
-        ctx.fillStyle = '#ffaa44'; ctx.font = `bold 8px ${getPixelFontFamily()}`; ctx.textAlign = 'left';
-        ctx.fillText(wItem?.emoji ?? wId.slice(0, 3), gx2, gy2 - 6);
-      }
-
-      // ── action ライフゲージ（ロックマン風縦型） ──
+      // ── action ライフゲージ（縦型） ──
       if (isPlaying && gameData.engine === 'action') {
         const z = onjRezeHpRef.current;
         const segH = 4, segW = 12, segGap = 1;
@@ -12125,7 +11863,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 画像が優先されるので、絵文字を書くと同時に画像参照を外す（外さないと絵文字が見えない）。
     if (res.emoji !== undefined) {
       const emoji = res.emoji;
-      if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, emoji, spriteRef: undefined, spriteUrl: undefined } }));
+      if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, emoji, spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }));
       else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, emoji, spriteRef: undefined, spriteUrl: undefined } : o) })); }
       else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, emoji, spriteRef: undefined, spriteUrl: undefined }));
       else if (target.t === 'emojiField') { emojiPickCallbackRef.current?.(emoji); emojiPickCallbackRef.current = null; }
@@ -12139,7 +11877,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       return;
     }
-    if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url } }));
+    // 空中/着地コマ（airSpriteRef / landSpriteRefs）は元のシート上のコマを指すので、見た目を替えたら外す
+    if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url, airSpriteRef: undefined, landSpriteRefs: undefined } }));
     else if (target.t === 'cmdChangeSprite' || target.t === 'cmdImage' || target.t === 'cmdBgm' || target.t === 'cmdSfx') { if (cmdPickCallbackRef.current) cmdPickCallbackRef.current(res); }
     else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, spriteRef: res.ref, spriteUrl: res.url } : o) })); }
     else if (target.t === 'mapBg') { ensureImage(res.url); setGameData(p => ({ ...p, mapBgRef: res.ref, mapBgUrl: res.url })); }
@@ -12218,7 +11957,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     }
     else if (target.t === 'playerMcSkin') {
-      setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: res.url, spriteRef: undefined, spriteUrl: undefined } }));
+      setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: res.url, spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }));
     }
     else if (target.t === 'effectImage') {
       ensureImage(res.url);
@@ -12306,69 +12045,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (selectedTileId === id) setSelectedTileId(0);
   };
 
-  const buildManifest = (): GameManifestDraft => ({
-    preset: gameData.id, engine: gameData.engine, name: title.trim() || gameData.name,
-    gravity: gameData.gravity, friction: gameData.friction, iceSlideSpeed: gameData.iceSlideSpeed,
-    player: {
-      emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
-      jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
-      start: gameData.player.start, spriteRef: gameData.player.spriteRef,
-      bombCount: gameData.player.bombCount,
-      bombSpellName: gameData.player.bombSpellName,
-      bombCutinCharName: gameData.player.bombCutinCharName,
-      bombCutinImageUrl: gameData.player.bombCutinImageUrl,
-      bombCutinImageX: gameData.player.bombCutinImageX,
-      bombCutinImageY: gameData.player.bombCutinImageY,
-      bombCutinScale: gameData.player.bombCutinScale,
-    },
-    tiles: Object.fromEntries(Object.entries(gameData.tiles).map(([k, t]) => [k, {
-      name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
-      // imageRef がない場合（RPGEN インポート等で直 URL が入っている場合）は imageUrl も保存する。
-      // ロード時は hydrateUrlFromRef で imageRef → imageUrl に変換されるが、
-      // imageRef がなければ imageUrl をそのまま使う。
-      imageUrl: t.imageRef ? undefined : t.imageUrl,
-      warpSceneId: t.warpSceneId, warpEntryCol: t.warpEntryCol, warpEntryRow: t.warpEntryRow, damageAmount: t.damageAmount,
-      touchRetrigger: t.touchRetrigger,
-    }])),
-    map: gameData.map,
-    overlayMap: gameData.overlayMap,
-    overheadMap: gameData.overheadMap,
-    objects: gameData.objects.map(({ spriteUrl, ...o }) => o),
-    mapBgRef: gameData.mapBgRef,
-    scroll: gameData.scroll,
-    bgm: gameData.bgm?.ref || 'none',
-    battleBgm: gameData.battleBgm?.ref,
-    bossBgm: gameData.bossBgm?.ref,
-    mmlAudioMode: gameData.mmlAudioMode,
-    sfx: Object.fromEntries(Object.entries(gameData.sfx).map(([k, v]) => [k, v?.ref])) as Partial<Record<SfxTrigger, string>>,
-    switches: gameData.switches,
-    items: gameData.items,
-    weapons: gameData.weapons,
-    armors: gameData.armors,
-    effects: gameData.effects?.map(ef => ({
-      id: ef.id, name: ef.name, imageRef: ef.imageRef,
-      // url: 参照は自己解決可能なので imageUrl は保存しない（post: の場合のみキャッシュとして保存）。
-      imageUrl: ef.imageRef.startsWith('url:') ? undefined : ef.imageUrl,
-      frameCount: ef.frameCount, fps: ef.fps, sfx: ef.sfx,
-    })),
-    phases: gameData.phases,
-    titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
-    ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
-    deathScreen: gameData.deathScreen,
-    battle: gameData.battle,
-    layout25d: gameData.layout25d,
-    scenes: gameData.scenes?.map(s => ({
-      id: s.id, name: s.name, exits: s.exits,
-      map: s.map,
-      overlayMap: s.overlayMap,
-      overheadMap: s.overheadMap,
-      objects: s.objects.map(({ spriteUrl, ...o }) => o),
-      bgm: s.bgm?.ref,
-      randomEncounters: s.randomEncounters,
-      encounterGroups: s.encounterGroups,
-      encounterRate: s.encounterRate,
-    })),
-  });
+  /** 保存用マニフェスト（投稿・履歴・自動保存・JSONエクスポート）。変換本体は game-manifest.ts。
+   *  シーン制のゲームでは、編集中のシーンの map/objects は flushSceneEdits（シーン切替・プレイ開始）まで
+   *  scenes へ書き戻されない。ここで写しの上で書き戻してから保存する（しないと、塗ったばかりのタイルが
+   *  投稿に入らず、閲覧者は scenes から組んだ古いマップを遊ぶ）。トップレベルの map/objects には、
+   *  読み込み時に開くシーン（editSceneIdx=0）に合わせてシーン0を書く（シーン2を開いたまま保存すると、
+   *  読み込み後にシーン2の中身がシーン0として表示され、次のシーン切替でシーン0へ上書きされていた）。 */
+  const buildManifest = (): GameManifestDraft => {
+    const scenes = gameData.scenes;
+    if (!scenes?.length) return buildGameManifest(gameData, title);
+    const merged = scenes.map((s, i) =>
+      i === editSceneIdx ? { ...s, map: gameData.map, overlayMap: gameData.overlayMap, overheadMap: gameData.overheadMap, objects: gameData.objects } : s
+    );
+    const s0 = merged[0];
+    return buildGameManifest({
+      ...gameData,
+      scenes: merged,
+      map: s0.map,
+      overlayMap: s0.overlayMap ?? emptyGridLike(s0.map),
+      overheadMap: s0.overheadMap ?? emptyGridLike(s0.map),
+      objects: s0.objects,
+    }, title);
+  };
 
   const handleSave = () => {
     const manifest = buildManifest();
@@ -12591,8 +12289,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return;
       }
 
-      const preset = (manifest.preset as PresetId) || 'onjReze';
-      const base = clone(PRESETS[preset]);
+      // RPGEN の取り込みはどの見本とも無関係なので、engine（rpg）のまっさらテンプレートを土台にする
+      // （見本を土台にすると、その見本のアイテム・効果音・タイトル画面などが混ざる）。presetId は 'blank'。
+      const base = createEngineTemplate(manifest.engine ?? 'rpg');
       const blackBgRef = 'tile:#000000';
       const blackBgUrl = colorToDataUrl('#000000');
       const data: PresetData = {
@@ -12601,18 +12300,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         name: manifest.name,
         gravity: manifest.gravity,
         friction: manifest.friction,
-        player: manifest.player,
+        player: { ...manifest.player, airSpriteRef: manifest.player.airSpriteRef ?? undefined, landSpriteRefs: manifest.player.landSpriteRefs ?? undefined },
         tiles: manifest.tiles,
         map: manifest.map,
         overlayMap: manifest.overlayMap ?? createBlankGrid(manifest.map),
         overheadMap: manifest.overheadMap ?? createBlankGrid(manifest.map),
         objects: manifest.objects,
         scenes: manifest.scenes as unknown as SceneDef[],
+        switches: manifest.switches ?? base.switches,
         mapBgRef: blackBgRef,
         mapBgUrl: blackBgUrl,
         bgm: hydrateBgmFromRef(manifest.bgm),
+        titleScreen: base.titleScreen ? { ...base.titleScreen, heading: manifest.name } : undefined,
       };
-      applyPresetData(preset as PresetId, data, manifest.name);
+      applyPresetData('blank', data, manifest.name);
+      introChoiceRef.current = null; // ギャラリーで選んだゲームではなくなる（D16 で数えない）
       if (manifest.player?.start) {
         const eng = engineRef.current;
         eng.player.x = manifest.player.start.x;
@@ -12842,6 +12544,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return () => window.removeEventListener('keydown', onKey);
   }, [isPlaying, playOnly, undoEdit, redoEdit]);
 
+  /** mmo3d の設定を部分更新する（既存の掲示板・ダミー・障害物・NPC 等は必ず残す）。 */
+  const updMmo3d = (patch: Partial<NonNullable<PresetData['mmo3dConfig']>>) =>
+    setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, ...patch } }));
   const updObj = (patch: Partial<ObjectDef>) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, ...patch } : o) })); };
   const delObj = () => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
   const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
@@ -13244,7 +12949,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             {/* プリセット選択はヘッダーの横幅を食うため設定メニュー（⚙）へ移動した。
                 いま何を編集中かだけがひと目で分かるように、名前はテキストで残す。 */}
             {!isPlaying && !playOnly && (
-              <span className="text-[11px] text-gray-400 truncate">{PRESETS[presetId].name}</span>
+              <span className="text-[11px] text-gray-400 truncate">{presetLabel}</span>
             )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -13661,15 +13366,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* まっさらにする */}
                     <div className="bg-red-950/40 border border-red-800/60 rounded p-3 space-y-2">
                       <div className="font-bold text-red-300 flex items-center gap-1.5">
-                        <Trash2 size={13} />まっさらにする（現在：{PRESETS[presetId].name}）
+                        <Trash2 size={13} />まっさらにする（現在：{presetLabel}）
                       </div>
                       <p className="text-[10px] text-gray-400 leading-relaxed">
-                        エンジンはそのまま、マップ・タイル・オブジェクト・イベント・戦闘・BGMをすべて消して空の状態から作り直します。プリセットの初期データには戻りません。
+                        エンジン（{ENGINE_LABELS[gameData.engine] ?? gameData.engine}）はそのまま、マップ・タイル・オブジェクト・イベント・戦闘・BGMをすべて消して、そのエンジンのまっさらな状態から作り直します。見本の初期データには戻りません。
                       </p>
                       <button
                         onClick={() => {
                           customConfirm(
-                            `現在の「${PRESETS[presetId].name}」の編集内容（マップ・タイル・オブジェクト・イベント・戦闘・BGM）をすべて消して、まっさらにしますか？\n\nCtrl+Z（元に戻す）で直前の状態へ戻せますが、確実に戻せる保証はないため、大切なデータは先にエクスポートしてください。`,
+                            `現在の「${presetLabel}」の編集内容（マップ・タイル・オブジェクト・イベント・戦闘・BGM）をすべて消して、まっさらにしますか？\n\nCtrl+Z（元に戻す）で直前の状態へ戻せますが、確実に戻せる保証はないため、大切なデータは先にエクスポートしてください。`,
                             () => {
                               pushUndo();
                               resetToBlank();
@@ -13688,13 +13393,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* プリセットを初期ロード */}
                     <div className="space-y-1.5">
                       <div className="font-bold text-gray-300 flex items-center gap-1.5">
-                        <Download size={13} />プリセットを初期ロード
+                        <Download size={13} />見本を初期ロード
                       </div>
                       <select
                         value={presetId}
                         onChange={e => {
-                          const id = e.target.value as PresetId;
-                          if (id === presetId) return;
+                          const id = e.target.value;
+                          if (id === presetId || !isSamplePresetId(id)) return;
                           customConfirm(
                             `「${PRESETS[id].name}」を初期データで読み込みますか？\n※編集中の内容は破棄されます`,
                             () => {
@@ -13707,13 +13412,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         }}
                         className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none rounded"
                       >
+                        {/* まっさらから作ったゲーム（やギャラリーに出さない mmo3d）は並びに無いので、
+                            選択肢に無い値にならないよう表示だけ出す */}
+                        {!(PRESET_ORDER as PresetId[]).includes(presetId) && (
+                          <option value={presetId} disabled>-- {presetLabel}を編集中 --</option>
+                        )}
                         {PRESET_ORDER.map(pid => (
                           <option key={pid} value={pid}>
                             {PRESETS[pid].name}{pid === presetId ? '（現在選択中）' : ''}
                           </option>
                         ))}
                       </select>
-                      <p className="text-[10px] text-gray-500 leading-tight">選んだゲームの初期状態に丸ごと置き換えます</p>
+                      <p className="text-[10px] text-gray-500 leading-tight">選んだ見本ゲームの初期状態に丸ごと置き換えます</p>
                     </div>
 
                     {/* 現データ引継ぎエンジン変換 */}
@@ -13724,13 +13434,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       <select
                         value=""
                         onChange={e => {
-                          const id = e.target.value as PresetId;
-                          if (!id || id === presetId) return;
+                          const engine = e.target.value as TemplateEngine;
+                          if (!engine || !TEMPLATE_ENGINES.includes(engine) || engine === gameData.engine) return;
                           customConfirm(
-                            `「${PRESETS[id].name}」エンジンへ変換しますか？\nタイトル・見た目・BGM・マップを引き継ぎます（2D⇄3D変換は一部が近似変換されます）`,
+                            `「${ENGINE_LABELS[engine]}」エンジンへ変換しますか？\nタイトル・見た目・BGM・マップ・アイテムなどを引き継ぎます（2D⇄3D変換は一部が近似変換されます）`,
                             () => {
                               pushUndo();
-                              switchEngine(id);
+                              switchEngine(engine);
                               setGameSwitchOpen(false);
                             },
                             'エンジン変換の確認'
@@ -13739,9 +13449,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-amber-200 outline-none rounded font-medium"
                       >
                         <option value="" disabled>-- 変換先のエンジンを選択 --</option>
-                        {PRESET_ORDER.filter(pid => pid !== presetId).map(pid => (
-                          <option key={pid} value={pid}>
-                            ➡️ {PRESETS[pid].name} エンジンへ変換
+                        {TEMPLATE_ENGINES.filter(engine => engine !== gameData.engine).map(engine => (
+                          <option key={engine} value={engine}>
+                            ➡️ {ENGINE_LABELS[engine]} エンジンへ変換
                           </option>
                         ))}
                       </select>
@@ -13814,9 +13524,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <p className="text-[10px] text-white/55 mt-0.5">ゲームを選んで改造しよう</p>
                 </div>
 
-                {/* テキストリスト */}
+                {/* テキストリスト：見本ゲーム → まっさらから作る（エンジン別テンプレート） */}
                 <div className="flex-1 overflow-y-auto px-3 py-2">
                   <div className="flex flex-col gap-1.5 max-w-sm mx-auto">
+                    <p className="text-[9px] font-bold tracking-[0.2em] text-white/40 px-1">見本ゲーム</p>
                     {PRESET_ORDER.map(id => (
                       <button key={id} onClick={() => previewPresetInIntro(id)}
                         className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-left transition ${id === presetId
@@ -13830,6 +13541,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         {id === presetId && <span className="text-[9px] text-white/70 shrink-0">選択中</span>}
                       </button>
                     ))}
+
+                    <p className="text-[9px] font-bold tracking-[0.2em] text-white/40 px-1 mt-3">まっさらから作る</p>
+                    {TEMPLATE_ENGINES.map(engine => {
+                      const selected = presetId === 'blank' && gameData.engine === engine;
+                      return (
+                        <button key={engine} onClick={() => previewTemplateInIntro(engine)}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border border-dashed text-left transition ${selected
+                              ? 'bg-white/15 border-white/40'
+                              : 'bg-transparent border-white/15 active:bg-white/10'
+                            }`}>
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-bold text-[12px] text-white/90 leading-tight truncate">{ENGINE_LABELS[engine]}</span>
+                            <span className="block text-[10px] text-white/45 mt-0.5 truncate">{ENGINE_TAGLINES[engine]}</span>
+                          </span>
+                          {selected && <span className="text-[9px] text-white/70 shrink-0">選択中</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -14440,20 +14169,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const curMember = bd.party?.[dtTurnIdx];
               const isSpellUser = (curMember?.spells ?? []).length > 0;
               const curSpells = availableSpells(curMember?.spells ?? [], dtTurnIdx, progressRef.current.level);
-              // 呪文持ちメンバー（スージー/ラルセイ）の2番目のコマンドは「まほう」＝自分の呪文だけが並ぶ。
-              // 呪文を持たないメンバー（クリス）だけが「こうどう」＝共通のACT技を使える（原作準拠：
-              // tlDR Engine でも ACT は item_s_act としてクリスの spells 枠に入っている構造）。
+              // 呪文持ちメンバーの2番目のコマンドは「まほう」＝自分の呪文だけが並ぶ。
+              // 呪文を持たないメンバーだけが「こうどう」＝共通のACT技を使える。
               const curMoves = isSpellUser ? [] : availableMoves(bd.moves, progressRef.current.level);
               const memberColor = (i: number) => bd.party?.[i]?.color ?? '#ffffff';
-              // コマンド5種（tlDR Engine のボタンスプライト。frame0=通常/frame1=選択中）。
-              // 2番目は呪文持ちなら POWER（まほう）、それ以外は ACT（こうどう）の絵柄になる。
+              // コマンド5種（絵文字アイコンの小さな四角ボタン。選択中は黄色く光る）。
+              // 2番目は呪文持ちなら「まほう」、それ以外は「こうどう」のアイコンになる。
               const cmds = [
-                { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, sel: undertaleMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
-                { anim: isSpellUser ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: isSpellUser ? 'まほう' : bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
-                { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: undertaleMenu === 'item', onClick: () => canMenu && setUndertaleMenu(m => m === 'item' ? 'root' : 'item') },
-                { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: undertaleMenu === 'mercy', mercy: true, onClick: () => canMenu && setUndertaleMenu(m => m === 'mercy' ? 'root' : 'mercy') },
-                { anim: TLDR_UI_SPRITES.btDefend, label: 'まもる', onClick: () => canMenu && doDefend() },
-              ] as { anim: BattleSpriteAnim; label: string; sel?: boolean; mercy?: boolean; onClick: () => void }[];
+                { icon: '⚔️', label: bd.labels.attack, sel: undertaleMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
+                { icon: isSpellUser ? '✨' : '💬', label: isSpellUser ? 'まほう' : bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
+                { icon: '🎒', label: bd.labels.item ?? 'アイテム', sel: undertaleMenu === 'item', onClick: () => canMenu && setUndertaleMenu(m => m === 'item' ? 'root' : 'item') },
+                { icon: '🕊️', label: bd.labels.mercy ?? 'みのがす', sel: undertaleMenu === 'mercy', mercy: true, onClick: () => canMenu && setUndertaleMenu(m => m === 'mercy' ? 'root' : 'mercy') },
+                { icon: '🛡️', label: 'まもる', onClick: () => canMenu && doDefend() },
+              ] as { icon: string; label: string; sel?: boolean; mercy?: boolean; onClick: () => void }[];
               return (
                 <div className="flex flex-col bg-black font-pixel select-none overflow-hidden"
                   style={{ ...playOverlayFrame, backgroundImage: 'repeating-linear-gradient(0deg, rgba(147,51,234,0.12) 0 1px, transparent 1px 24px), repeating-linear-gradient(90deg, rgba(147,51,234,0.12) 0 1px, transparent 1px 24px)' }}>
@@ -14557,8 +14285,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   </div>
                                 )}
                                 {fReady && (
-                                  <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="" draggable={false}
-                                    className="absolute -top-1 -right-1 h-4 w-auto z-10" style={{ imageRendering: 'pixelated' }} />
+                                  <span aria-hidden className="absolute -top-1.5 -right-1.5 z-10 text-[15px] leading-none text-yellow-300"
+                                    style={{ textShadow: '0 0 3px #000, 0 0 1px #000' }}>★</span>
                                 )}
                                 {targeting && <span className="absolute -left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pulse z-10">❤</span>}
                                 {battleEffects.filter(be => be.foeIdx === i).map(be => (
@@ -14605,10 +14333,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             {active && canMenu && cmds.map((c, j) => {
                               const selected = c.sel || (undertaleMenu === 'root' && undertaleRootCursor === j);
                               return (
-                                <button key={j} onClick={() => { setUndertaleRootCursor(j); c.onClick(); }} title={c.label} className="block shrink-0">
-                                  <img src={c.anim.frames[selected ? 1 : 0]} alt={c.label} draggable={false}
-                                    className={`h-7 w-auto ${c.mercy && ready && !selected ? 'animate-pulse' : ''}`}
-                                    style={{ imageRendering: 'pixelated' }} />
+                                <button key={j} onClick={() => { setUndertaleRootCursor(j); c.onClick(); }} title={c.label} aria-label={c.label}
+                                  className={`grid place-items-center shrink-0 h-7 w-7 border-2 text-[15px] leading-none ${c.mercy && ready && !selected ? 'animate-pulse' : ''}`}
+                                  style={{
+                                    borderColor: selected ? '#fde047' : c.mercy && ready ? '#facc15' : '#f97316',
+                                    background: selected ? 'rgba(253,224,71,0.25)' : '#000',
+                                    boxShadow: selected ? '0 0 6px rgba(253,224,71,0.7)' : undefined,
+                                    filter: selected ? undefined : 'saturate(0.6)',
+                                  }}>
+                                  <span aria-hidden>{c.icon}</span>
                                 </button>
                               );
                             })}
@@ -14732,7 +14465,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <div className="w-10 h-1.5 overflow-hidden bg-gray-700">
                                   <div className={`h-full ${fHpPct <= 30 ? 'bg-red-500' : 'bg-lime-400'}`} style={{ width: `${fHpPct}%` }} />
                                 </div>
-                                {fSpareReady && <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="みのがし可" draggable={false} className="h-3 w-auto" style={{ imageRendering: 'pixelated' }} />}
+                                {fSpareReady && <span role="img" aria-label="みのがし可" className="text-[12px] leading-none text-yellow-300">★</span>}
                               </span>
                             </button>
                           );
@@ -15441,7 +15174,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         <li>ジャンプ … [Space] / [Z]</li>
                         <li>ショット / 攻撃 … [X]</li>
                         <li>ダッシュ … [Shift] / [C]</li>
-                        {gameData.id === 'rockman' && <li>武器切替 … [Q] / [E]</li>}
                       </>
                     )}
 
@@ -15750,10 +15482,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </optgroup>
                   <optgroup label="設定">
                     {([
-                      ...(gameData.engine !== 'yume25d' ? [['mapSettings', 'マップ設定（背景・サイズ・地形）']] : []),
+                      ...(gameData.engine !== 'yume25d' ? [['mapSettings', 'マップ設定（背景・演出・サイズ・地形）']] : []),
                       ...(gameData.engine !== 'touhou' ? [['event', 'イベント編集']] : []),
                       ['char', 'キャラ'],
-                      ...(gameData.battle ? [['battle', '戦闘'], ['character', 'キャラクター']] : []),
+                      // 戦闘タブは rpg エンジンなら戦闘が無くても出す（中の「戦闘を有効にする」で作る）
+                      ...(gameData.battle || gameData.engine === 'rpg' ? [['battle', '戦闘']] : []),
+                      ...(gameData.battle ? [['character', 'キャラクター']] : []),
                       ['item', 'アイテム定義'],
                       ['weapon', '武器'],
                       ['armor', '防具'],
@@ -16098,25 +15832,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {editorTab === 'map' && gameData.engine === 'mmo3d' && (
                   <Mmo3dEditorPanel
                     renderer={gameData.mmo3dConfig?.renderer ?? 'three'}
-                    onRendererChange={(renderer) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer, boardPostId: prev.mmo3dConfig?.boardPostId, pmxUrl: prev.mmo3dConfig?.pmxUrl, vmdUrl: prev.mmo3dConfig?.vmdUrl } }))}
+                    onRendererChange={(renderer) => updMmo3d({ renderer })}
                     boardPostId={gameData.mmo3dConfig?.boardPostId ?? ''}
-                    onBoardPostIdChange={(boardPostId) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boardPostId: boardPostId || undefined } }))}
+                    onBoardPostIdChange={(boardPostId) => updMmo3d({ boardPostId: boardPostId || undefined })}
                     boards={gameData.mmo3dConfig?.boards ?? []}
-                    onBoardsChange={(boards) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boards } }))}
+                    onBoardsChange={(boards) => updMmo3d({ boards })}
                     dummies={gameData.mmo3dConfig?.dummies ?? []}
-                    onDummiesChange={(dummies) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, dummies } }))}
+                    onDummiesChange={(dummies) => updMmo3d({ dummies })}
                     npcs={gameData.mmo3dConfig?.npcs ?? []}
-                    onNpcsChange={(npcs) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, npcs } }))}
+                    onNpcsChange={(npcs) => updMmo3d({ npcs })}
                     obstacles={gameData.mmo3dConfig?.obstacles ?? []}
-                    onObstaclesChange={(obstacles) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, obstacles } }))}
+                    onObstaclesChange={(obstacles) => updMmo3d({ obstacles })}
                     pmxUrl={gameData.mmo3dConfig?.pmxUrl ?? ''}
-                    onPmxUrlChange={(pmxUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, pmxUrl: pmxUrl || undefined } }))}
+                    onPmxUrlChange={(pmxUrl) => updMmo3d({ pmxUrl: pmxUrl || undefined })}
                     vmdUrl={gameData.mmo3dConfig?.vmdUrl ?? ''}
-                    onVmdUrlChange={(vmdUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdUrl: vmdUrl || undefined } }))}
+                    onVmdUrlChange={(vmdUrl) => updMmo3d({ vmdUrl: vmdUrl || undefined })}
                     vmdWalkUrl={gameData.mmo3dConfig?.vmdWalkUrl ?? ''}
-                    onVmdWalkUrlChange={(vmdWalkUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdWalkUrl: vmdWalkUrl || undefined } }))}
+                    onVmdWalkUrlChange={(vmdWalkUrl) => updMmo3d({ vmdWalkUrl: vmdWalkUrl || undefined })}
                     vmdRunUrl={gameData.mmo3dConfig?.vmdRunUrl ?? ''}
-                    onVmdRunUrlChange={(vmdRunUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdRunUrl: vmdRunUrl || undefined } }))}
+                    onVmdRunUrlChange={(vmdRunUrl) => updMmo3d({ vmdRunUrl: vmdRunUrl || undefined })}
                   />
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && gameData.engine !== 'mmo3d' && (
@@ -16183,6 +15917,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <option value="trap">トラップ</option>
                                 <option value="item">アイテム</option>
                                 <option value="grass">草むら</option>
+                                <option value="ladder">アクション: はしご（上下キーで登り降り）</option>
+                                <option value="oneway">アクション: すり抜け床（下から通れて上に乗れる）</option>
+                                <option value="destructible">アクション: 壊せるブロック（下から叩くと壊れる）</option>
+                                <option value="checkpoint">アクション: チェックポイント（ミス後の復帰地点）</option>
                                 <option value="warp">システム: シーン切替床</option>
                                 <option value="damage">システム: どく沼/ダメージ床</option>
                                 <option value="ice-up">システム: つるつる床（↑）</option>
@@ -16329,6 +16067,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       )}
                     </div>
+
+                    {/* ── 画面の演出（色味・光の精霊）：どちらもデータ（screenTint / player.companionLight）として保存される ── */}
+                    {gameData.engine !== 'mmo3d' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-gray-300">画面の演出</p>
+                        {gameData.screenTint ? (
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                            <span className="shrink-0">色味</span>
+                            <input type="color" value={/^#[0-9a-f]{6}$/i.test(gameData.screenTint.color) ? gameData.screenTint.color : '#ffffff'}
+                              onChange={e => { const color = e.target.value; setGameData(p => p.screenTint ? { ...p, screenTint: { ...p.screenTint, color } } : p); }}
+                              className="w-9 h-9 rounded-lg border border-gray-700 bg-transparent cursor-pointer shrink-0" />
+                            <input type="range" min={0.05} max={1} step={0.05} value={gameData.screenTint.alpha}
+                              onChange={e => { const alpha = Number(e.target.value); setGameData(p => p.screenTint ? { ...p, screenTint: { ...p.screenTint, alpha } } : p); }}
+                              className="flex-1 min-w-0 accent-blue-500" />
+                            <span className="w-9 text-right shrink-0">{Math.round(gameData.screenTint.alpha * 100)}%</span>
+                            <button onClick={() => setGameData(p => ({ ...p, screenTint: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setGameData(p => ({ ...p, screenTint: { color: '#91a5dc', alpha: 0.4 } }))}
+                            className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />画面に色味を付ける</button>
+                        )}
+                        <p className="text-[10px] text-gray-500">画面全体に乗算で色を重ねます（青で冬の空気、橙で夕方など）。素材そのものは変わりません。</p>
+                        <label className="flex items-center gap-2 text-[10px] text-gray-400">
+                          <input type="checkbox" checked={!!gameData.player.companionLight}
+                            onChange={e => { const on = e.target.checked; setGameData(p => ({ ...p, player: { ...p.player, companionLight: on || undefined } })); }}
+                            className="accent-blue-500" />
+                          プレイヤーに光の精霊を付き添わせる
+                        </label>
+                      </div>
+                    )}
 
                     {/* ── マップサイズ（自由拡張・東方以外）── */}
                     {gameData.engine !== 'touhou' && (
@@ -16859,6 +16627,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 onChange={e => updObj({ through: e.target.checked || undefined })} />
                               壁をすり抜ける（through）
                             </label>
+                            {gameData.engine === 'onjReze' && (
+                              <label className="block text-[10px] text-gray-400">特殊AI
+                                <select value={selObj.ai ?? ''} onChange={e => updObj({ ai: (e.target.value || undefined) as ObjectAi | undefined })}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                                  <option value="">なし（挙動のとおりに動く）</option>
+                                  {Object.entries(OBJECT_AI_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                </select>
+                              </label>
+                            )}
                             {gameData.battle && (
                               <>
                                 <div className="grid grid-cols-3 gap-2">
@@ -16886,7 +16663,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   {/* 1. 通常攻撃の弾幕 (undertale / deltarune のみ) */}
                                   {isDodgeBattleStyle(gameData.battle.style) && (
                                     <>
-                                      <label className="block text-[10px] text-gray-400">UNDERTALE移動モード（既定）
+                                      <label className="block text-[10px] text-gray-400">ハートの移動モード（既定）
                                         <select value={selObj.undertaleMode ?? 'red'} onChange={e => updObj({ undertaleMode: e.target.value as UndertaleMode })}
                                           className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
                                           <option value="red">🔴 レッド（自由移動）</option>
@@ -16953,7 +16730,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                           </div>
                                           {isDodgeBattleStyle(gameData.battle?.style) && !m.heal && (
                                             <>
-                                              <label className="block text-[10px] text-gray-400">UNDERTALE移動モード（この技専用・省略時は既定値）
+                                              <label className="block text-[10px] text-gray-400">ハートの移動モード（この技専用・省略時は既定値）
                                                 <select value={m.undertaleMode ?? ''} onChange={e => {
                                                   const copy = [...(selObj.moves ?? [])];
                                                   const val = e.target.value;
@@ -17130,7 +16907,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                         key: Date.now(), mode: 'player',
                                         charName: card.cutinCharName ?? selObj.name ?? selObj.emoji,
                                         spellName: card.name,
-                                        imageUrl: card.cutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png',
+                                        imageUrl: card.cutinImageUrl,
                                         imageX: card.cutinImageX ?? 0, imageY: card.cutinImageY ?? -50, imageScale: card.cutinScale ?? 1,
                                         ...overrides,
                                       });
@@ -17145,7 +16922,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                           <input value={card.cutinImageUrl ?? ''}
                                             onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })}
                                             onFocus={() => firePreview()}
-                                            placeholder={'https://i.imgur.com/4M92pLV.png'}
+                                            placeholder={'立ち絵のURL（空欄＝立ち絵なし）'}
                                             className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
                                           <div className="flex gap-1 items-center flex-wrap">
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
@@ -17233,7 +17010,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <span className="text-[9px] text-gray-500">%（空欄=連続移動）</span>
                               </div>
                               <span className="block mt-0.5 text-[9px] text-gray-500">
-                                指定すると DQ 風に一定間隔で判定し、当たったときだけ1マス歩きます。
+                                指定すると一定間隔で判定し、当たったときだけ1マス歩きます（見下ろし型RPGの村人のような動き）。
                                 挙動は 静止=向きだけ変える／左右往復=左右ランダム／上下往復=上下ランダム になります。
                               </span>
                             </label>
@@ -17575,7 +17352,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <div>
                       <label className="block text-[11px] text-gray-400 mb-1">見た目</label>
                       <div className="flex items-center gap-2">
-                        <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined } }))}
+                        <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }))}
                           className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-center text-xl" />
                         <button onClick={() => setPicker({ mode: 'image', target: { t: 'player' } })}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300"><ImageIcon size={13} />画像/歩行グラを参照</button>
@@ -17584,7 +17361,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
                           <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} />
                           <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
-                          <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                          <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
                       )}
                     </div>
@@ -17861,10 +17638,56 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   );
                 })()}
 
+                {/* ── BATTLE（戦闘がまだ無い）：rpg エンジンで「戦闘を有効にする」 ── */}
+                {editorTab === 'battle' && !gameData.battle && (
+                  <div className="space-y-3">
+                    <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                      <p className="text-[10px] text-gray-400 leading-relaxed">
+                        このゲームにはまだ戦闘がありません。有効にすると、フィールドで敵に触れたとき（とランダムエンカウント）にターン制の戦闘へ入ります。
+                        戦闘スタイル（コマンド戦闘・弾幕よけ・パーティ戦闘など）は有効にしたあとで選べます。
+                      </p>
+                      {gameData.engine !== 'rpg' && (
+                        <p className="text-[10px] text-amber-300/80">※ 戦闘は RPG エンジンでだけ動きます。</p>
+                      )}
+                      <button
+                        onClick={() => {
+                          pushUndo();
+                          setGameData(p => ({ ...p, battle: createDefaultBattleConfig() }));
+                        }}
+                        className="w-full px-3 py-2 rounded text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition flex items-center justify-center gap-1.5"
+                      >
+                        <Sword size={13} />戦闘を有効にする
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── BATTLE（RPG戦闘設定） ── */}
                 {editorTab === 'battle' && gameData.battle && (
                   <div className="space-y-4">
-                    <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
+                      <button
+                        onClick={() => {
+                          customConfirm(
+                            '戦闘を無効にしますか？\n\n戦闘設定（ステータス・技・パーティ・ボスなど）が消えます。Ctrl+Z（元に戻す）で戻せます。',
+                            () => {
+                              pushUndo();
+                              setGameData(p => ({ ...p, battle: undefined }));
+                            },
+                            '戦闘を無効にする',
+                            { confirmText: '無効にする', danger: true }
+                          );
+                        }}
+                        className="shrink-0 px-2 py-1 rounded text-[10px] text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition"
+                      >
+                        戦闘を無効にする
+                      </button>
+                    </div>
+                    {gameData.engine !== 'rpg' && (
+                      <p className="text-[10px] text-amber-300/80">※ 戦闘は RPG エンジンでだけ動きます（いまのエンジンでは設定が保持されるだけです）。</p>
+                    )}
 
                     {/* 1. 基本ステータス */}
                     <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
@@ -17907,12 +17730,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const style = e.target.value as BattleConfig['style'];
                           setGameData(p => ({ ...p, battle: { ...p.battle!, style } }));
                         }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
-                          <option value="classic">コマンド戦闘（ドラクエ風）</option>
-                          <option value="undertale">ハート弾幕よけ（アンダーテール風）</option>
-                          <option value="deltarune">パーティ×弾幕よけ（デルタルーン風）</option>
-                          <option value="ff">サイドビュー パーティ戦闘（FF風）</option>
-                          <option value="mother3">ローリングHP戦闘（MOTHER3風）</option>
-                          <option value="milky">行動値カウント戦闘（ミルキークエスト風）</option>
+                          <option value="classic">コマンド戦闘（正面視点）</option>
+                          <option value="undertale">弾幕よけ（ひとり）</option>
+                          <option value="deltarune">弾幕よけ（パーティ）</option>
+                          <option value="ff">サイドビュー パーティ戦闘</option>
+                          <option value="mother3">ローリングHP戦闘</option>
+                          <option value="milky">行動値カウント戦闘（CTB）</option>
                         </select>
                       </label>
                       <label className="block text-[10px] text-gray-400">エンカウント演出
@@ -17921,7 +17744,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const encounterEffect = v ? (v as EncounterEffect) : undefined;
                           setGameData(p => ({ ...p, battle: { ...p.battle!, encounterEffect } }));
                         }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
-                          <option value="">プリセット既定</option>
+                          <option value="">既定（演出なし）</option>
                           {ENCOUNTER_EFFECT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                       </label>
@@ -17935,6 +17758,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             milky: '行動値が0になった者から行動するカウント制。強い技ほど次の行動が遅れる。敵はHPが減ると疲れた表情に。',
                           }[gameData.battle.style as string]}
                         </p>
+                      )}
+                      {isDodgeBattleStyle(gameData.battle.style) && (
+                        <label className="flex items-center gap-2 text-[10px] text-gray-400 cursor-pointer">
+                          <input type="checkbox" checked={gameData.battle.dodgePointer !== false} onChange={e => {
+                            const dodgePointer = e.target.checked ? undefined : false;
+                            setGameData(p => ({ ...p, battle: { ...p.battle!, dodgePointer } }));
+                          }} />
+                          弾幕よけでハートをタッチ／マウスで直接動かせる（オフ＝方向キーだけ）
+                        </label>
                       )}
                     </div>
 
@@ -18153,7 +17985,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <div>
                             <label className="block text-[11px] text-gray-400 mb-1">見た目</label>
                             <div className="flex items-center gap-2">
-                              <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined } }))}
+                              <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }))}
                                 className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-center text-xl" />
                               <button onClick={() => setPicker({ mode: 'image', target: { t: 'player' } })}
                                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300"><ImageIcon size={13} />画像/歩行グラを参照</button>
@@ -18162,7 +17994,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
                                 <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} />
                                 <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
-                                <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                                <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined, airSpriteRef: undefined, landSpriteRefs: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                               </div>
                             )}
                           </div>
@@ -18182,15 +18014,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             </label>
                             <label className="block text-[11px] text-gray-400">スペルカード名
                               <input type="text" value={gameData.player.bombSpellName ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombSpellName: e.target.value || undefined } }))}
-                                placeholder="恋符「マスタースパーク」" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                                placeholder="例: 光符「ほしのしずく」（空欄＝ボム）" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
                             <label className="block text-[11px] text-gray-400">キャラクター名
                               <input type="text" value={gameData.player.bombCutinCharName ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinCharName: e.target.value || undefined } }))}
-                                placeholder="魔理沙" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                                placeholder="例: プレイヤー（空欄＝プレイヤー）" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
                             <label className="block text-[11px] text-gray-400">立ち絵URL
-                              <input type="text" value={gameData.player.bombCutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png'} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageUrl: e.target.value || undefined } }))}
-                                placeholder="https://i.imgur.com/4M92pLV.png" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                              <input type="text" value={gameData.player.bombCutinImageUrl ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageUrl: e.target.value || undefined } }))}
+                                placeholder="立ち絵のURL（空欄＝立ち絵なし）" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
                             <div className="flex gap-2 items-center flex-wrap">
                               <label className="text-[10px] text-gray-400 flex items-center gap-1">X<input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageX ?? 0} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageX: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
@@ -18315,7 +18147,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                           key: Date.now(), mode: 'boss',
                                           charName: card.cutinCharName ?? curList[0].name ?? curList[0].emoji,
                                           spellName: card.name,
-                                          imageUrl: card.cutinImageUrl ?? 'https://i.imgur.com/lf3x8xR.png',
+                                          imageUrl: card.cutinImageUrl,
                                           imageX: card.cutinImageX ?? 350, imageY: card.cutinImageY ?? 100, imageScale: card.cutinScale ?? 0.5,
                                           ...overrides,
                                         });
@@ -18323,7 +18155,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                           <>
                                             <input value={card.cutinCharName ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })} onFocus={() => firePreview()} placeholder="キャラクター名" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
                                             <p className="text-[9px] text-blue-400/80">立ち絵</p>
-                                            <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={() => firePreview()} placeholder="https://i.imgur.com/lf3x8xR.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                            <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={() => firePreview()} placeholder="立ち絵のURL（空欄＝立ち絵なし）" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
                                             <div className="flex gap-1 items-center flex-wrap">
                                               <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 350} onFocus={() => firePreview()} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" /></label>
                                               <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? 100} onFocus={() => firePreview()} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" /></label>

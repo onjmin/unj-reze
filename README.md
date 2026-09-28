@@ -105,6 +105,35 @@ R2 パブリックアクセスの有効化：バケットの **Settings → Publ
 2. Neon のダッシュボードの **SQL Editor** を開くか、またはローカルの PostgreSQL クライアント等から接続します。
 3. コピーした SQL を実行してテーブルやインデックスを作成します。
 
+##### 既存DBへの移行SQL
+
+`docker/init.sql` は作り直し用（先頭で全テーブルを DROP する）なので、稼働中の本番 Neon には
+流さないこと。スキーマを変えたときは、既存DBに当てる差分SQLを新しい順にここへ書き足す。
+（`docker/init.sql` と unj リポジトリの `wiki/init.sql` にも同じ変更を入れておく。）
+
+**2026-09-28 — `preset_opens`（ゲームエディタの見本プリセット／テンプレートが開かれた回数、日別）**
+
+`POST /api/games/preset-open` が書く。当てるまではその API が黙って数え漏らすだけで、エディタは壊れない。
+
+```sql
+CREATE TABLE IF NOT EXISTS preset_opens (
+    preset TEXT NOT NULL,
+    day DATE NOT NULL,
+    opens INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (preset, day)
+);
+```
+
+集計を見るとき（直近30日、多い順）:
+
+```sql
+SELECT preset, SUM(opens) AS opens
+  FROM preset_opens
+ WHERE day >= (now() AT TIME ZONE 'Asia/Tokyo')::date - 30
+ GROUP BY preset
+ ORDER BY opens DESC;
+```
+
 #### 5. デプロイ
 
 `main` ブランチへの push で自動デプロイされます。手動デプロイは Netlify CLI から：

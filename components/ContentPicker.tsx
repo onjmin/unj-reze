@@ -8,6 +8,7 @@ import {
 	colorToDataUrl,
 	nicovideoRefFromUrl,
 	soundcloudRefFromUrl,
+	stripBgmRefParams,
 	toYoutubeWatchUrl,
 	youtubeRefFromUrl,
 } from "@/lib/asset-ref";
@@ -33,7 +34,7 @@ import {
 import { fetchSize, fetchText } from "@/lib/uploader";
 import { loadImage } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
-import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
+import EngineSfxPanel from "./EngineSfxPanel";
 import LocalAssetPanel from "./LocalAssetPanel";
 import RpgenAssetPanel from "./RpgenAssetPanel";
 import SpriteImage from "./SpriteImage";
@@ -58,7 +59,7 @@ interface ContentPickerProps {
 	mode: "image" | "bgm";
 	/**
 	 * mode==='bgm' のときのみ有効。タブを出し分ける。
-	 * 'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/URL）、
+	 * 'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/内蔵SE/URL）、
 	 * 'mml'=MML専用（MVのように外部音源を使えない用途）。
 	 */
 	bgmKind?: "bgm" | "sfx" | "mml";
@@ -99,19 +100,18 @@ type BgmTab =
 	| "mmlRaw"
 	| "direct"
 	| "rpgenSe"
-	| "builtinGame";
+	| "engineSe";
 
-// BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
+// BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/URL、効果音はrpgen効果音/内蔵SE/URLのみ。
 const BGM_TABS: BgmTab[] = [
 	"youtube",
 	"nicovideo",
 	"soundcloud",
 	"mmlPost",
-	"builtinGame",
 	"mmlRaw",
 	"direct",
 ];
-const SFX_TABS: BgmTab[] = ["rpgenSe", "builtinGame", "direct"];
+const SFX_TABS: BgmTab[] = ["rpgenSe", "engineSe", "direct"];
 // MV は音源がMMLだけ（ノートから映像を作るので外部音源では成立しない）。
 const MML_TABS: BgmTab[] = ["mmlPost", "mmlRaw"];
 
@@ -204,7 +204,9 @@ export default function ContentPicker({
 		bgmKind === "sfx" ? SFX_TABS : bgmKind === "mml" ? MML_TABS : BGM_TABS;
 	// 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
 	// （従来は毎回タブ・入力欄が空になり、既存の設定を再編集できなかった）。
-	const currentRefBase = currentRef?.split("#")[0];
+	// `#loop=…&vol=…` の再生パラメータだけを外す。単純に最初の `#` で切ると、
+	// `#inst=…;` ヘッダ付きのインラインMMLが `mml:` だけになり、MML欄が空で開いてしまう。
+	const currentRefBase = currentRef ? stripBgmRefParams(currentRef) : undefined;
 	const [bgmTab, setBgmTab] = useState<BgmTab>(() => {
 		if (mode === "bgm" && currentRefBase) {
 			if (
@@ -825,12 +827,12 @@ export default function ContentPicker({
 									効果音
 								</button>
 							)}
-							{allowedBgmTabs.includes("builtinGame") && (
+							{allowedBgmTabs.includes("engineSe") && (
 								<button
-									className={tabBtn(bgmTab === "builtinGame")}
-									onClick={() => changeBgmTab("builtinGame")}
+									className={tabBtn(bgmTab === "engineSe")}
+									onClick={() => changeBgmTab("engineSe")}
 								>
-									他ゲーム音源
+									内蔵SE
 								</button>
 							)}
 							{allowedBgmTabs.includes("mmlRaw") && (
@@ -979,7 +981,7 @@ export default function ContentPicker({
 					{mode === "image" && imageTab === "mcSkin" && (
 						<div className="space-y-3">
 							<p className="text-[10px] text-gray-500">
-								Minecraft のスキン画像（Slim型・64×64）。ゆめにっき3D
+								Minecraft のスキン画像（Slim型・64×64）。2.5D探索エンジン
 								のブロック人形キャラや、主人公のマイクラスキンに使えます。
 							</p>
 							<div className="grid grid-cols-2 gap-1.5">
@@ -1653,10 +1655,9 @@ export default function ContentPicker({
 						/>
 					)}
 
-					{/* BGM/SE: other game project sound library (Undertale/Mario127/MegamanJS) */}
-					{mode === "bgm" && bgmTab === "builtinGame" && (
-						<BuiltinGameSoundPanel
-							kind={bgmKind === "sfx" ? "sfx" : "bgm"}
+					{/* SE: ゲームエンジン内蔵のオリジナル効果音 */}
+					{mode === "bgm" && bgmTab === "engineSe" && (
+						<EngineSfxPanel
 							onPick={(res) => {
 								stopAllPreviews();
 								onPick(res);

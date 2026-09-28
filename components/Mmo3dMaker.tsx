@@ -10,7 +10,7 @@
 // GameMaker.tsx への正式配線（virtualKeys等との統合）はデータ形状が固まるフェーズ6で行った。
 // 参考: docs/mmo3d-feature-design.md
 //
-// レンダラーは three（yume25dと共有基盤・three-stdlibでFBX等を追加読込可）と
+// レンダラーは three（yume25dと共有基盤）と
 // babylon（babylon-mmdでMMD/PMXを読み込む）の2択。同じ<canvas>のWebGLコンテキストを
 // 共有できないため、ゲームごとに片方だけを選ぶ（Mmo3dRenderer, shared.ts）。
 // 比較は docs/mmo3d-feature-design.md の表を参照。
