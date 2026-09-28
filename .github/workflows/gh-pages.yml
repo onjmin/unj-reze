@@ -40,10 +40,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Remove API routes and adjust config for static export
+      - name: Remove server-only routes and adjust config for static export
         run: |
-          rm -rf app/api
-          sed -i "s/export const dynamic = 'force-dynamic';/export const dynamic = 'force-static';/g" app/sitemap.ts
+          # API と 専ブラ(2ch互換)のエンドポイントは静的サイトでは動かないので外す
+          rm -rf app/api app/unj app/test/bbs.cgi
+          # output: "export" は force-dynamic を受け付けない。ファイル名を決め打ちせず全部 force-static にし、
+          # biome の整形で引用符が変わっても当たるよう ' と " の両方を許す
+          grep -rlE "export const dynamic = ['\"]force-dynamic['\"]" app \
+            | xargs -r sed -i -E "s/export const dynamic = ['\"]force-dynamic['\"];/export const dynamic = \"force-static\";/g"
 
       - name: Build static site
         run: pnpm run build
