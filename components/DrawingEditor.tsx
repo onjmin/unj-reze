@@ -24,9 +24,11 @@ import {
 	Trash2,
 	Undo,
 	Upload,
+	Wand2,
 	X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { type FlipAxis, flipLayers } from "@/lib/drawing-macros";
 import {
 	clearAutosave,
 	DrawingEditorState,
@@ -52,6 +54,7 @@ import { copyToClipboard, readPasteImage } from "@/lib/oekaki-clipboard";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
+import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import HistoryModal from "./HistoryModal";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
@@ -182,6 +185,7 @@ export default function DrawingEditor({
 	const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
 	const [zoom, setZoom] = useState(1);
 	const [flipped, setFlipped] = useState(false);
+	const [showMacros, setShowMacros] = useState(false);
 	const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
 	const selectDragModeRef = useRef<"new" | "resize" | "move" | "rotate" | null>(
 		null,
@@ -1159,6 +1163,20 @@ export default function DrawingEditor({
 		forceRender((n) => n + 1);
 	};
 
+	const handleMacroFlip = (axis: FlipAxis, scope: MacroScope) => {
+		handleDeselect();
+		const layers =
+			scope === "canvas"
+				? layerEntriesRef.current.map((e) => e.instance)
+				: [layerEntriesRef.current[activeLayerIndexRef.current]?.instance];
+		flipLayers(
+			layers.filter((l) => l !== undefined),
+			axis,
+			{ respectLock: scope === "layer" },
+		);
+		forceRender((n) => n + 1);
+	};
+
 	const handleUndo = () => {
 		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.undo();
 		forceRender((n) => n + 1);
@@ -2029,11 +2047,25 @@ export default function DrawingEditor({
 								? "bg-blue-600 text-white shadow"
 								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
 						}
-						title="左右反転"
+						title="表示だけ左右反転（描画内容は変わらない）"
 					>
 						<FlipHorizontal size={15} />
 					</button>
+					<button
+						onClick={() => setShowMacros((v) => !v)}
+						className={
+							"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+							(showMacros
+								? "bg-blue-600 text-white shadow"
+								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+						}
+						title="マクロ（描画内容の左右反転など）"
+					>
+						<Wand2 size={15} />
+					</button>
 				</div>
+
+				{showMacros && <DrawingMacroBar onFlip={handleMacroFlip} />}
 
 				<div className="flex items-center space-x-3">
 					{(tool === "pen" || tool === "brush") && (
