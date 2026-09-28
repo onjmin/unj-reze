@@ -11,8 +11,8 @@ const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
 
 const HEADER_HEIGHT = 36;
-/** TalkPlayer の進行バーぶん */
-const CONTROLS_HEIGHT = 20;
+/** TalkPlayer の操作列ぶん（mt-1 + h-5） */
+const CONTROLS_HEIGHT = 24;
 
 interface TalkBoxProps {
 	talkId: string;
