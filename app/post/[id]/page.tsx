@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
-import PostPageClient from "@/components/PostPageClient";
+import PostPageClient from "@/components/post/PostPageClient";
 import { db } from "@/lib/db";
-import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml";
-import { db as mockDb } from "@/lib/mock-db";
+import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml/mml";
+import { db as mockDb } from "@/lib/db/mock-db";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 

@@ -2,8 +2,8 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import CookiesView from "@/components/CookiesView";
+import AppShell from "@/components/layout/AppShell";
+import CookiesView from "@/components/pages/CookiesView";
 
 export default function CookiesPage() {
 	return (

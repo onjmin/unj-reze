@@ -2,8 +2,8 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import PrivacyView from "@/components/PrivacyView";
+import AppShell from "@/components/layout/AppShell";
+import PrivacyView from "@/components/pages/PrivacyView";
 
 export default function PrivacyPage() {
 	return (

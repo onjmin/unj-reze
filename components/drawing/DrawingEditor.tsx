@@ -1,0 +1,2430 @@
+"use client";
+
+import * as oekaki from "@onjmin/oekaki";
+import {
+	BoxSelect,
+	Brush,
+	Copy,
+	Download,
+	Eraser,
+	Film,
+	FlipHorizontal,
+	Grid3x3,
+	History,
+	LassoSelect,
+	Layers,
+	PaintBucket,
+	Pen,
+	Pipette,
+	Redo,
+	RotateCcw,
+	RotateCw,
+	Save,
+	Settings,
+	Trash2,
+	Undo,
+	Upload,
+	Wand2,
+	X,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import HistoryModal from "@/components/ui/HistoryModal";
+import { api } from "@/lib/api";
+import {
+	exportFramesZip,
+	exportGif,
+	exportSinglePng,
+	exportSpriteSheet,
+	generateSpriteSheetCanvas,
+} from "@/lib/drawing/export-drawing";
+import { copyToClipboard, readPasteImage } from "@/lib/drawing/oekaki-clipboard";
+import { type FlipAxis, flipLayers } from "@/lib/drawing-macros";
+import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import {
+	clearAutosave,
+	DrawingEditorState,
+	deserializeFrames,
+	deserializeLayers,
+	getAutosave,
+	getStorageKey,
+	saveAutosave,
+	saveHistory,
+	serializeFrames,
+	serializeLayers,
+} from "@/lib/ui/history";
+import DrawingMacroBar, { type MacroScope } from ".././DrawingMacroBar";
+import type { AnimationBarFrame, FrameData } from "./AnimationBar";
+import AnimationBar, { computeFrameColor } from "./AnimationBar";
+import DrawingExportDialog from "./DrawingExportDialog";
+import ImportDialog from "./ImportDialog";
+import type { LayerEntry } from "./LayerPanel";
+import LayerPanel from "./LayerPanel";
+import ZoomScrollArea from "./ZoomScrollArea";
+
+function getEditorFrames(
+	instances: oekaki.LayeredCanvas[][],
+	ids: number[],
+	currentLayers: oekaki.LayeredCanvas[],
+	currentFrame: number,
+): AnimationBarFrame[] {
+	const list = instances.length > 0 ? instances : [currentLayers];
+	return list.map((layers, i) => {
+		const id = ids[i] ?? i + 1;
+		const l = i === currentFrame ? currentLayers : layers;
+		return {
+			id,
+			color: computeFrameColor(l, id),
+		};
+	});
+}
+
+export interface DrawingAnimMeta {
+	/** スプライトシート(横1列)のコマ数 */
+	animFrames: number;
+	/** 再生fps */
+	animFps: number;
+}
+
+interface DrawingEditorProps {
+	onClose: () => void;
+	onSave: (data: string, animMeta?: DrawingAnimMeta) => void;
+	collabImageUrl?: string;
+}
+
+type Tool =
+	| "pen"
+	| "brush"
+	| "eraser"
+	| "dropper"
+	| "fill"
+	| "select"
+	| "lasso";
+
+const PRESET_COLORS = [
+	"#000000",
+	"#ffffff",
+	"#ef4444",
+	"#f97316",
+	"#eab308",
+	"#22c55e",
+	"#3b82f6",
+	"#8b5cf6",
+	"#6b7280",
+	"#ec4899",
+	"#f43f5e",
+	"#14b8a6",
+	"#facc15",
+	"#fed7aa",
+	"#60a5fa",
+	"#a855f7",
+	"#1e293b",
+	"#475569",
+	"#94a3b8",
+	"#cbd5e1",
+	"#f8fafc",
+	"#dc2626",
+	"#ea580c",
+	"#ca8a04",
+];
+
+export default function DrawingEditor({
+	onClose,
+	onSave,
+	collabImageUrl,
+}: DrawingEditorProps) {
+	const mountRef = useRef<HTMLDivElement>(null);
+	const toolRef = useRef<Tool>("pen");
+	const colorRef = useRef("#ffffff");
+	const collabRef = useRef(collabImageUrl);
+	const [tool, setTool] = useState<Tool>("pen");
+	const [color, setColor] = useState("#000000");
+	const [penSize, setPenSize] = useState(4);
+	const [brushSize, setBrushSize] = useState(12);
+	const [eraserSize, setEraserSize] = useState(20);
+	// 筆の濃さ。ひと筆の中では重ねても濃くならず、離したときに1回だけ乗る
+	const [paintOpacity, setPaintOpacity] = useState(100);
+	// 筆の縁のぼけ具合。0で従来どおりの硬い円
+	const [brushSoftness, setBrushSoftness] = useState(0);
+	// バケツの許容誤差と、線画の下へもぐり込ませる量
+	const [fillTolerance, setFillTolerance] = useState(24);
+	const [fillGrow, setFillGrow] = useState(2);
+	// バケツの領域判定を全レイヤーの見た目で行うか。既定はアクティブなレイヤーだけで判定する
+	// （線画と塗りを分けている時だけONにすると、上のレイヤーの線画の囲みで塗れる）
+	const [fillRefAll, setFillRefAll] = useState(false);
+	const fillToleranceRef = useRef(24);
+	const fillGrowRef = useRef(2);
+	const fillRefAllRef = useRef(false);
+	const [showGrid, setShowGrid] = useState(false);
+	const [recentColors, setRecentColors] = useState<string[]>([]);
+	const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
+	const [activeLayerIndex, setActiveLayerIndex] = useState(0);
+	const [showLayerPanel, setShowLayerPanel] = useState(() => {
+		if (typeof window !== "undefined") {
+			return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+		}
+		return false;
+	});
+	const layerCounterRef = useRef(1);
+	const layerEntriesRef = useRef<LayerEntry[]>([]);
+	const activeLayerIndexRef = useRef(0);
+	const [animMode, setAnimMode] = useState(false);
+	const frameInstancesRef = useRef<oekaki.LayeredCanvas[][]>([]);
+	const frameIdsRef = useRef<number[]>([1]);
+	const nextFrameIdRef = useRef<number>(2);
+	const currentFrameRef = useRef(0);
+	const fpsRef = useRef(8);
+	const [isPlaying, setIsPlaying] = useState(false);
+	const isPlayingRef = useRef(false);
+	const playTimerRef = useRef<number | null>(null);
+	const [, forceRender] = useState(0);
+	const [showImport, setShowImport] = useState(false);
+	const onionSkinRef = useRef(false);
+	const onionSkinOpacityRef = useRef(20);
+	const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+	const [onionSkin, setOnionSkin] = useState(false);
+	const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
+	const [zoom, setZoom] = useState(1);
+	const [flipped, setFlipped] = useState(false);
+	const [showMacros, setShowMacros] = useState(false);
+	const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+	const selectDragModeRef = useRef<"new" | "resize" | "move" | "rotate" | null>(
+		null,
+	);
+	const lassoPointsRef = useRef<[number, number][]>([]);
+	const selectRotateAngleRef = useRef(0);
+
+	// History & Autosave States
+	const [showHistory, setShowHistory] = useState(false);
+	const [showExportDialog, setShowExportDialog] = useState(false);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsRef = useRef<HTMLDivElement>(null);
+	const [hasAutosave, setHasAutosave] = useState(false);
+	const [autosaveData, setAutosaveData] = useState<DrawingEditorState | null>(
+		null,
+	);
+	const [restoredState, setRestoredState] = useState<DrawingEditorState | null>(
+		null,
+	);
+	const [initKey, setInitKey] = useState(0);
+	const storageKey = getStorageKey("drawing");
+	const multiTouchPointsRef = useRef<Map<number, { x: number; y: number }>>(
+		new Map(),
+	);
+	/** 複数指タッチ中フラグ。立っている間は描画コールバックを無視する。 */
+	const multiTouchingRef = useRef(false);
+	/** 1本目の指が触れた時点のレイヤー内容。2本目が触れたらここまで巻き戻す。 */
+	const strokeSnapshotRef = useRef<{
+		layer: { data: Uint8ClampedArray };
+		data: Uint8ClampedArray;
+	} | null>(null);
+
+	const lastDrawToolRef = useRef<"pen" | "brush">("pen");
+
+	// 設定ドロップダウンの外側クリック検知
+	useEffect(() => {
+		const handleClickOutside = (e: MouseEvent) => {
+			if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+				setSettingsOpen(false);
+			}
+		};
+		window.addEventListener("mousedown", handleClickOutside);
+		return () => window.removeEventListener("mousedown", handleClickOutside);
+	}, []);
+
+	// --- Export Handlers ---
+	const handleExportSinglePng = () => {
+		const canvas = oekaki.render();
+		exportSinglePng(canvas, undefined, undefined, "drawing.png");
+	};
+	// Ctrl+S は投稿ではなく全レイヤーを合成した画像として手元に保存
+	useSaveShortcut(handleExportSinglePng);
+
+	const getAnimFramesForExport = () => {
+		const frames =
+			frameInstancesRef.current.length > 0
+				? frameInstancesRef.current
+				: [oekaki.getLayers()];
+		const currentLayers = oekaki.getLayers();
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const w = active?.canvas.width || canvasSizeRef.current.w || 640;
+		const h = active?.canvas.height || canvasSizeRef.current.h || 480;
+
+		return frames.map((layers, frameIdx) => {
+			const list =
+				frameIdx === currentFrameRef.current ? currentLayers : layers;
+			const canvas = document.createElement("canvas");
+			canvas.width = w;
+			canvas.height = h;
+			const ctx = canvas.getContext("2d", { willReadFrequently: true });
+			if (ctx) {
+				for (const l of list) {
+					if (!l.visible || l.opacity <= 0) continue;
+					ctx.globalAlpha = l.opacity / 100;
+					ctx.drawImage(l.canvas, 0, 0);
+				}
+			}
+			return canvas;
+		});
+	};
+
+	const handleExportAnimSpriteSheet = () => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		exportSpriteSheet(
+			{
+				columns: frameCanvases.length,
+				rows: 1,
+				cellWidth: w,
+				cellHeight: h,
+				frames: frameCanvases,
+			},
+			"animation_spritesheet.png",
+		);
+	};
+
+	const handleExportAnimGif = async ({
+		transparent,
+		backgroundColor,
+	}: {
+		scale?: number;
+		transparent: boolean;
+		backgroundColor?: string;
+	}) => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		await exportGif({
+			frames: frameCanvases,
+			width: w,
+			height: h,
+			fps: fpsRef.current,
+			transparent,
+			backgroundColor,
+			fileName: "animation.gif",
+		});
+	};
+
+	const handleExportAnimZip = async () => {
+		const frameCanvases = getAnimFramesForExport();
+		if (frameCanvases.length === 0) return;
+		const w = frameCanvases[0].width;
+		const h = frameCanvases[0].height;
+		await exportFramesZip({
+			frames: frameCanvases.map((canvas, i) => ({
+				name: `frame_${String(i + 1).padStart(2, "0")}.png`,
+				canvas,
+			})),
+			width: w,
+			height: h,
+			fileName: "animation_frames.zip",
+		});
+	};
+
+	useEffect(() => {
+		toolRef.current = tool;
+		colorRef.current = color;
+		if (tool === "pen" || tool === "brush") {
+			lastDrawToolRef.current = tool;
+		}
+	});
+
+	const currentSize =
+		tool === "brush" ? brushSize : tool === "eraser" ? eraserSize : penSize;
+
+	const notDrawing = (e: Event) => {
+		const target = e.target as HTMLElement | null;
+		if (!target) return false;
+		return (
+			target.tagName === "INPUT" ||
+			target.tagName === "TEXTAREA" ||
+			target.isContentEditable
+		);
+	};
+
+	const handleDeselect = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (active) {
+			active.deselect();
+			if (active.modified()) active.trace();
+		}
+		const upperCtx = oekaki.upperLayer.value?.ctx;
+		if (upperCtx) {
+			upperCtx.clearRect(0, 0, upperCtx.canvas.width, upperCtx.canvas.height);
+		}
+		forceRender((n) => n + 1);
+	};
+
+	const selectTool = (t: Tool) => {
+		if (toolRef.current !== t && t !== "select" && t !== "lasso") {
+			handleDeselect();
+		}
+		setTool(t);
+		toolRef.current = t;
+	};
+
+	const applyColor = (c: string) => {
+		setColor(c);
+		oekaki.color.value = c;
+		setRecentColors((prev) => {
+			if (prev[0] === c) return prev;
+			const filtered = prev.filter((x) => x !== c);
+			return [c, ...filtered].slice(0, 8);
+		});
+		if (toolRef.current === "eraser" || toolRef.current === "dropper") {
+			const nextTool = lastDrawToolRef.current || "pen";
+			selectTool(nextTool);
+		}
+	};
+
+	const toggleOnionSkin = () => {
+		const next = !onionSkinRef.current;
+		onionSkinRef.current = next;
+		setOnionSkin(next);
+		if (onionCanvasRef.current) {
+			onionCanvasRef.current.style.display = next ? "block" : "none";
+		}
+		if (next) updateOnionSkin();
+	};
+
+	const handleOnionSkinOpacityChange = (opacity: number) => {
+		onionSkinOpacityRef.current = opacity;
+		setOnionSkinOpacity(opacity);
+		updateOnionSkin();
+	};
+
+	const updateOnionSkin = () => {
+		const canvas = onionCanvasRef.current;
+		if (!canvas || !onionSkinRef.current) return;
+		const idx = currentFrameRef.current - 1;
+		const prevLayers = frameInstancesRef.current[idx];
+		if (idx < 0 || !prevLayers) {
+			const ctx = canvas.getContext("2d");
+			if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+			return;
+		}
+		const w = canvas.width,
+			h = canvas.height;
+		const temp = document.createElement("canvas");
+		temp.width = w;
+		temp.height = h;
+		const tempCtx = temp.getContext("2d")!;
+		for (const l of prevLayers) {
+			if (!l.visible || l.opacity <= 0) continue;
+			tempCtx.globalAlpha = l.opacity / 100;
+			tempCtx.drawImage(l.canvas, 0, 0);
+		}
+		const ctx = canvas.getContext("2d")!;
+		ctx.clearRect(0, 0, w, h);
+		ctx.globalAlpha = onionSkinOpacityRef.current / 100;
+		ctx.drawImage(temp, 0, 0);
+		ctx.globalAlpha = 1;
+	};
+
+	const SELECTION_HANDLE_SIZE = 8;
+	const SELECTION_HANDLE_HIT = 10;
+	const ROTATE_HANDLE_OFFSET = 24;
+	const ROTATE_HANDLE_RADIUS = 5;
+	const ROTATE_HANDLE_HIT = 10;
+	const getRotateHandlePos = (sel: {
+		x: number;
+		y: number;
+		w: number;
+		h: number;
+	}) => ({ x: sel.x + sel.w / 2, y: sel.y - ROTATE_HANDLE_OFFSET });
+
+	const drawSelectionHandle = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const sel = active?.selection;
+		const ctx = oekaki.upperLayer.value?.ctx;
+		if (!ctx) return;
+		if (!sel || (toolRef.current !== "select" && toolRef.current !== "lasso")) {
+			ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+			return;
+		}
+		const hx = sel.x + sel.w;
+		const hy = sel.y + sel.h;
+		ctx.save();
+		ctx.fillStyle = "#ffffff";
+		ctx.strokeStyle = "#000000";
+		ctx.lineWidth = 1;
+		ctx.fillRect(
+			hx - SELECTION_HANDLE_SIZE / 2,
+			hy - SELECTION_HANDLE_SIZE / 2,
+			SELECTION_HANDLE_SIZE,
+			SELECTION_HANDLE_SIZE,
+		);
+		ctx.strokeRect(
+			hx - SELECTION_HANDLE_SIZE / 2,
+			hy - SELECTION_HANDLE_SIZE / 2,
+			SELECTION_HANDLE_SIZE,
+			SELECTION_HANDLE_SIZE,
+		);
+		const cx = sel.x + sel.w / 2;
+		const rot = getRotateHandlePos(sel);
+		ctx.beginPath();
+		ctx.moveTo(cx, sel.y);
+		ctx.lineTo(rot.x, rot.y);
+		ctx.stroke();
+		ctx.beginPath();
+		ctx.arc(rot.x, rot.y, ROTATE_HANDLE_RADIUS, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.stroke();
+		ctx.restore();
+	};
+
+	const isNearSelectionHandle = (
+		sel: { x: number; y: number; w: number; h: number },
+		x: number,
+		y: number,
+	) => {
+		const hx = sel.x + sel.w;
+		const hy = sel.y + sel.h;
+		return (
+			Math.abs(x - hx) <= SELECTION_HANDLE_HIT &&
+			Math.abs(y - hy) <= SELECTION_HANDLE_HIT
+		);
+	};
+
+	const isNearRotateHandle = (
+		sel: { x: number; y: number; w: number; h: number },
+		x: number,
+		y: number,
+	) => {
+		const rot = getRotateHandlePos(sel);
+		return Math.hypot(x - rot.x, y - rot.y) <= ROTATE_HANDLE_HIT;
+	};
+
+	const isInsideSelection = (
+		sel: { x: number; y: number; w: number; h: number },
+		x: number,
+		y: number,
+	) => x >= sel.x && x <= sel.x + sel.w && y >= sel.y && y <= sel.y + sel.h;
+
+	const drawLassoPreview = () => {
+		const ctx = oekaki.upperLayer.value?.ctx;
+		const pts = lassoPointsRef.current;
+		if (!ctx || pts.length < 2) return;
+		ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+		ctx.save();
+		ctx.lineWidth = 1;
+		ctx.setLineDash([4, 4]);
+		ctx.beginPath();
+		pts.forEach(([px, py], i) =>
+			i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py),
+		);
+		ctx.strokeStyle = "#ffffff";
+		ctx.stroke();
+		ctx.strokeStyle = "#000000";
+		ctx.lineDashOffset = 4;
+		ctx.stroke();
+		ctx.restore();
+	};
+
+	// Check autosave on mount
+	useEffect(() => {
+		let cancelled = false;
+		getAutosave<DrawingEditorState>(storageKey).then((autosave) => {
+			if (cancelled || !autosave?.data) return;
+			setAutosaveData(autosave.data);
+			setHasAutosave(true);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [storageKey]);
+
+	const handleRestoreAutosave = () => {
+		if (!autosaveData) return;
+		setRestoredState(autosaveData);
+		setInitKey((k) => k + 1);
+		setHasAutosave(false);
+		clearAutosave(storageKey);
+	};
+
+	const handleIgnoreAutosave = () => {
+		setHasAutosave(false);
+		clearAutosave(storageKey);
+	};
+
+	const handleRestoreHistory = (state: DrawingEditorState) => {
+		setRestoredState(state);
+		setInitKey((k) => k + 1);
+	};
+
+	const syncLayerEntries = () => {
+		const entries = oekaki
+			.getLayers()
+			.map((inst) => ({
+				instance: inst,
+				name: inst.name,
+			}))
+			.reverse();
+		setLayerEntries(entries);
+		layerEntriesRef.current = entries;
+	};
+
+	const captureLiveFrames = (): FrameData[] => {
+		if (frameInstancesRef.current.length > 0) {
+			if (frameInstancesRef.current[currentFrameRef.current]) {
+				frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+			}
+			return frameInstancesRef.current.map((layers, i) => ({
+				id: frameIdsRef.current[i] ?? i + 1,
+				layers: layers.map((l) => ({
+					name: l.name,
+					visible: l.visible,
+					locked: l.locked,
+					opacity: l.opacity,
+					data: new Uint8ClampedArray(l.data),
+				})),
+			}));
+		}
+		return [
+			{
+				id: frameIdsRef.current[0] ?? 1,
+				layers: oekaki.getLayers().map((l) => ({
+					name: l.name,
+					visible: l.visible,
+					locked: l.locked,
+					opacity: l.opacity,
+					data: new Uint8ClampedArray(l.data),
+				})),
+			},
+		];
+	};
+
+	const getCurrentState = (): DrawingEditorState | null => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active) return null;
+		const canvas = active.canvas;
+		const w = canvas.width;
+		const h = canvas.height;
+		if (animMode || frameInstancesRef.current.length > 1) {
+			const frames = captureLiveFrames();
+			return {
+				mode: "anim",
+				width: w,
+				height: h,
+				gridW: 32,
+				gridH: 32,
+				zoom,
+				frames: serializeFrames(frames, w, h),
+				currentFrame: currentFrameRef.current,
+				fps: fpsRef.current,
+			};
+		} else {
+			return {
+				mode: "standard",
+				width: w,
+				height: h,
+				gridW: 32,
+				gridH: 32,
+				zoom,
+				layers: serializeLayers(oekaki.getLayers(), w, h),
+			};
+		}
+	};
+
+	// Periodic autosave (every 10s) and history snapshot (every 30m)
+	useEffect(() => {
+		const autosaveInterval = setInterval(() => {
+			const state = getCurrentState();
+			if (state) {
+				saveAutosave(storageKey, state);
+			}
+		}, 10000);
+
+		const historyInterval = setInterval(() => {
+			const state = getCurrentState();
+			if (state) {
+				saveHistory(storageKey, state, "drawing", 50);
+			}
+		}, 1800000);
+
+		return () => {
+			clearInterval(autosaveInterval);
+			clearInterval(historyInterval);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [storageKey, animMode, zoom]);
+
+	useEffect(() => {
+		const el = mountRef.current;
+		if (!el) return;
+		// 拡大用の箱（ZoomScrollArea）の中にいるので、見える領域の大きさで決める
+		const parent = el.closest<HTMLElement>("[data-zoom-area]");
+		const availW = parent ? parent.clientWidth : 640;
+		const availH = parent ? parent.clientHeight : 480;
+		const cap = 1024;
+
+		const w = restoredState ? restoredState.width : Math.min(availW, cap) | 0;
+		const h = restoredState ? restoredState.height : Math.min(availH, cap) | 0;
+		el.innerHTML = "";
+		oekaki.init(el, w, h);
+		oekaki.flipped.value = false;
+		setFlipped(false);
+		canvasSizeRef.current = { w, h };
+
+		oekaki.lowerLayer.value?.canvas.classList.add(
+			"gimp-checkered-background-white",
+		);
+		oekaki.upperLayer.value?.canvas.classList.add("upper-canvas");
+		oekaki.color.value = colorRef.current;
+		oekaki.penSize.value = penSize;
+		oekaki.brushSize.value = brushSize;
+		oekaki.eraserSize.value = eraserSize;
+
+		const loadCanvasContent = async () => {
+			if (restoredState) {
+				if (restoredState.mode === "anim" && restoredState.frames) {
+					for (const l of oekaki.getLayers()) l.delete();
+					oekaki.refresh();
+					const deserializedFrames = await deserializeFrames(
+						restoredState.frames,
+						w,
+						h,
+					);
+					const instances: oekaki.LayeredCanvas[][] = [];
+					const restoredIds: number[] = [];
+					for (const f of deserializedFrames) {
+						restoredIds.push(f.id ?? (restoredIds.length + 1));
+						const frameLayers: oekaki.LayeredCanvas[] = [];
+						for (const {
+							name,
+							visible,
+							locked,
+							opacity,
+							data,
+						} of f.layers) {
+							const l = new oekaki.LayeredCanvas(name);
+							l.visible = visible;
+							l.locked = locked;
+							l.opacity = opacity;
+							l.data = new Uint8ClampedArray(data);
+							l.trace();
+							frameLayers.push(l);
+						}
+						instances.push(frameLayers);
+					}
+					frameInstancesRef.current = instances;
+					frameIdsRef.current =
+						restoredIds.length > 0 ? restoredIds : [1];
+					nextFrameIdRef.current =
+						Math.max(...frameIdsRef.current, 0) + 1;
+					const targetFrame = Math.max(
+						0,
+						Math.min(restoredState.currentFrame || 0, instances.length - 1),
+					);
+					currentFrameRef.current = targetFrame;
+					fpsRef.current = restoredState.fps || 8;
+					setAnimMode(true);
+					if (instances[targetFrame]) {
+						oekaki.setLayers(instances[targetFrame]);
+					}
+				} else if (restoredState.layers) {
+					for (const l of oekaki.getLayers()) l.delete();
+					oekaki.refresh();
+					const deserializedLayers = await deserializeLayers(
+						restoredState.layers,
+						w,
+						h,
+					);
+					for (const {
+						name,
+						visible,
+						locked,
+						opacity,
+						data,
+					} of deserializedLayers) {
+						const l = new oekaki.LayeredCanvas(name);
+						l.visible = visible;
+						l.locked = locked;
+						l.opacity = opacity;
+						l.data = new Uint8ClampedArray(data);
+						l.trace();
+					}
+					setAnimMode(false);
+					frameInstancesRef.current = [];
+					frameIdsRef.current = [1];
+					nextFrameIdRef.current = 2;
+					currentFrameRef.current = 0;
+				}
+				setRestoredState(null);
+			} else {
+				new oekaki.LayeredCanvas("レイヤー #1");
+				layerCounterRef.current = 2;
+
+				// collaboration: load existing image as base layer
+				if (collabRef.current) {
+					const img = new Image();
+					img.crossOrigin = "anonymous";
+					img.src = collabRef.current;
+					img.onload = () => {
+						const layers = oekaki.getLayers();
+						const target = layers[0];
+						if (target) {
+							target.name = "コラボ";
+							target.paste(img);
+							target.trace();
+						}
+						syncLayerEntries();
+						setActiveLayerIndex(0);
+						activeLayerIndexRef.current = 0;
+						forceRender((n) => n + 1);
+					};
+				}
+			}
+
+			syncLayerEntries();
+			setActiveLayerIndex(0);
+			activeLayerIndexRef.current = 0;
+			updateOnionSkin();
+			forceRender((n) => n + 1);
+		};
+
+		loadCanvasContent();
+
+		// onion skin canvas
+		const onionCanvas = document.createElement("canvas");
+		onionCanvas.width = w;
+		onionCanvas.height = h;
+		onionCanvas.style.position = "absolute";
+		onionCanvas.style.zIndex = "2";
+		onionCanvas.style.left = "0";
+		onionCanvas.style.top = "0";
+		onionCanvas.style.pointerEvents = "none";
+		onionCanvas.style.display = "none";
+		const container = el.firstChild as HTMLElement;
+		if (container && container.children.length >= 2) {
+			container.insertBefore(onionCanvas, container.children[1]);
+		}
+		onionCanvasRef.current = onionCanvas;
+
+		let px: number | null = null;
+		let py: number | null = null;
+		let selectDragMode: "new" | "move" | "resize" | "rotate" | null = null;
+		let selectStartX = 0;
+		let selectStartY = 0;
+		let selectAnchorX = 0;
+		let selectAnchorY = 0;
+		let selectRotateLastAngle = 0;
+
+		oekaki.onDraw((x, y, buttons) => {
+			// 複数指タッチ中はペンを動かさない
+			if (multiTouchingRef.current) return;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			if (!active?.editable) return;
+
+			if (toolRef.current === "dropper" || (buttons & 2) !== 0) {
+				const result = oekaki.dropper(x, y);
+				if (result) {
+					const [r, g, b, a] = result;
+					if (a) {
+						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+						applyColor(hex);
+						const nextTool = lastDrawToolRef.current || "pen";
+						selectTool(nextTool);
+					} else {
+						selectTool("eraser");
+					}
+				}
+				px = null;
+				py = null;
+				return;
+			}
+
+			if (toolRef.current === "select") {
+				const sel = active.selection;
+				if (selectDragMode === null) {
+					if (sel && isNearRotateHandle(sel, x, y)) {
+						selectDragMode = "rotate";
+						const cx = sel.x + sel.w / 2;
+						const cy = sel.y + sel.h / 2;
+						selectRotateLastAngle =
+							(Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+					} else if (sel && isNearSelectionHandle(sel, x, y)) {
+						selectDragMode = "resize";
+						selectAnchorX = sel.x;
+						selectAnchorY = sel.y;
+					} else if (sel && isInsideSelection(sel, x, y)) {
+						selectDragMode = "move";
+					} else {
+						selectDragMode = "new";
+						selectStartX = x;
+						selectStartY = y;
+					}
+					px = x;
+					py = y;
+				}
+				if (selectDragMode === "rotate") {
+					if (!sel) return;
+					const cx = sel.x + sel.w / 2;
+					const cy = sel.y + sel.h / 2;
+					const angle = (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+					let deltaAngle = angle - selectRotateLastAngle;
+					if (deltaAngle > 180) deltaAngle -= 360;
+					if (deltaAngle < -180) deltaAngle += 360;
+					if (showGrid) {
+						active.rotateSelectionByDot(deltaAngle);
+					} else {
+						active.rotateSelection(deltaAngle);
+					}
+					selectRotateLastAngle = angle;
+				} else if (selectDragMode === "move") {
+					if (showGrid) {
+						active.moveSelectionByDot(x - px!, y - py!);
+					} else {
+						active.moveSelection(x - px!, y - py!);
+					}
+				} else if (selectDragMode === "resize") {
+					if (showGrid) {
+						active.resizeSelectionByDot(x - selectAnchorX, y - selectAnchorY);
+					} else {
+						active.resizeSelection(x - selectAnchorX, y - selectAnchorY);
+					}
+				} else if (showGrid) {
+					active.selectByDot(
+						selectStartX,
+						selectStartY,
+						x - selectStartX,
+						y - selectStartY,
+					);
+				} else {
+					active.select(
+						selectStartX,
+						selectStartY,
+						x - selectStartX,
+						y - selectStartY,
+					);
+				}
+				drawSelectionHandle();
+				px = x;
+				py = y;
+				return;
+			}
+
+			if (toolRef.current === "lasso") {
+				lassoPointsRef.current.push([x, y]);
+				drawLassoPreview();
+				px = x;
+				py = y;
+				return;
+			}
+
+			const strokeStarting = px === null;
+			if (px === null) {
+				px = x;
+				py = y;
+			}
+			if (py === null) {
+				py = y;
+			}
+			// ひと筆を一時キャンバスに溜める。離したときに濃さを1回だけ掛けるため
+			if (strokeStarting && !active.stroking) {
+				active.beginStroke(toolRef.current === "eraser" ? "erase" : "draw");
+			}
+
+			if (toolRef.current === "brush") {
+				active.drawLine(x, y, px, py);
+			} else {
+				const points = oekaki.lerp(x, y, px, py);
+				if (toolRef.current === "pen") {
+					for (const [cx, cy] of points) active.draw(cx, cy);
+				} else if (toolRef.current === "eraser") {
+					for (const [cx, cy] of points) active.erase(cx, cy);
+				}
+			}
+			px = x;
+			py = y;
+		});
+
+		oekaki.onDrawn((x, y) => {
+			px = null;
+			py = null;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			// 溜めていたひと筆をここで初めてレイヤーへ乗せる
+			active?.endStroke();
+			// 複数指タッチ中に指が離れた場合は、描いていないので履歴も残さない
+			if (multiTouchingRef.current) {
+				lassoPointsRef.current = [];
+				return;
+			}
+			if (active?.modified()) active.trace();
+
+			if (toolRef.current === "select" && selectDragMode !== null) {
+				selectDragMode = null;
+				forceRender((n) => n + 1);
+			}
+
+			if (toolRef.current === "lasso" && active) {
+				if (lassoPointsRef.current.length >= 3) {
+					if (showGrid) {
+						active.selectFreehandByDot(lassoPointsRef.current);
+					} else {
+						active.selectFreehand(lassoPointsRef.current);
+					}
+					toolRef.current = "select";
+					setTool("select");
+					drawSelectionHandle();
+				}
+				const upperCtx = oekaki.upperLayer.value?.ctx;
+				if (upperCtx)
+					upperCtx.clearRect(
+						0,
+						0,
+						upperCtx.canvas.width,
+						upperCtx.canvas.height,
+					);
+				lassoPointsRef.current = [];
+			}
+
+			if (toolRef.current === "fill") {
+				const rgb = colorRef.current
+					.slice(1)
+					.match(/.{2}/g)
+					?.map((v) => parseInt(v, 16));
+				if (!rgb || !active) return;
+				const w = active.canvas.width;
+				const h = active.canvas.height;
+				// 領域の判定は既定では今のレイヤーだけ。「全レイヤー参照」ON なら見た目（全レイヤー合成）で行う。
+				// どちらでも色は今のレイヤーにだけ置く。
+				let reference = active.data;
+				if (fillRefAllRef.current) {
+					const merged = oekaki
+						.render()
+						.getContext("2d", { willReadFrequently: true });
+					if (merged) reference = merged.getImageData(0, 0, w, h).data;
+				}
+				const mask = oekaki.floodFillMask(reference, w, h, x, y, {
+					tolerance: fillToleranceRef.current,
+					grow: fillGrowRef.current,
+				});
+				if (mask) {
+					active.data = oekaki.paintMask(
+						active.data,
+						mask,
+						[rgb[0], rgb[1], rgb[2], 255],
+						Math.min(100, Math.max(0, oekaki.opacity.value)) / 100,
+						active.alphaLocked,
+					);
+				}
+				active.trace();
+			}
+			updateOnionSkin();
+			forceRender((n) => n + 1);
+		});
+
+		return () => {
+			onionCanvasRef.current = null;
+			if (mountRef.current) mountRef.current.innerHTML = "";
+		};
+	}, [initKey]);
+
+	useEffect(() => {
+		if (mountRef.current) {
+			mountRef.current.className =
+				"inline-block" + (showGrid ? " unj-canvas-grid" : "");
+		}
+	}, [showGrid]);
+
+	useEffect(() => {
+		oekaki.penSize.value = penSize;
+		oekaki.brushSize.value = brushSize;
+		oekaki.eraserSize.value = eraserSize;
+	}, [penSize, brushSize, eraserSize]);
+
+	useEffect(() => {
+		oekaki.opacity.value = paintOpacity;
+		oekaki.softness.value = brushSoftness;
+	}, [paintOpacity, brushSoftness]);
+
+	useEffect(() => {
+		fillToleranceRef.current = fillTolerance;
+		fillGrowRef.current = fillGrow;
+		fillRefAllRef.current = fillRefAll;
+	}, [fillTolerance, fillGrow, fillRefAll]);
+
+	useEffect(() => {
+		const el = mountRef.current;
+		if (!el) return;
+		const correctCoords = (e: PointerEvent) => {
+			const canvas = oekaki.upperLayer.value?.canvas;
+			if (!canvas) return;
+			const rect = canvas.getBoundingClientRect();
+			if (rect.width === 0) return;
+			const sx = canvas.width / rect.width;
+			const sy = canvas.height / rect.height;
+			if (sx === 1 && sy === 1) return;
+			Object.defineProperty(e, "clientX", {
+				value: rect.left + (e.clientX - rect.left) * sx,
+				configurable: true,
+			});
+			Object.defineProperty(e, "clientY", {
+				value: rect.top + (e.clientY - rect.top) * sy,
+				configurable: true,
+			});
+		};
+		const patchCoalesced = (e: PointerEvent) => {
+			for (const ce of e.getCoalescedEvents()) correctCoords(ce);
+		};
+		const onPointer = (e: PointerEvent) => {
+			correctCoords(e);
+			patchCoalesced(e);
+		};
+		const onClick = (e: MouseEvent) => {
+			const canvas = oekaki.upperLayer.value?.canvas;
+			if (!canvas) return;
+			const rect = canvas.getBoundingClientRect();
+			if (rect.width === 0) return;
+			const sx = canvas.width / rect.width;
+			const sy = canvas.height / rect.height;
+			if (sx === 1 && sy === 1) return;
+			Object.defineProperty(e, "clientX", {
+				value: rect.left + (e.clientX - rect.left) * sx,
+				configurable: true,
+			});
+			Object.defineProperty(e, "clientY", {
+				value: rect.top + (e.clientY - rect.top) * sy,
+				configurable: true,
+			});
+		};
+		el.addEventListener("pointerdown", onPointer, {
+			capture: true,
+			passive: true,
+		});
+		el.addEventListener("pointermove", onPointer, {
+			capture: true,
+			passive: true,
+		});
+		el.addEventListener("pointerup", onPointer, {
+			capture: true,
+			passive: true,
+		});
+		el.addEventListener("click", onClick, { capture: true, passive: true });
+		el.addEventListener("auxclick", onClick, { capture: true, passive: true });
+		return () => {
+			el.removeEventListener("pointerdown", onPointer, { capture: true });
+			el.removeEventListener("pointermove", onPointer, { capture: true });
+			el.removeEventListener("pointerup", onPointer, { capture: true });
+			el.removeEventListener("click", onClick, { capture: true });
+			el.removeEventListener("auxclick", onClick, { capture: true });
+		};
+	}, [zoom]);
+
+	useEffect(() => {
+		const upperCanvas = oekaki.upperLayer.value?.canvas;
+		if (!upperCanvas) return;
+		const onPointerMove = (e: PointerEvent) => {
+			if (
+				toolRef.current !== "select" ||
+				selectDragModeRef.current !== null ||
+				e.buttons !== 0
+			)
+				return;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			const sel = active?.selection;
+			if (!sel) {
+				upperCanvas.style.cursor = "crosshair";
+				return;
+			}
+			const [x, y] = oekaki.getXY(e);
+			if (isNearRotateHandle(sel, x, y)) {
+				upperCanvas.style.cursor = "crosshair";
+			} else if (isNearSelectionHandle(sel, x, y)) {
+				upperCanvas.style.cursor = "nwse-resize";
+			} else if (isInsideSelection(sel, x, y)) {
+				upperCanvas.style.cursor = "move";
+			} else {
+				upperCanvas.style.cursor = "crosshair";
+			}
+			drawSelectionHandle();
+		};
+		upperCanvas.addEventListener("pointermove", onPointerMove);
+		return () => upperCanvas.removeEventListener("pointermove", onPointerMove);
+	}, []);
+
+
+	const clearCanvas = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active) return;
+		active.clear();
+		active.trace();
+		forceRender((n) => n + 1);
+	};
+
+	const handleMacroFlip = (axis: FlipAxis, scope: MacroScope) => {
+		handleDeselect();
+		const layers =
+			scope === "canvas"
+				? layerEntriesRef.current.map((e) => e.instance)
+				: [layerEntriesRef.current[activeLayerIndexRef.current]?.instance];
+		flipLayers(
+			layers.filter((l) => l !== undefined),
+			axis,
+			{ respectLock: scope === "layer" },
+		);
+		forceRender((n) => n + 1);
+	};
+
+	const handleUndo = () => {
+		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.undo();
+		forceRender((n) => n + 1);
+	};
+	const handleRedo = () => {
+		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.redo();
+		forceRender((n) => n + 1);
+	};
+
+	const selectLayer = (i: number) => {
+		handleDeselect();
+		setActiveLayerIndex(i);
+		activeLayerIndexRef.current = i;
+	};
+
+	const addLayer = () => {
+		const name = `Layer ${layerCounterRef.current++}`;
+		const newLayer = new oekaki.LayeredCanvas(name);
+		const newEntry: LayerEntry = { instance: newLayer, name };
+		const entries = [newEntry, ...layerEntriesRef.current];
+		setLayerEntries(entries);
+		layerEntriesRef.current = entries;
+		setActiveLayerIndex(0);
+		activeLayerIndexRef.current = 0;
+	};
+
+	const deleteLayer = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.delete();
+		const entries = layerEntriesRef.current.filter((_, idx) => idx !== i);
+		setLayerEntries(entries);
+		layerEntriesRef.current = entries;
+		// 消した行が選択中より上なら、選択は1つ繰り上がる。
+		// はみ出しの補正は繰り上げた後に行う（先に補正すると、
+		// 一番下を選択中に上の行を消したとき二重に減って別のレイヤーが選ばれる）
+		let newIdx = activeLayerIndexRef.current;
+		if (i < newIdx) newIdx--;
+		if (newIdx >= entries.length) newIdx = entries.length - 1;
+		if (newIdx < 0) newIdx = 0;
+		setActiveLayerIndex(newIdx);
+		activeLayerIndexRef.current = newIdx;
+	};
+
+	const reorderLayers = (from: number, to: number) => {
+		const entries = [...layerEntriesRef.current];
+		const [moved] = entries.splice(from, 1);
+		entries.splice(to, 0, moved);
+		setLayerEntries(entries);
+		layerEntriesRef.current = entries;
+		const gLayers = [...entries].reverse().map((e) => e.instance);
+		oekaki.setLayers(gLayers);
+		let newIdx = activeLayerIndexRef.current;
+		if (from === newIdx) {
+			newIdx = to;
+		} else if (from < newIdx && to >= newIdx) {
+			newIdx--;
+		} else if (from > newIdx && to <= newIdx) {
+			newIdx++;
+		}
+		setActiveLayerIndex(newIdx);
+		activeLayerIndexRef.current = newIdx;
+	};
+
+	const toggleVisibility = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.visible = !entry.instance.visible;
+		forceRender((n) => n + 1);
+	};
+
+	const toggleLock = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.locked = !entry.instance.locked;
+		forceRender((n) => n + 1);
+	};
+
+	const toggleAlphaLock = (i: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.alphaLocked = !entry.instance.alphaLocked;
+		forceRender((n) => n + 1);
+	};
+
+	const setLayerOpacity = (i: number, opacity: number) => {
+		const entry = layerEntriesRef.current[i];
+		if (!entry) return;
+		entry.instance.opacity = opacity;
+		forceRender((n) => n + 1);
+	};
+
+	// ── Animation ──
+
+	const selectFrame = (i: number) => {
+		if (i === currentFrameRef.current) return;
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		currentFrameRef.current = i;
+		if (frameInstancesRef.current[i]) {
+			oekaki.setLayers(frameInstancesRef.current[i]);
+			syncLayerEntries();
+		}
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const addFrame = () => {
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const newLayers = (
+			currentLayers.length > 0
+				? currentLayers
+				: [{ name: "レイヤー #1", visible: true, locked: false, opacity: 100 }]
+		).map((l) => {
+			const newL = new oekaki.LayeredCanvas(l.name);
+			newL.visible = l.visible;
+			newL.locked = l.locked;
+			newL.opacity = l.opacity;
+			return newL;
+		});
+		const idx = currentFrameRef.current + 1;
+		const newId = nextFrameIdRef.current++;
+		frameInstancesRef.current.splice(idx, 0, newLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
+		currentFrameRef.current = idx;
+		oekaki.setLayers(newLayers);
+		syncLayerEntries();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const deleteFrame = () => {
+		if (frameInstancesRef.current.length <= 1) return;
+		handleDeselect();
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const toDelete = frameInstancesRef.current[currentFrameRef.current];
+		toDelete?.forEach((l) => l.delete());
+		frameInstancesRef.current.splice(currentFrameRef.current, 1);
+		frameIdsRef.current.splice(currentFrameRef.current, 1);
+		if (currentFrameRef.current >= frameInstancesRef.current.length)
+			currentFrameRef.current = frameInstancesRef.current.length - 1;
+		const nextLayers = frameInstancesRef.current[currentFrameRef.current];
+		if (nextLayers) {
+			oekaki.setLayers(nextLayers);
+			syncLayerEntries();
+		}
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const duplicateFrameAdjacent = () => {
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const dupLayers = currentLayers.map((src) => {
+			const dupL = new oekaki.LayeredCanvas(src.name);
+			dupL.visible = src.visible;
+			dupL.locked = src.locked;
+			dupL.opacity = src.opacity;
+			dupL.data = new Uint8ClampedArray(src.data);
+			dupL.trace();
+			return dupL;
+		});
+		const idx = currentFrameRef.current + 1;
+		const newId = nextFrameIdRef.current++;
+		frameInstancesRef.current.splice(idx, 0, dupLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
+		currentFrameRef.current = idx;
+		oekaki.setLayers(dupLayers);
+		syncLayerEntries();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const duplicateFrameEnd = () => {
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const currentLayers = oekaki.getLayers();
+		const dupLayers = currentLayers.map((src) => {
+			const dupL = new oekaki.LayeredCanvas(src.name);
+			dupL.visible = src.visible;
+			dupL.locked = src.locked;
+			dupL.opacity = src.opacity;
+			dupL.data = new Uint8ClampedArray(src.data);
+			dupL.trace();
+			return dupL;
+		});
+		const idx = frameInstancesRef.current.length;
+		const newId = nextFrameIdRef.current++;
+		frameInstancesRef.current.splice(idx, 0, dupLayers);
+		frameIdsRef.current.splice(idx, 0, newId);
+		currentFrameRef.current = idx;
+		oekaki.setLayers(dupLayers);
+		syncLayerEntries();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const reorderFrame = (from: number, to: number) => {
+		if (
+			from === to ||
+			from < 0 ||
+			to < 0 ||
+			from >= frameInstancesRef.current.length ||
+			to >= frameInstancesRef.current.length
+		)
+			return;
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			frameIdsRef.current = [1];
+		}
+		frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		const moved = frameInstancesRef.current.splice(from, 1)[0];
+		frameInstancesRef.current.splice(to, 0, moved);
+		const movedId = frameIdsRef.current.splice(from, 1)[0];
+		frameIdsRef.current.splice(to, 0, movedId);
+
+		let newCurrent = currentFrameRef.current;
+		if (currentFrameRef.current === from) {
+			newCurrent = to;
+		} else if (from < currentFrameRef.current && to >= currentFrameRef.current) {
+			newCurrent--;
+		} else if (from > currentFrameRef.current && to <= currentFrameRef.current) {
+			newCurrent++;
+		}
+		currentFrameRef.current = newCurrent;
+		const target = frameInstancesRef.current[newCurrent];
+		if (target) {
+			oekaki.setLayers(target);
+			syncLayerEntries();
+		}
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
+	const togglePlay = () => {
+		if (isPlayingRef.current) {
+			if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+			playTimerRef.current = null;
+			isPlayingRef.current = false;
+			setIsPlaying(false);
+		} else {
+			handleDeselect();
+			if (frameInstancesRef.current.length === 0) {
+				frameInstancesRef.current = [oekaki.getLayers()];
+			}
+			frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+			isPlayingRef.current = true;
+			setIsPlaying(true);
+			playTimerRef.current = window.setInterval(() => {
+				if (frameInstancesRef.current.length <= 1) return;
+				const next =
+					(currentFrameRef.current + 1) % frameInstancesRef.current.length;
+				currentFrameRef.current = next;
+				const target = frameInstancesRef.current[next];
+				if (target) {
+					oekaki.setLayers(target);
+					syncLayerEntries();
+				}
+				updateOnionSkin();
+				forceRender((n) => n + 1);
+			}, 1000 / fpsRef.current);
+		}
+	};
+
+	const handleFpsChange = (fps: number) => {
+		fpsRef.current = fps;
+		if (isPlayingRef.current) {
+			if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+			playTimerRef.current = window.setInterval(() => {
+				if (frameInstancesRef.current.length <= 1) return;
+				const next =
+					(currentFrameRef.current + 1) % frameInstancesRef.current.length;
+				currentFrameRef.current = next;
+				const target = frameInstancesRef.current[next];
+				if (target) {
+					oekaki.setLayers(target);
+					syncLayerEntries();
+				}
+				updateOnionSkin();
+				forceRender((n) => n + 1);
+			}, 1000 / fpsRef.current);
+		}
+	};
+
+	const enterAnimMode = () => {
+		stopPlayback();
+		handleDeselect();
+		if (frameInstancesRef.current.length === 0) {
+			frameInstancesRef.current = [oekaki.getLayers()];
+			currentFrameRef.current = 0;
+		} else {
+			if (!frameInstancesRef.current[currentFrameRef.current]) {
+				currentFrameRef.current = 0;
+			}
+			const target = frameInstancesRef.current[currentFrameRef.current];
+			if (target) {
+				oekaki.setLayers(target);
+				syncLayerEntries();
+			}
+		}
+		setAnimMode(true);
+		updateOnionSkin();
+	};
+
+	const exitAnimMode = () => {
+		stopPlayback();
+		handleDeselect();
+		if (frameInstancesRef.current.length > 0) {
+			frameInstancesRef.current[currentFrameRef.current] = oekaki.getLayers();
+		}
+		onionSkinRef.current = false;
+		setOnionSkin(false);
+		if (onionCanvasRef.current) onionCanvasRef.current.style.display = "none";
+		setAnimMode(false);
+	};
+
+	const stopPlayback = () => {
+		if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+		playTimerRef.current = null;
+		isPlayingRef.current = false;
+		setIsPlaying(false);
+	};
+
+	useEffect(() => {
+		return () => {
+			if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+		};
+	}, []);
+
+	const handleSave = async () => {
+		const state = getCurrentState();
+		if (state) {
+			saveHistory(storageKey, state, "drawing", 50);
+		}
+		clearAutosave(storageKey);
+
+		// アニメモードで複数フレームある場合は横1列のスプライトシートとして書き出す
+		// （GIFではなく静止画スプライトシート＝投稿側の想定フォーマット）。
+		// コマ数/fpsは総ピクセルサイズから逆算できない自由入力値なので、
+		// メタデータとして別途 onSave に渡し posts.anim_frames/anim_fps に保存する。
+		const hasMultipleFrames =
+			animMode && frameInstancesRef.current.length > 1;
+		if (hasMultipleFrames) {
+			const frameCanvases = getAnimFramesForExport();
+			if (frameCanvases.length > 1) {
+				const w = frameCanvases[0].width;
+				const h = frameCanvases[0].height;
+				try {
+					const sheet = generateSpriteSheetCanvas({
+						columns: frameCanvases.length,
+						rows: 1,
+						cellWidth: w,
+						cellHeight: h,
+						frames: frameCanvases,
+					});
+					// Neonのcontent_urlに生base64を書き込まないよう、必ずアップロードしてURL化する
+					const { url } = await api.upload.image({
+						image: sheet.toDataURL("image/png"),
+					});
+					onSave(url, {
+						animFrames: frameCanvases.length,
+						animFps: fpsRef.current,
+					});
+					return;
+				} catch (err) {
+					console.error(
+						"アニメスプライトシートの書き出しに失敗、1枚絵として保存します",
+						err,
+					);
+				}
+			}
+		}
+
+		onSave(oekaki.render().toDataURL());
+	};
+
+	// キャンバス全体を選択する（全選択→コピー→貼り付けの入口）
+	const handleSelectAll = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active?.editable) return false;
+		const { width, height } = active.canvas;
+		if (showGrid) {
+			active.selectByDot(0, 0, width, height);
+		} else {
+			active.select(0, 0, width, height);
+		}
+		setTool("select");
+		toolRef.current = "select";
+		drawSelectionHandle();
+		forceRender((n) => n + 1);
+		return true;
+	};
+
+	/**
+	 * 選択範囲をクリップボードにコピーする。選択が無ければ何もしない
+	 *
+	 * @returns コピーしたか
+	 */
+	const handleCopy = () => {
+		const target = layerEntriesRef.current
+			.map((l) => l.instance)
+			.find((l) => l.selection);
+		const copyCanvas = target?.copySelection();
+		if (!copyCanvas) return false;
+		copyToClipboard(copyCanvas);
+		return true;
+	};
+
+	const handleCut = () => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		const target =
+			layerEntriesRef.current
+				.map((l) => l.instance)
+				.find((l) => l.selection) || active;
+		if (!target?.selection) return;
+		handleCopy();
+		target.deleteSelection();
+		if (target.modified()) target.trace();
+		forceRender((n) => n + 1);
+	};
+
+	const handleImport = async (
+		image: HTMLImageElement,
+		_opts: { opacity: number; simple: boolean },
+	) => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active?.editable) return;
+		const bitmap = await createImageBitmap(image);
+		active.paste(bitmap);
+		active.trace();
+		setTool("select");
+		toolRef.current = "select";
+		drawSelectionHandle();
+		forceRender((n) => n + 1);
+	};
+
+	useEffect(() => {
+		const onCopy = (e: ClipboardEvent) => {
+			if (notDrawing(e)) return;
+			if (handleCopy()) e.preventDefault();
+		};
+
+		const onPaste = async (e: ClipboardEvent) => {
+			if (notDrawing(e)) return;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			if (!active?.editable) return;
+			const bitmap = await readPasteImage(e, true);
+			if (!bitmap) return;
+			e.preventDefault();
+			active.paste(bitmap);
+			if (active.modified()) active.trace();
+			setTool("select");
+			toolRef.current = "select";
+			drawSelectionHandle();
+			forceRender((n) => n + 1);
+		};
+
+		const handler = (e: KeyboardEvent) => {
+			if (notDrawing(e)) return;
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			if (e.ctrlKey || e.metaKey) {
+				const key = e.key.toLowerCase();
+				if (key === "z" || e.code === "KeyZ") {
+					e.preventDefault();
+					if (e.shiftKey) {
+						handleRedo();
+					} else {
+						handleUndo();
+					}
+					return;
+				}
+				if (key === "a" || e.code === "KeyA") {
+					if (handleSelectAll()) e.preventDefault();
+					return;
+				}
+				if (key === "c" || e.code === "KeyC") {
+					if (handleCopy()) e.preventDefault();
+					return;
+				}
+				if (key === "x" || e.code === "KeyX") {
+					e.preventDefault();
+					handleCut();
+					return;
+				}
+				return;
+			}
+			if (active?.selection) {
+				if (e.key === "Delete" || e.key === "Backspace") {
+					e.preventDefault();
+					active.deleteSelection();
+					if (active.modified()) active.trace();
+					forceRender((n) => n + 1);
+					return;
+				} else if (e.key === "Escape") {
+					e.preventDefault();
+					handleDeselect();
+					return;
+				} else if (
+					["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
+				) {
+					e.preventDefault();
+					const step = 1;
+					const dx =
+						e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+					const dy =
+						e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+					active.moveSelection(dx, dy);
+					if (active.modified()) active.trace();
+					drawSelectionHandle();
+					return;
+				} else if (e.key === "[" || e.key === "]") {
+					e.preventDefault();
+					const rotateStep = showGrid ? 90 : 15;
+					const deltaAngle = e.key === "[" ? -rotateStep : rotateStep;
+					if (showGrid) {
+						active.rotateSelectionByDot(deltaAngle);
+					} else {
+						active.rotateSelection(deltaAngle);
+					}
+					if (active.modified()) active.trace();
+					drawSelectionHandle();
+					return;
+				}
+			}
+			switch (e.key) {
+				case "1":
+					selectTool("pen");
+					break;
+				case "2":
+					selectTool("brush");
+					break;
+				case "3":
+					selectTool("eraser");
+					break;
+				case "4":
+					selectTool("dropper");
+					break;
+				case "5":
+					selectTool("fill");
+					break;
+				case "6":
+					selectTool("select");
+					break;
+				case "7":
+					selectTool("lasso");
+					break;
+				case "g":
+					setShowGrid((v) => !v);
+					break;
+			}
+		};
+		window.addEventListener("copy", onCopy);
+		window.addEventListener("paste", onPaste);
+		window.addEventListener("keydown", handler);
+		return () => {
+			window.removeEventListener("copy", onCopy);
+			window.removeEventListener("paste", onPaste);
+			window.removeEventListener("keydown", handler);
+		};
+	}, [showGrid]);
+
+	// スマホでの2本指ピンチによるズームは行わない（描画中に不用意に拡大縮小されるため）。
+	// ただし複数指タッチの検出自体は残す — 2本目の指がそのまま線として描かれるのを防ぐ必要がある。
+	// ズームはツールバーのボタンとPCのホイールから操作する。
+	const handleMultiTouchPointerDown = (e: React.PointerEvent) => {
+		multiTouchPointsRef.current.set(e.pointerId, {
+			x: e.clientX,
+			y: e.clientY,
+		});
+		// 1本目の指はそのまま描画が始まってしまうため、内容を控えておき、
+		// 2本目が触れた時点で巻き戻して描き込みを無かったことにする。
+		if (multiTouchPointsRef.current.size === 1 && e.pointerType === "touch") {
+			const active =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			strokeSnapshotRef.current = active?.editable
+				? { layer: active, data: active.data }
+				: null;
+		}
+		if (multiTouchPointsRef.current.size >= 2) {
+			multiTouchingRef.current = true;
+			const snapshot = strokeSnapshotRef.current;
+			if (snapshot) {
+				snapshot.layer.data = snapshot.data;
+				strokeSnapshotRef.current = null;
+			}
+		}
+	};
+
+	const handleMultiTouchPointerMove = (e: React.PointerEvent) => {
+		if (!multiTouchPointsRef.current.has(e.pointerId)) return;
+		multiTouchPointsRef.current.set(e.pointerId, {
+			x: e.clientX,
+			y: e.clientY,
+		});
+	};
+
+	// キャンバス外（ツールバー上など）で指が離れると要素側の pointerup を取りこぼし、
+	// 複数指フラグが立ちっぱなしで描けなくなるため、window側でも後始末する。
+	useEffect(() => {
+		const release = (e: PointerEvent) => {
+			if (!multiTouchPointsRef.current.delete(e.pointerId)) return;
+			if (multiTouchPointsRef.current.size === 0) {
+				multiTouchingRef.current = false;
+				strokeSnapshotRef.current = null;
+			}
+		};
+		window.addEventListener("pointerup", release);
+		window.addEventListener("pointercancel", release);
+		return () => {
+			window.removeEventListener("pointerup", release);
+			window.removeEventListener("pointercancel", release);
+		};
+	}, []);
+
+	const handleMultiTouchPointerUp = (e: React.PointerEvent) => {
+		multiTouchPointsRef.current.delete(e.pointerId);
+		// 指が全部離れるまでは描画を再開しない（1本残った指で線が出るのを防ぐ）
+		if (multiTouchPointsRef.current.size === 0) {
+			multiTouchingRef.current = false;
+			strokeSnapshotRef.current = null;
+		}
+	};
+
+	const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
+		<button
+			onClick={() => selectTool(t)}
+			className={
+				"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+				(tool === t
+					? "bg-blue-600 text-white shadow"
+					: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+			}
+			title={label}
+		>
+			{icon}
+		</button>
+	);
+
+	return (
+		<div className="fixed inset-0 bg-[#0f0f11] z-50 flex flex-col select-none">
+			<div className="flex items-center px-3.5 py-2 border-b border-gray-800 shrink-0 bg-[#0f0f11] gap-2">
+				<button
+					onClick={onClose}
+					className="text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors"
+				>
+					<X size={20} />
+				</button>
+				<span className="font-bold text-xs text-gray-300">キャンセル</span>
+				<span className="text-gray-600 text-[10px]">›</span>
+				<div className="flex items-center bg-gray-800 rounded-lg p-0.5 gap-0.5">
+					<button
+						onClick={() => {
+							if (animMode) exitAnimMode();
+						}}
+						className={
+							"px-3 py-1 rounded-md text-[11px] font-medium transition-colors " +
+							(!animMode
+								? "bg-blue-600 text-white shadow-sm"
+								: "text-gray-400 hover:text-gray-200")
+						}
+					>
+						一枚絵
+					</button>
+					<button
+						onClick={() => enterAnimMode()}
+						className={
+							"px-3 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 " +
+							(animMode
+								? "bg-blue-600 text-white shadow-sm"
+								: "text-gray-400 hover:text-gray-200")
+						}
+					>
+						<Film size={12} />
+						アニメ
+					</button>
+				</div>
+				<div className="ml-auto flex items-center space-x-2">
+					{/* 設定ボタン & ドロップダウン */}
+					<div className="relative" ref={settingsRef}>
+						<button
+							onClick={() => setSettingsOpen((v) => !v)}
+							className={`p-1.5 rounded transition-colors ${
+								settingsOpen
+									? "bg-gray-700 text-white"
+									: "text-gray-400 hover:bg-gray-800 hover:text-white"
+							}`}
+							title="設定"
+						>
+							<Settings size={14} />
+						</button>
+						{settingsOpen && (
+							<div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#161622] border border-gray-700 shadow-2xl p-2 rounded-lg space-y-1">
+								{/* 履歴 */}
+								<button
+									onClick={() => {
+										setShowHistory(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<History size={13} />
+									<span>履歴・スナップショット</span>
+								</button>
+								<div className="border-t border-gray-800 my-1" />
+								{/* 出力・ダウンロード */}
+								<button
+									onClick={() => {
+										setShowExportDialog(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Download size={13} />
+									<span>
+										{animMode
+											? "アニメーションの出力"
+											: "画像の出力"}
+									</span>
+								</button>
+								{/* 読込 */}
+								<button
+									onClick={() => {
+										setShowImport(true);
+										setSettingsOpen(false);
+									}}
+									className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded transition"
+								>
+									<Upload size={13} />
+									<span>画像の読込 (インポート)</span>
+								</button>
+							</div>
+						)}
+					</div>
+				</div>
+			</div>
+
+			{hasAutosave && (
+				<div className="bg-yellow-600/20 border-b border-yellow-800/30 px-4 py-2 flex items-center justify-between text-xs text-yellow-200 shrink-0">
+					<span className="flex items-center gap-1.5">
+						⚠️ 未保存のデータ（自動保存）があります。復元しますか？
+					</span>
+					<div className="flex gap-2">
+						<button
+							onClick={handleRestoreAutosave}
+							className="bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded text-[10px] active:scale-95 transition-transform"
+						>
+							復元する
+						</button>
+						<button
+							onClick={handleIgnoreAutosave}
+							className="text-gray-400 hover:text-gray-200 px-2 py-1 rounded text-[10px]"
+						>
+							無視
+						</button>
+					</div>
+				</div>
+			)}
+
+			<ZoomScrollArea
+				zoom={zoom}
+				setZoom={setZoom}
+				mountRef={mountRef}
+				className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner relative"
+				padClassName=""
+				onPointerDown={handleMultiTouchPointerDown}
+				onPointerMove={handleMultiTouchPointerMove}
+				onPointerUp={handleMultiTouchPointerUp}
+				onPointerCancel={handleMultiTouchPointerUp}
+			/>
+
+			{/* eslint-disable react-hooks/refs */}
+			{animMode && (
+				// フレーム数・現在フレーム・fps は毎フレームの高頻度更新を避けるため意図的に ref + forceRender
+				// で管理しており(各更新箇所で forceRender を呼びfresh値を反映)、ここでの ref 読み取りは安全。
+				<AnimationBar
+					frames={getEditorFrames(
+						frameInstancesRef.current,
+						frameIdsRef.current,
+						oekaki.getLayers(),
+						currentFrameRef.current,
+					)}
+					currentFrame={currentFrameRef.current}
+					fps={fpsRef.current}
+					isPlaying={isPlaying}
+					onSelectFrame={selectFrame}
+					onAddFrame={addFrame}
+					onDeleteFrame={deleteFrame}
+					onDuplicateFrameAdjacent={duplicateFrameAdjacent}
+					onDuplicateFrameEnd={duplicateFrameEnd}
+					onReorderFrame={reorderFrame}
+					onTogglePlay={togglePlay}
+					onFpsChange={handleFpsChange}
+					onionSkin={onionSkin}
+					onionSkinOpacity={onionSkinOpacity}
+					onToggleOnionSkin={toggleOnionSkin}
+					onOnionSkinOpacityChange={handleOnionSkinOpacityChange}
+					onExit={exitAnimMode}
+				/>
+			)}
+			{/* eslint-enable react-hooks/refs */}
+
+			<div className="px-3.5 pb-4 pt-2.5 space-y-2.5 shrink-0 bg-[#0f0f11] border-t border-gray-900">
+				<div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+					{toolBtn("pen", <Pen size={15} />, "ペン (1)")}
+					{toolBtn("brush", <Brush size={15} />, "ブラシ (2)")}
+					{toolBtn("eraser", <Eraser size={15} />, "消しゴム (3)")}
+					{toolBtn("dropper", <Pipette size={15} />, "スポイト (4)")}
+					{toolBtn("fill", <PaintBucket size={15} />, "塗りつぶし (5)")}
+					{toolBtn("select", <BoxSelect size={15} />, "範囲選択 (6)")}
+					{toolBtn("lasso", <LassoSelect size={15} />, "自由選択 (7)")}
+					<div className="w-px h-6 bg-gray-800 mx-1" />
+					<button
+						onClick={() => setShowGrid((v) => !v)}
+						className={
+							"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+							(showGrid
+								? "bg-blue-600 text-white shadow"
+								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+						}
+						title="グリッド (G)"
+					>
+						<Grid3x3 size={15} />
+					</button>
+					<button
+						onClick={() => setShowLayerPanel((v) => !v)}
+						className={
+							"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+							(showLayerPanel
+								? "bg-blue-600 text-white shadow"
+								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+						}
+						title="レイヤー"
+					>
+						<Layers size={15} />
+					</button>
+					<button
+						onClick={() => {
+							oekaki.flipped.value = !oekaki.flipped.value;
+							setFlipped(oekaki.flipped.value);
+						}}
+						className={
+							"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+							(flipped
+								? "bg-blue-600 text-white shadow"
+								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+						}
+						title="表示だけ左右反転（描画内容は変わらない）"
+					>
+						<FlipHorizontal size={15} />
+					</button>
+					<button
+						onClick={() => setShowMacros((v) => !v)}
+						className={
+							"w-9 h-9 rounded-lg flex items-center justify-center transition-colors " +
+							(showMacros
+								? "bg-blue-600 text-white shadow"
+								: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+						}
+						title="マクロ（描画内容の左右反転など）"
+					>
+						<Wand2 size={15} />
+					</button>
+				</div>
+
+				{showMacros && <DrawingMacroBar onFlip={handleMacroFlip} />}
+
+				<div className="flex items-center space-x-3">
+					{(tool === "pen" || tool === "brush") && (
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-12 shrink-0">
+								{tool === "brush" ? "ブラシ" : "ペン"}サイズ
+							</span>
+							<input
+								type="range"
+								min={1}
+								max={tool === "brush" ? 60 : 20}
+								value={currentSize}
+								onChange={(e) =>
+									tool === "brush"
+										? setBrushSize(Number(e.target.value))
+										: setPenSize(Number(e.target.value))
+								}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-6 text-right">
+								{currentSize}px
+							</span>
+						</div>
+					)}
+					{tool === "eraser" && (
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-16 shrink-0">
+								消しゴムサイズ
+							</span>
+							<input
+								type="range"
+								min={4}
+								max={80}
+								value={eraserSize}
+								onChange={(e) => setEraserSize(Number(e.target.value))}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-6 text-right">
+								{eraserSize}px
+							</span>
+						</div>
+					)}
+					{tool === "dropper" && (
+						<span className="text-[10px] text-gray-500">
+							キャンバスをクリック
+						</span>
+					)}
+					{tool === "fill" && (
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-12 shrink-0">
+								色の許容
+							</span>
+							<input
+								type="range"
+								min={0}
+								max={128}
+								value={fillTolerance}
+								onChange={(e) => setFillTolerance(Number(e.target.value))}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-6 text-right">
+								{fillTolerance}
+							</span>
+							<span className="text-[10px] text-gray-500 shrink-0">はみ出し</span>
+							<input
+								type="range"
+								min={0}
+								max={8}
+								value={fillGrow}
+								onChange={(e) => setFillGrow(Number(e.target.value))}
+								className="w-16 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-8 text-right">
+								{fillGrow}px
+							</span>
+						</div>
+					)}
+					{(tool === "select" || tool === "lasso") && (
+						<div className="flex-1 flex items-center space-x-1">
+							<span className="text-[10px] text-gray-500">
+								クリック&ドラッグで範囲選択
+							</span>
+						</div>
+					)}
+				</div>
+
+				{(tool === "pen" ||
+					tool === "brush" ||
+					tool === "eraser" ||
+					tool === "fill") && (
+					<div className="flex items-center space-x-3">
+						<div className="flex-1 flex items-center space-x-2">
+							<span className="text-[10px] text-gray-500 w-12 shrink-0">
+								濃さ
+							</span>
+							<input
+								type="range"
+								min={1}
+								max={100}
+								value={paintOpacity}
+								onChange={(e) => setPaintOpacity(Number(e.target.value))}
+								className="flex-1 h-1 accent-blue-500"
+							/>
+							<span className="text-[10px] text-gray-400 w-8 text-right">
+								{paintOpacity}%
+							</span>
+						</div>
+						{(tool === "brush" || tool === "eraser") && (
+							<div className="flex-1 flex items-center space-x-2">
+								<span className="text-[10px] text-gray-500 w-10 shrink-0">
+									ぼかし
+								</span>
+								<input
+									type="range"
+									min={0}
+									max={100}
+									value={brushSoftness}
+									onChange={(e) => setBrushSoftness(Number(e.target.value))}
+									className="flex-1 h-1 accent-blue-500"
+								/>
+								<span className="text-[10px] text-gray-400 w-8 text-right">
+									{brushSoftness}%
+								</span>
+							</div>
+						)}
+						{tool === "fill" && (
+							<button
+								onClick={() => setFillRefAll((v) => !v)}
+								title="線画が別レイヤーにあっても、その囲みの内側だけを塗る"
+								className={
+									"px-2 h-6 rounded text-[10px] shrink-0 transition-colors " +
+									(fillRefAll
+										? "bg-blue-600 text-white"
+										: "bg-gray-100/10 text-gray-300 hover:bg-gray-100/20")
+								}
+							>
+								全レイヤー参照
+							</button>
+						)}
+					</div>
+				)}
+
+				<div className="flex items-center space-x-2">
+					<div
+						className="relative shrink-0 w-8 h-8 rounded border border-gray-600 overflow-hidden"
+						style={{ backgroundColor: color }}
+					/>
+					<input
+						type="color"
+						value={color}
+						onChange={(e) => applyColor(e.target.value)}
+						className="w-8 h-8 rounded border border-gray-700 cursor-pointer bg-transparent"
+					/>
+					<div className="flex-1 flex flex-wrap gap-0.5">
+						{PRESET_COLORS.map((c) => (
+							<button
+								key={c}
+								className={
+									"w-5 h-5 rounded-sm border " +
+									(color === c
+										? "border-white scale-110"
+										: "border-gray-700/50") +
+									" transition-transform"
+								}
+								style={{ backgroundColor: c }}
+								onClick={() => applyColor(c)}
+							/>
+						))}
+					</div>
+				</div>
+				{recentColors.length > 0 && (
+					<div className="flex items-center space-x-1.5">
+						<span className="text-[9px] text-gray-600 shrink-0">履歴</span>
+						<div className="flex flex-wrap gap-0.5">
+							{recentColors.map((c) => (
+								<button
+									key={c}
+									className="w-5 h-5 rounded-sm border border-gray-700/50 hover:scale-110 transition-transform"
+									style={{ backgroundColor: c }}
+									onClick={() => applyColor(c)}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+
+				{(tool === "select" || tool === "lasso") && (
+					<div className="flex items-center space-x-1">
+						<button
+							onClick={handleCopy}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲をコピー (Ctrl+C)"
+						>
+							<Copy size={11} />
+							<span>コピー</span>
+						</button>
+						<button
+							onClick={handleCut}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲を削除 (Delete)"
+						>
+							<Trash2 size={11} />
+							<span>削除</span>
+						</button>
+						<div className="w-px h-5 bg-gray-800 mx-1" />
+						<button
+							onClick={() => {
+								const active =
+									layerEntriesRef.current[activeLayerIndexRef.current]
+										?.instance;
+								if (!active?.selection) return;
+								const step = showGrid ? 90 : 15;
+								if (showGrid) {
+									active.rotateSelectionByDot(-step);
+								} else {
+									active.rotateSelection(-step);
+								}
+								if (active.modified()) active.trace();
+								drawSelectionHandle();
+								forceRender((n) => n + 1);
+							}}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="反時計回りに回転"
+						>
+							<RotateCcw size={11} />
+							<span>回転</span>
+						</button>
+						<button
+							onClick={() => {
+								const active =
+									layerEntriesRef.current[activeLayerIndexRef.current]
+										?.instance;
+								if (!active?.selection) return;
+								const step = showGrid ? 90 : 15;
+								if (showGrid) {
+									active.rotateSelectionByDot(step);
+								} else {
+									active.rotateSelection(step);
+								}
+								if (active.modified()) active.trace();
+								drawSelectionHandle();
+								forceRender((n) => n + 1);
+							}}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="時計回りに回転"
+						>
+							<RotateCw size={11} />
+							<span>回転</span>
+						</button>
+						<div className="w-px h-5 bg-gray-800 mx-1" />
+						<button
+							onClick={handleDeselect}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="選択範囲を解除 (Esc)"
+						>
+							<X size={11} />
+							<span>解除</span>
+						</button>
+					</div>
+				)}
+
+				<div className="flex justify-between items-center">
+					<div className="flex space-x-1.5">
+						<button
+							onClick={clearCanvas}
+							className="px-2 h-7 rounded bg-red-950/20 text-red-400 border border-red-900/30 flex items-center space-x-1 text-[10px]"
+						>
+							<Trash2 size={11} />
+							<span>クリア</span>
+						</button>
+						<button
+							onClick={() => setShowExportDialog(true)}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+							title="出力・ダウンロード"
+						>
+							<Download size={11} />
+							<span>出力</span>
+						</button>
+						<button
+							onClick={() => setShowImport(true)}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20"
+						>
+							<Upload size={11} />
+							<span>読込</span>
+						</button>
+						<button
+							onClick={() => setShowHistory(true)}
+							className="px-2 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center space-x-1 text-[10px] transition-colors"
+						>
+							<History size={11} />
+							<span>履歴</span>
+						</button>
+						<button
+							onClick={handleUndo}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+						>
+							<Undo size={11} />
+							<span>戻る</span>
+						</button>
+						<button
+							onClick={handleRedo}
+							className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+						>
+							<Redo size={11} />
+							<span>進む</span>
+						</button>
+					</div>
+					<button
+						onClick={handleSave}
+						className="h-7 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1.5 px-3 text-[10px] transition-colors"
+					>
+						<Save size={11} />
+						<span>投稿する</span>
+					</button>
+				</div>
+			</div>
+			{showLayerPanel && (
+				<LayerPanel
+					layers={layerEntries}
+					activeIndex={activeLayerIndex}
+					onSelect={selectLayer}
+					onReorder={reorderLayers}
+					onToggleVisibility={toggleVisibility}
+					onToggleLock={toggleLock}
+					onToggleAlphaLock={toggleAlphaLock}
+					onOpacityChange={setLayerOpacity}
+					onAdd={addLayer}
+					onDelete={deleteLayer}
+					onClose={() => setShowLayerPanel(false)}
+				/>
+			)}
+			<ImportDialog
+				open={showImport}
+				onClose={() => setShowImport(false)}
+				onImport={handleImport}
+				walkMode={false}
+				walkPresets={[]}
+			/>
+			<HistoryModal
+				isOpen={showHistory}
+				onClose={() => setShowHistory(false)}
+				storageKey={storageKey}
+				type="drawing"
+				onRestore={handleRestoreHistory}
+				getCurrentData={getCurrentState}
+			/>
+			{/* eslint-disable react-hooks/refs */}
+			<DrawingExportDialog
+				open={showExportDialog}
+				onClose={() => setShowExportDialog(false)}
+				mode={animMode ? "anim" : "standard"}
+				isDotEditor={false}
+				fps={fpsRef.current}
+				onExportSinglePng={handleExportSinglePng}
+				onExportSpriteSheet={handleExportAnimSpriteSheet}
+				onExportGif={handleExportAnimGif}
+				onExportZip={handleExportAnimZip}
+			/>
+			{/* eslint-enable react-hooks/refs */}
+		</div>
+	);
+}

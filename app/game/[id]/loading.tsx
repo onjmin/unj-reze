@@ -2,8 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import GameLandingView from "@/components/GameLandingView";
-import { readCachedGame } from "@/lib/game-cache";
+import GameLandingView from "@/components/game/GameLandingView";
+import { readCachedGame } from "@/lib/game/game-cache";
 import type { GameRankingEntry } from "@/lib/types";
 
 export default function GameLoading() {

@@ -1,7 +1,7 @@
-import { db as mockDb } from "../mock-db";
-import type { MvManifest } from "../mv-config";
-import { OriginType } from "../types";
-import type { DbGameRecord, DbMvRecord, DbTalkRecord } from "../types-db";
+import { db as mockDb } from "./mock-db";
+import type { MvManifest } from "@/lib/mv/mv-config";
+import { OriginType } from "@/lib/types";
+import type { DbGameRecord, DbMvRecord, DbTalkRecord } from "@/lib/types-db";
 import type {
 	CreateGameParams,
 	CreateMvParams,
@@ -103,7 +103,7 @@ export const mockStore: DataStore = {
 	async deletePost(id: number, userId: string) {
 		// mockモードでは常に空でよい：
 		// - MMLは content にインライン保持のまま（isUploaderAvailable=false時の挙動、
-		//   lib/mml-payload.ts 参照）でR2実体が無い。
+		//   lib/mml/mml-payload.ts 参照）でR2実体が無い。
 		// - ゲーム/MVはそもそもアップローダ未設定だと作成自体ができない
 		//   （lib/uploader.ts uploadText が isUploaderAvailable=false で即throw）ので、
 		//   mockDb側にorphan判定を足す実益が無い。gameStore/mvStore(lib/db/mock.ts)は

@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import type { DotMetaEdit } from "@/lib/db/interface";
-import { parseImageDeleteRef, parseMmlRef } from "@/lib/manifest-ref";
-import { attachEmbedInfo } from "@/lib/post-embeds";
+import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
+import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
-import { tryHeart, tryVote } from "@/lib/vote-guard";
-import { isValidWalkPreset } from "@/lib/walk-cycle";
+import { tryHeart, tryVote } from "@/lib/security/vote-guard";
+import { isValidWalkPreset } from "@/lib/assets/walk-cycle";
 
 /**
  * ドット絵素材メタの後付け編集。投稿済みの任意の画像URLに dotW/dotH/animFrames/animFps/
@@ -261,7 +261,7 @@ export async function PATCH(
 	]);
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
-	// （lib/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
+	// （lib/game/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
 	// 差し替えで外れた旧画像（previousImage）も同じ扱い。
 	const { previousMml, previousImage } = result as typeof result & {
 		previousMml?: { deleteId: string; deleteHash: string };

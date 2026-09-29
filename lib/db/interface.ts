@@ -1,13 +1,13 @@
-import type { GameManifestDraft } from "@/components/GameMaker";
-import type { Message, Trend } from "../mock-db";
-import type { MvManifest, MvPresetKind } from "../mv-config";
+import type { GameManifestDraft } from "@/components/game/GameMaker";
+import type { Message, Trend } from "./mock-db";
+import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
 import {
 	AnonymousUser,
 	FollowUser,
 	GameVoteCandidate,
 	OriginType,
 	OshiItemKind,
-} from "../types";
+} from "@/lib/types";
 import {
 	DbGameRecord,
 	DbMediaSearchPost,
@@ -16,7 +16,7 @@ import {
 	DbNotification,
 	DbOshiItem,
 	DbPost,
-} from "../types-db";
+} from "@/lib/types-db";
 
 /**
  * manifest 本体はブラウザが uploader-worker へ直接上げ、DBにはURLだけが渡る。
@@ -101,7 +101,7 @@ export interface MmlRef {
  * 添付画像の削除トークン。画像はブラウザが uploader へ直接上げ（lib/uploader.ts uploadImage）、
  * DBには imageSrc（URL）とこのトークンが渡る。DELETE_SECRET_PEPPER は uploader 側にしか無く
  * 後から再計算できないので、保存しておかないと投稿を消しても画像の実体を消せない。
- * 値は lib/manifest-ref.ts parseImageDeleteRef で imageSrc のキーと突き合わせ済みのものだけ。
+ * 値は lib/assets/manifest-ref.ts parseImageDeleteRef で imageSrc のキーと突き合わせ済みのものだけ。
  */
 export interface ImageDeleteRef {
 	imageDeleteId?: string;
@@ -135,7 +135,7 @@ export interface CreatePostParams extends MmlRef, ImageDeleteRef {
 	/** アニメ/歩行グラの再生fps */
 	animFps?: number;
 	/**
-	 * imageSrc が歩行グラのスプライトシートのとき、`lib/walk-cycle.ts` の
+	 * imageSrc が歩行グラのスプライトシートのとき、`lib/assets/walk-cycle.ts` の
 	 * WalkPreset.label（例: "RPGEN"）。方向数・コマ順はこのラベルから一意に
 	 * 引けるので、画像の画素サイズから推測(detectPreset)する必要が無くなる
 	 * ＝別規格が同じ総ピクセルサイズになる衝突を避けられる。
@@ -496,6 +496,6 @@ export interface DataStore {
 	 */
 	recordPresetOpen(preset: string): Promise<void>;
 	// ゴーストプレイヤーの位置同期はDBに一切持たない。ハブ（Koyeb）のメモリ上のみで
-	// 完結する仕組みに一本化した（components/LiveGameView.tsx）。ハブ未設定時は
+	// 完結する仕組みに一本化した（components/game/LiveGameView.tsx）。ハブ未設定時は
 	// プレゼンス機能自体を出さない。DB書き込みへのフォールバックは意図的に作らない。
 }

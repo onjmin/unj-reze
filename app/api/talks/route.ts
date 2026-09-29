@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
-import { parseBgRef, parseManifestRef } from "@/lib/manifest-ref";
+import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
 import { encodeTalk } from "@/lib/sqids";
 
 /**

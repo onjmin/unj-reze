@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { attachEmbedInfo } from "@/lib/post-embeds";
+import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { encodePost } from "@/lib/sqids";
 
 export async function GET(

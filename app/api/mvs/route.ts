@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
-import { parseBgRef, parseManifestRef } from "@/lib/manifest-ref";
+import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
 import {
 	MV_PRESET_LABELS,
 	type MvManifest,
 	type MvPresetKind,
-} from "@/lib/mv-config";
+} from "@/lib/mv/mv-config";
 import { encodeMv } from "@/lib/sqids";
 
 const VALID_PRESETS = new Set(Object.keys(MV_PRESET_LABELS));

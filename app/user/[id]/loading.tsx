@@ -2,8 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getAvatarInfo } from "@/lib/avatar";
-import { type ProfileSeed, readProfileSeed } from "@/lib/profile-cache";
+import { getAvatarInfo } from "@/lib/social/avatar";
+import { type ProfileSeed, readProfileSeed } from "@/lib/social/profile-cache";
 
 const BG = "#0b0e14";
 const BORDER = "#1f2937";

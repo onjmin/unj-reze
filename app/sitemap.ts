@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { db } from "@/lib/db";
-import { db as mockDb } from "@/lib/mock-db";
+import { db as mockDb } from "@/lib/db/mock-db";
 import { SITE_URL } from "@/lib/site";
 import { encodeId, encodePost } from "@/lib/sqids";
 

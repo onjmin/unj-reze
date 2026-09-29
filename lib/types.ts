@@ -1,5 +1,5 @@
-import type { GameManifestDraft } from "@/components/GameMaker";
-import type { MvManifest, MvPresetKind } from "./mv-config";
+import type { GameManifestDraft } from "@/components/game/GameMaker";
+import type { MvManifest, MvPresetKind } from "./mv/mv-config";
 
 /** 投稿本文をこの行数を超えたら折りたたむ（タイムライン・投稿個別ページ共通） */
 export const POST_BODY_COLLAPSE_LINES = 8;
@@ -78,7 +78,7 @@ export interface Post {
 	slug?: string;
 	/** 投稿者のユーザーID（users.id） */
 	userId?: string;
-	/** 掲示板モードの「ID:」表示専用の安定ハッシュ値（lib/cc-id.ts:genBbsId）。slugとは別物。 */
+	/** 掲示板モードの「ID:」表示専用の安定ハッシュ値（lib/bbs/cc-id.ts:genBbsId）。slugとは別物。 */
 	bbsId?: string;
 	createdAt: string;
 	time: string;
@@ -120,7 +120,7 @@ export interface Post {
 	animFrames?: number;
 	/** アニメ投稿の再生fps */
 	animFps?: number;
-	/** imageSrc が歩行グラのスプライトシートのとき、`lib/walk-cycle.ts` の WalkPreset.label */
+	/** imageSrc が歩行グラのスプライトシートのとき、`lib/assets/walk-cycle.ts` の WalkPreset.label */
 	walkPreset?: string;
 	mvId?: string;
 	mvTitle?: string;

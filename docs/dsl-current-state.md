@@ -8,11 +8,11 @@
 
 | 層 | 実体 | 形式 | ファイル |
 |---|---|---|---|
-| ① ゲームデータ本体 | `PresetData`（配置・マップ・シーン・セリフ・イベント） | プレーンなTSオブジェクト（GUIエディタが直接編集、テキストDSLではない） | [components/game-presets/shared.ts](../components/game-presets/shared.ts) |
-| ② 手続きスクリプト | 弾幕パターン等の挙動 | 独自テキストDSL「MiniScript」 | [components/MiniScriptVM.ts](../components/MiniScriptVM.ts) |
-| ③ アセット参照 | 画像/BGM/SEの出典 | `scheme:value` 形式の短い文字列リファレンス | [lib/asset-ref.ts](../lib/asset-ref.ts) |
+| ① ゲームデータ本体 | `PresetData`（配置・マップ・シーン・セリフ・イベント） | プレーンなTSオブジェクト（GUIエディタが直接編集、テキストDSLではない） | [components/game/presets/shared.ts](../components/game/presets/shared.ts) |
+| ② 手続きスクリプト | 弾幕パターン等の挙動 | 独自テキストDSL「MiniScript」 | [components/game/MiniScriptVM.ts](../components/game/MiniScriptVM.ts) |
+| ③ アセット参照 | 画像/BGM/SEの出典 | `scheme:value` 形式の短い文字列リファレンス | [lib/assets/asset-ref.ts](../lib/assets/asset-ref.ts) |
 
-①は全エンジン（rpg/action/touhou/onjReze/yume25d。見本プリセットもまっさらテンプレート `components/game-presets/templates.ts` も）共通のGUI（[GameMaker.tsx](../components/GameMaker.tsx)）が直接編集する構造化データであり、現状テキストDSLとしては存在しない（テキスト化はまだ未実装の検討事項）。
+①は全エンジン（rpg/action/touhou/onjReze/yume25d。見本プリセットもまっさらテンプレート `components/game/presets/templates.ts` も）共通のGUI（[GameMaker.tsx](../components/game/GameMaker.tsx)）が直接編集する構造化データであり、現状テキストDSLとしては存在しない（テキスト化はまだ未実装の検討事項）。
 ②③は既に実テキスト形式として運用されている。
 
 ---
@@ -33,7 +33,7 @@
 
 ---
 
-## 3. アセット参照DSL（`lib/asset-ref.ts`）
+## 3. アセット参照DSL（`lib/assets/asset-ref.ts`）
 
 `scheme:value` 形式の軽量リファレンス文字列。実体（base64等）は埋め込まず、短い参照だけを`ObjectDef`等のフィールドに保持する。
 
@@ -54,7 +54,7 @@
 | `youtube:` | `youtube:VIDEO_ID` | YouTube動画をBGM/SEとして参照（素のURLも自動変換） |
 | `nicovideo:` / `soundcloud:` | `nicovideo:sm123` / `soundcloud:https://…` | ニコニコ動画／SoundCloud をBGMとして参照（`url:` のURLからも判定） |
 | `mml:` | `mml:post:123` / `mml:T120 cdefg` | MML（Music Macro Language）。既存MML投稿参照 or インライン記述 |
-| `direct:` | `direct:/assets/game-sfx/menu_move.wav` | 音声ファイルの直URL。エンジン内蔵の効果音（`lib/game-sfx.ts` の `gameSfxRef()`）もこの形 |
+| `direct:` | `direct:/assets/game-sfx/menu_move.wav` | 音声ファイルの直URL。エンジン内蔵の効果音（`lib/game/game-sfx.ts` の `gameSfxRef()`）もこの形 |
 | `none` | `none` | 未設定 |
 
 スキーム不明の文字列はすべて`url`として扱われるフォールバック設計（`parseRef`）。
@@ -69,7 +69,7 @@ BGM参照の末尾には再生パラメータ `#loop=bar:2,bar:4&vol=40&start=12
 
 `walk:<stdId>:<source>` 形式。`stdId`でシート画像のグリッド規格（セルサイズ・コマ数・行=方向の並び順）を指定する。
 
-### サポート規格一覧（[lib/walk-sprite.ts](../lib/walk-sprite.ts)）
+### サポート規格一覧（[lib/assets/walk-sprite.ts](../lib/assets/walk-sprite.ts)）
 
 | stdId | 名称 | セルサイズ(px) | 1方向あたりコマ数 | 備考 |
 |---|---|---|---|---|

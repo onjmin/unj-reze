@@ -4,12 +4,12 @@
 MV（[mv-feature-design.md](mv-feature-design.md)）とは**別の投稿種別**として新設し、描画部品と
 mp4 書き出しだけを MV から借りる。声は `@onjmin/dtm` の `studio.speak`（koe UtauTTS）。
 
-- 型定義: `lib/talk-config.ts`（新規）
-- 時間軸の組み立て: `lib/talk-timeline.ts`（新規）
-- 描画: `lib/talk-engine.ts`（新規。`lib/mv-engine.ts` の部品を import）
-- 音: `lib/talk-audio.ts`（新規。`lib/dtm.ts` の共有 studio）
-- 編集UI: `components/TalkMaker.tsx` / 再生: `components/TalkPlayer.tsx` / 埋め込み: `components/TalkBox.tsx`
-- 先行実装: ゲームのメッセージウィンドウ読み上げ `lib/game-voice.ts`（同じ `studio.speak` を使う）
+- 型定義: `lib/talk/talk-config.ts`（新規）
+- 時間軸の組み立て: `lib/talk/talk-timeline.ts`（新規）
+- 描画: `lib/talk/talk-engine.ts`（新規。`lib/mv/mv-engine.ts` の部品を import）
+- 音: `lib/talk/talk-audio.ts`（新規。`lib/mml/dtm.ts` の共有 studio）
+- 編集UI: `components/talk/TalkMaker.tsx` / 再生: `components/talk/TalkPlayer.tsx` / 埋め込み: `components/talk/TalkBox.tsx`
+- 先行実装: ゲームのメッセージウィンドウ読み上げ `lib/game/game-voice.ts`（同じ `studio.speak` を使う）
 
 ---
 
@@ -26,7 +26,7 @@ mp4 書き出しだけを MV から借りる。声は `@onjmin/dtm` の `studio.
 
 ---
 
-## 1. データモデル（`lib/talk-config.ts`）
+## 1. データモデル（`lib/talk/talk-config.ts`）
 
 ```ts
 export interface TalkManifest {
@@ -93,7 +93,7 @@ export interface TalkCue {
 }
 ```
 
-- `MvAssetRef` は `lib/mv-config.ts` からそのまま使う。`emoji:` 参照は絵文字を fillText で描く（内蔵イラストが
+- `MvAssetRef` は `lib/mv/mv-config.ts` からそのまま使う。`emoji:` 参照は絵文字を fillText で描く（内蔵イラストが
   無い段階の代用と、開発用ページのサンプルに使う）。
   psd の目/口レイヤー割り当て UI（`CharacterLayerFields`）も流用対象。
 - 表情は「立ち絵の差し替え」（`faces`）と「声の感情」（`emotion`）の 2 系統。UI では
@@ -104,16 +104,16 @@ export interface TalkCue {
 - 音源の選択 UI は dtm の歌唱モデル選択と同じ大分類（kusaプリセット / おんJ / 一般 / クッキー☆）に
   分ける。**分類表は dtm が持つ**（`VOICE_MODEL_CATEGORIES` / `groupVoiceModels`）——音源を増やすのは
   dtm 側なので、こちらに写すと増えた音源が「その他」に落ちたまま放置される。reze は
-  `loadVoiceModelGroups()`（`lib/game-voice.ts`）で `KOE_VOICEBANK_NAMES` を渡すだけ
+  `loadVoiceModelGroups()`（`lib/game/game-voice.ts`）で `KOE_VOICEBANK_NAMES` を渡すだけ
   （語れない `klatt` はこの一覧に無いので自然に外れる）。
 - **カスタム音源**は `.koe` の URL を持つだけで、ファイルはこのアプリでは預からない（CORS 必須）。
   キーは URL から決まる（`talkCustomVoiceKey`。日本語名で英数字が残らないため URL のハッシュを混ぜる）。
-  読み上げ・計画・先取りの前に `registerTalkVoicebanks()`（`lib/talk-audio.ts`）で
+  読み上げ・計画・先取りの前に `registerTalkVoicebanks()`（`lib/talk/talk-audio.ts`）で
   `studio.singingVoices.registerVoicebanks()` へ流し込む。権利表記は投稿者がクレジット欄に書く（§8）。
 
 ---
 
-## 2. 時間軸（`lib/talk-timeline.ts`）
+## 2. 時間軸（`lib/talk/talk-timeline.ts`）
 
 MV と決定的に違う点。台本の各行の長さは**読み上げてみないと分からない**。
 
@@ -132,7 +132,7 @@ cues → (全行を計画+合成) → durations → timeline { cue, startSec, en
 2. `startSec[i] = startSec[i-1] + duration[i-1] + gap[i-1]` で並べる。
 3. 再生は AudioContext の時計 `t0 = ctx.currentTime + 0.2`（頭出しの余裕）を基準に、各行を
    `studio.speak(text, { at: t0 + startSec[i], awaitRender: "first-chunk", lateChunks: "shift" })`
-   で置く（`lib/talk-audio.ts` の `scheduleTalkSpeech`）。
+   で置く（`lib/talk/talk-audio.ts` の `scheduleTalkSpeech`）。
    - どの行も**最初のチャンクが出来てから頭から鳴らし**、合成が再生に追いつかなければ
      **声を後ろへずらす**（言葉は欠けない）。既定の `awaitRender: false` / `lateChunks: "skip"` は
      予定時刻を過ぎて届いたチャンクを飛ばすので、頭や途中が欠け、丸ごと過ぎた行は無音になる。
@@ -158,9 +158,9 @@ cues → (全行を計画+合成) → durations → timeline { cue, startSec, en
 
 ---
 
-## 3. 描画（`lib/talk-engine.ts`）
+## 3. 描画（`lib/talk/talk-engine.ts`）
 
-`lib/mv-engine.ts` から次を **export に昇格**して借りる（現状は module-private）:
+`lib/mv/mv-engine.ts` から次を **export に昇格**して借りる（現状は module-private）:
 `drawCharacterLayer`、`resolveAssetRefImage`、`DrawCtx`。画像の事前ロードは既存の
 `preloadMvImages` / `collectMvPsdRefs` を manifest の型だけ差し替えて呼ぶ。
 
@@ -183,9 +183,9 @@ cues → (全行を計画+合成) → durations → timeline { cue, startSec, en
 
 ---
 
-## 4. 音（`lib/talk-audio.ts`）
+## 4. 音（`lib/talk/talk-audio.ts`）
 
-- 共有 studio（`lib/dtm.ts` の `getStudio()`）を使う。**2 つ目の studio は作らない**
+- 共有 studio（`lib/mml/dtm.ts` の `getStudio()`）を使う。**2 つ目の studio は作らない**
   （音量がサイト共通の masterGain に乗る）。
 - `speakGameMessage` と同じく `studio.speak` を呼ぶが、`at` で絶対時刻を渡す点が違う。
 - 初回は TTS アセット約 43MB。`TalkBox` を開いた瞬間に `prepareSpeech` を始め、
@@ -206,7 +206,7 @@ MV の実装を**そのまま複製**する。差分は名前だけ。
 | 孤児 GC | `hasOtherPostRef("mv_id")` / `collectOrphanManifests` / `deletePost` の delete token | `talk_id` を追加 |
 | API | `app/api/mvs/…` 3 ルート | `app/api/talks/…` 3 ルート（GET は `withEdgeCache`） |
 | 種別の登録 | `UploadKind`、`isValidPayloadUrl`、`parseManifestRef`、`saveHistory` の type、`discardType` | それぞれに `"talk"` を追加 |
-| クライアント保存 | `lib/game-mv-client.ts` | `createTalk/updateTalk/loadTalk` を同ファイルへ |
+| クライアント保存 | `lib/game/game-mv-client.ts` | `createTalk/updateTalk/loadTalk` を同ファイルへ |
 | ID | `encodeMv`、`encodePost` の id 変換 | `encodeTalk` を追加、`encodePost` に `talkId` |
 | 投稿 | `mvDraft` / `onOpenMvMaker` / チップ / 送信 2 箇所 | `talkDraft` 一式 |
 | フィード | `PostEmbeds` → `MvBox` → `MvPlayer` | `TalkBox` → `TalkPlayer`（`unj-game-box-open` の排他イベントも同じ） |
@@ -244,11 +244,11 @@ uploader-worker 側にも `talk` 種別（prefix `talk`、gzip JSON）を足し�
 
 ---
 
-## 6. 編集UI（`components/TalkMaker.tsx`）
+## 6. 編集UI（`components/talk/TalkMaker.tsx`）
 
 MvMaker（8.6k 行）は流用せず、小さく作る。画面は「見本」＋ 3 枚。
 
-0. **見本**（`lib/talk-presets.ts` の `TALK_PRESETS`）: MV の見本と同じ入口。新規作成はこのタブから始まり、
+0. **見本**（`lib/talk/talk-presets.ts` の `TALK_PRESETS`）: MV の見本と同じ入口。新規作成はこのタブから始まり、
    選ぶと台本タブへ移る（台本に中身があれば confirm）。見本はキャラ・台本込みの完成した manifest で、
    表情・行ごとの話し方・間の使い分けの手本を兼ねる（サイト紹介 / この機能の使い方 / ゲーム作成の紹介 /
    漫才のひな形 / まっさら）。立ち絵は絵文字なので何も選ばなくても動く。`createDefaultTalkManifest` もここにある。
@@ -263,9 +263,9 @@ MvMaker（8.6k 行）は流用せず、小さく作る。画面は「見本」�
 開始処理を無効にして発話を止めてから捨てる。見本の切り替えで古い台本の声が鳴り続けないように）。
 
 パネルの見た目は [[gamemaker-panel-design]] に従う（グレーセクション、青の参照ボタン、紫は使わない）。
-自動保存は `lib/history.ts` に `"talk"` を足して使う。
+自動保存は `lib/ui/history.ts` に `"talk"` を足して使う。
 
-### 6.1 台本のテキスト入出力（`lib/talk-script-text.ts`）
+### 6.1 台本のテキスト入出力（`lib/talk/talk-script-text.ts`）
 
 台本タブの「テキスト」ボタンで、台本（`cues`）をプレーンテキストに書き出し／取り込みできる。
 LLM に書かせた台本を貼る、他所で書いた台本を持ち込む、既存の台本をまとめて手直しする用途。

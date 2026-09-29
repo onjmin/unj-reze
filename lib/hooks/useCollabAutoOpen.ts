@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { COLLAB_QUERY_PARAM } from "@/lib/collab-link";
+import { COLLAB_QUERY_PARAM } from "@/lib/social/collab-link";
 import type { Post } from "@/lib/types";
 
 /**
  * 一覧画面（ハッシュタグ/検索/プロフィール）から `?collab=1` で飛んできたときに
  * コラボ導線を自動で開く。あちらはコンポーザもエディタも載せていないので、
- * コラボの実処理はポスト詳細へ委譲されている（lib/collab-link.ts 参照）。
+ * コラボの実処理はポスト詳細へ委譲されている（lib/social/collab-link.ts 参照）。
  *
  * useSearchParams ではなく window.location を読むのは、これを使う画面が
  * 静的シェル生成の対象に入ったときに Suspense 境界を要求されないようにするため。

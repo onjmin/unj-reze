@@ -26,9 +26,9 @@ under `app/api/`.
 
 ## Game engines & presets
 
-`components/GameMaker.tsx` (~21k lines) hosts every engine, picked by `gameData.engine` (`EngineKind`,
-`components/game-presets/shared.ts`): canvas 2D inline for `action`/`rpg`/`touhou`/`onjReze`, three.js
-2.5D for `yume25d` (`Yume25DMaker.tsx`, `lib/yume25d.ts`), `mmo3d` (`Mmo3dMaker.tsx`, `next/dynamic`,
+`components/game/GameMaker.tsx` (~21k lines) hosts every engine, picked by `gameData.engine` (`EngineKind`,
+`components/game/presets/shared.ts`): canvas 2D inline for `action`/`rpg`/`touhou`/`onjReze`, three.js
+2.5D for `yume25d` (`Yume25DMaker.tsx`, `lib/yume25d/yume25d.ts`), `mmo3d` (`Mmo3dMaker.tsx`, `next/dynamic`,
 hidden from the gallery). `MiniScriptVM.ts` runs touhou bullet patterns and dodge-battle attacks.
 Sample presets and neutral engine templates (preset `'blank'`) are separate — see
 [docs/game-presets.md](docs/game-presets.md). **IP policy: nothing the site ships (presets, templates,
@@ -144,7 +144,7 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
   - Instant movement (`moveNpc` with duration 0, `warp`) must register cooldown timestamps on arrival (`performance.now()`) to prevent rapid-fire event re-triggering.
   - A phase jump must *clear* the corresponding cooldown entries so the new page can fire.
 
-## RPGEN Map & Tile Import (`lib/rpgen-parser.ts` + `submitRpgenImport` in `GameMaker.tsx`)
+## RPGEN Map & Tile Import (`lib/game/rpgen-parser.ts` + `submitRpgenImport` in `GameMaker.tsx`)
 
 - **Terrain Layer Overwriting**
   - Imported maps must completely overwrite all terrain layers (`map`, `overlayMap`, `overheadMap`).
@@ -153,7 +153,7 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
   - When merging into an existing scene, assign non-conflicting tile IDs and keep a `tileIdRemap` (with `0 → 0`).
   - Recursively remap `#CH_SP` / `changeTile` tile IDs inside nested commands (`choice`, and the `then`/`else` branches of `ifSwitch` / `ifItem` / `ifGold`).
 - **RPGEN Search access has two paths**
-  - Client/parse-time (`lib/rpgen-parser.ts`, `lib/rpgen-assets.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` (privileged agent token configured via local env / `.agents/`).
+  - Client/parse-time (`lib/game/rpgen-parser.ts`, `lib/game/rpgen-assets.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` (privileged agent token configured via local env / `.agents/`).
   - Server proxy `app/api/rpgen/[...path]/route.ts`: uses `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` or `RPGEN_SEARCH_TOKEN`, with an endpoint allowlist for legacy routing.
 
 ---
@@ -175,7 +175,7 @@ Verify that no execution-context leaks, state desynchronizations, or deadlocks a
 then run `pnpm typecheck` and `pnpm lint`.
 
 > `eslint.config.mjs` disables the React Compiler-backed `react-hooks/*` rules **for
-> `components/GameMaker.tsx` only** — the compiler OOMs on a 21k-line component even at an 8 GB
+> `components/game/GameMaker.tsx` only** — the compiler OOMs on a 21k-line component even at an 8 GB
 > heap. Removing that override makes `pnpm lint` crash instead of fail. `exhaustive-deps` is not
 > compiler-backed and stays enabled everywhere.
 
@@ -183,6 +183,7 @@ then run `pnpm typecheck` and `pnpm lint`.
 
 # Documentation
 
+- [docs/DIRECTORY_STRUCTURE.md](docs/DIRECTORY_STRUCTURE.md) — what lives in each `components/` and `lib/` feature folder.
 - [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md) — Neon transfer budget rules and the queries that broke it.
 - [services/realtime/README.md](services/realtime/README.md) — realtime hub protocol and Koyeb deploy.
 - [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.

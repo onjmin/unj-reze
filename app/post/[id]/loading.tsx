@@ -2,8 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import PostDetail from "@/components/PostDetail";
-import { readCachedPost } from "@/lib/post-cache";
+import PostDetail from "@/components/post/PostDetail";
+import { readCachedPost } from "@/lib/post/post-cache";
 import { Post } from "@/lib/types";
 
 const BG = "#0b0e14";

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
-import { parseBgRef, parseManifestRef } from "@/lib/manifest-ref";
+import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
 import { decodeId, encodeTalk } from "@/lib/sqids";
 
 export async function GET(

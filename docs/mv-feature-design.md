@@ -4,12 +4,12 @@
 ゲーム機能と同じく **プリセットを選んで中身を差し替える** 体験に寄せてあり、
 AviUtl のような自由タイムラインは意図的に持たない。
 
-- 型定義: [lib/mv-config.ts](../lib/mv-config.ts)
-- 描画: [lib/mv-engine.ts](../lib/mv-engine.ts)
-- 音: [lib/mv-audio.ts](../lib/mv-audio.ts)
-- プリセット: [components/mv-presets/](../components/mv-presets/)
-- 編集UI: [components/MvMaker.tsx](../components/MvMaker.tsx)
-- 再生: [components/MvPlayer.tsx](../components/MvPlayer.tsx) / 埋め込み: [components/MvBox.tsx](../components/MvBox.tsx)
+- 型定義: [lib/mv/mv-config.ts](../lib/mv/mv-config.ts)
+- 描画: [lib/mv/mv-engine.ts](../lib/mv/mv-engine.ts)
+- 音: [lib/mv/mv-audio.ts](../lib/mv/mv-audio.ts)
+- プリセット: [components/mv/presets/](../components/mv/presets/)
+- 編集UI: [components/mv/MvMaker.tsx](../components/mv/MvMaker.tsx)
+- 再生: [components/mv/MvPlayer.tsx](../components/mv/MvPlayer.tsx) / 埋め込み: [components/mv/MvBox.tsx](../components/mv/MvBox.tsx)
 
 ---
 
@@ -59,12 +59,12 @@ MVの時間はすべて `@onjmin/dtm` の再生ステップ（1小節=192ステ�
 `image` レイヤーは1枚絵か歩行グラのどちらかしか出せず、「瞬きしながら喋るキャラ」を
 1レイヤーで作れなかった。`character` レイヤーは `image` と同じ位置・拡大・motion・
 repeat・flip・frame・entrance/exit の仕組みをそのまま持ちつつ、**土台画像の上に
-目・口のパーツ画像を重ねて描く**（`lib/mv-engine.ts` の `drawCharacterLayer`）。
+目・口のパーツ画像を重ねて描く**（`lib/mv/mv-engine.ts` の `drawCharacterLayer`）。
 
 - `base: MvAssetRef` … 常に描かれる土台画像。必須。
 - `eyes?: { open, closed, blink }` … 瞬き。`open`/`closed` は base と同じ矩形へそのまま
   重ねる静止画（コマ割りは持たない）。`blink`（`MvBlinkSetting`、型・既定値・
-  スケジューリングは `lib/mv-blink.ts`）は seed 付きの決定論的な発生スケジュール——
+  スケジューリングは `lib/mv/mv-blink.ts`）は seed 付きの決定論的な発生スケジュール——
   毎フレーム乱数を振ると同じ位置へシークするたびに瞬きの有無が変わってしまうため、
   「seedから曲頭基準の発生拍位置を1回だけ計算し、いまの拍位置(`beatPos = step /
   MV_STEPS_PER_BEAT`)から開閉状態を引く」方式にしてある（`resolveBlinkState`）。
@@ -74,7 +74,7 @@ repeat・flip・frame・entrance/exit の仕組みをそのまま持ちつつ、
   - `"track"` … 指定トラック(`@n`)の `trackEnergy` がしきい値(`threshold`)を超えている
     間だけ `open` を出す（超えていなければ `closed`）。
   - `"vowel"` … 指定した歌詞トラック(`@@n`)の現在発音中の行から、経過割合で文字位置を
-    見積もり（音節ごとの正確なタイミングは持っていない近似）、`lib/mv-vowel.ts` の
+    見積もり（音節ごとの正確なタイミングは持っていない近似）、`lib/mv/mv-vowel.ts` の
     `estimateVowel`（一般的な五十音表ベースの簡易母音推定。
     https://rpgen3.github.io/ust2lab/ の考え方を参考にした自前実装で、外部取得はしない）
     で母音(`MvVowel = "a"|"i"|"u"|"e"|"o"|"n"`)へ落とし、`vowels[母音]` の画像を出す。
@@ -82,13 +82,13 @@ repeat・flip・frame・entrance/exit の仕組みをそのまま持ちつつ、
     それ以外は開く方向）——6種すべて揃えなくても動くようにするため。
 
 **「目開」「目閉」「口開」「口閉」のようなファイル名からの自動関連付けは行わない。**
-`components/mv-presets/shared.ts` の `ROZE_BEATS`（`beat-a`〜`g`）は目/口が
+`components/mv/presets/shared.ts` の `ROZE_BEATS`（`beat-a`〜`g`）は目/口が
 **合成済みの一枚絵**で、この別レイヤー合成方式とは別物——流用しない。
 
 目/口を分離したデフォルト素材（束音ロゼ V1.01 の psd、
 https://res.cloudinary.com/dbld5kqtz/image/upload/v1786677313/TabaneLozeV101_jnj7yb.psd）は
 **事前にPNGへ書き出して `public/assets/` にバンドルすることはしない**。代わりに、
-`lib/mv-psd.ts`（client-only）が psd URL をブラウザ側で直接 `fetch` し、`ag-psd` でその場で
+`lib/mv/mv-psd.ts`（client-only）が psd URL をブラウザ側で直接 `fetch` し、`ag-psd` でその場で
 パースしてレイヤーをレイヤー名パス（例: `"!目/*開"`。グループは `!`、表情差分レイヤーは `*`
 というアーティスト独自命名。`/` 区切りでネストを表す）ごとの `HTMLCanvasElement` として
 切り出す。個々のレイヤーは `left`/`top` オフセットがズレているため、psd全体と同じ幅・高さの
@@ -96,15 +96,15 @@ canvasへオフセット込みで描き直してから使う。土台（色塗�
 1枚に合成したい場合は `resolvePsdBaseImage(url, layerPaths)` に合成したいパスの配列を渡す。
 
 これを asset-ref の新スキーム `psd:<encodeURIComponent(url)>#<path1>|<path2>|...`
-（`lib/asset-ref.ts` の `buildPsdRef`/`parsePsdRef`/`isPsdRef`。`|`区切りで複数レイヤーを
-重ね合成できる）として `MvAssetRef.ref` に持たせる。`lib/mv-engine.ts` の
+（`lib/assets/asset-ref.ts` の `buildPsdRef`/`parsePsdRef`/`isPsdRef`。`|`区切りで複数レイヤーを
+重ね合成できる）として `MvAssetRef.ref` に持たせる。`lib/mv/mv-engine.ts` の
 `resolveAssetRefImage` が `psd:` 参照かどうかで解決経路を振り分け（psd: なら
 `peekPsdImage`、それ以外は既存の `loadImage`/`peekImage`）、`collectMvPsdRefs` +
 `preloadMvImages` が事前に `preloadPsdRef` で解決しておく。fetch失敗・パース失敗時は
 `console.warn` してそのフレームは何も描かない（既存の画像ロード失敗時と同じ挙動）。
 
 Node実行時（SSR・`pnpm typecheck`/`pnpm lint`・ビルドスクリプト）で `ag-psd` や
-`document`/`HTMLCanvasElement` を評価しないよう、`lib/mv-psd.ts` は関数呼び出し時にのみ
+`document`/`HTMLCanvasElement` を評価しないよう、`lib/mv/mv-psd.ts` は関数呼び出し時にのみ
 `ag-psd` を動的importし、`typeof window === "undefined"` なら例外を投げる。この
 モジュールはブラウザ実行時（`useEffect` 等）からのみ呼び出すこと。
 
@@ -154,7 +154,7 @@ psd URL入力欄＋「レイヤー一覧を読み込む」ボタン（`listPsdLa
 開閉する。横軸の単位は小節で、全レイヤーを1画面に並べて帯をドラッグする（0.5小節きざみ）。
 場面の切れ目は縦線で重ねてあるので、サビの位置を見ながら範囲を決められる。
 
-### レイヤーのグループ化（`lib/mv-layer-group.ts`）
+### レイヤーのグループ化（`lib/mv/mv-layer-group.ts`）
 
 複数のレイヤーを1つの塊としてまとめて並び替えられるようにする機能。**実体は
 `kind:'group'` レイヤーではない**——`manifest.layers` は今までどおりフラットな配列のまま、
@@ -164,7 +164,7 @@ groupId の存在を一切意識しない。グループは編集用の並び替
 - `MvManifest.groups?: MvLayerGroup[]` にグループのレコード（id・名前・折りたたみ状態）を持つ。
 - **同じ groupId のレイヤーは配列中で必ず連続している**という不変条件がある。崩すと
   一覧でグループの一部だけ離れた場所に取り残される。グループに関わる並び替え・追加・削除は
-  必ず `lib/mv-layer-group.ts` のヘルパ（`groupSelectedLayers`/`moveGroupBlock`/
+  必ず `lib/mv/mv-layer-group.ts` のヘルパ（`groupSelectedLayers`/`moveGroupBlock`/
   `moveTopLevelLayer`/`addLayerToGroup`/`replaceGroupMembers` 等）を通すこと。
 - グループの上下移動は塊ごと配列位置を入れ替えるだけで、メンバーの `z` は変えない
   （z は各レイヤーが個別に持ったまま移動するので、重なり順は変わらない——グループ化は
@@ -175,7 +175,7 @@ groupId の存在を一切意識しない。グループは編集用の並び替
 - グループ内では「＋このグループに図形を追加」「✕で1枚だけ削除」がカジュアルに使える
   （不変条件を壊さない範囲でメンバーの出し入れが自由）。
 
-### 対称図形グループ生成マクロ（`lib/mv-shape-group-macro.ts`）
+### 対称図形グループ生成マクロ（`lib/mv/mv-shape-group-macro.ts`）
 
 「対称図形グループを生成」ボタン1つで、画面中央の縦線を軸に**線対称**な図形群を
 グループごと作る。対称性は「生成してから判定する」のではなく、**最初からペア単位で
@@ -195,7 +195,7 @@ form/size/色/太さ/動きは共有）を必ずセットで作る。軸の真�
 出す小節を絞りたいときは `barRange` を使う。旧データは `resolveShapeModulators()` が
 最初の1つを曲全体の動きとして拾う。
 
-### 図形の動きプリセット（`lib/mv-shape-motion.ts`）は拍周期だけ
+### 図形の動きプリセット（`lib/mv/mv-shape-motion.ts`）は拍周期だけ
 
 「図形の動き方設定」モーダルのプリセットは**すべて `source: "beat"`**（拍に同期する動き）
 だけで構成されている。以前あった「回転しっぱなし」「往復移動」のような拍と無関係な動きと、
@@ -411,7 +411,7 @@ MV用の素材は `public/assets/mv/` に置く。**RPG用の歩行グラ（行�
 GIFのままでは再生位置をこちらで決められず音と合わないので、コマを展開してある。
 コマ送りは `MvWalkSetting.loopBeats` で**拍にロック**する（`fps` の秒指定はテンポを変えた瞬間にずれる）。
 
-これらは `lib/local-assets.ts` の `MV_LOCAL_SPRITES` に登録してあり、素材ピッカーの
+これらは `lib/assets/local-assets.ts` の `MV_LOCAL_SPRITES` に登録してあり、素材ピッカーの
 「🎬 MV素材」タブから選べる。選んだ参照にはクロップとコマ数が焼き込まれていて、
 `MvMaker` が `MvWalkSetting` へ写すので、選んだだけで動き出す。
 
@@ -420,7 +420,7 @@ GIFのままでは再生位置をこちらで決められず音と合わない�
 
 ### プリセットMMLの書き方
 
-`components/mv-presets/shared.ts` の `mvTrack(header, bars, expectBars)` を使い、
+`components/mv/presets/shared.ts` の `mvTrack(header, bars, expectBars)` を使い、
 **1要素＝1小節**の配列としてトラックを組む。64小節を1本の文字列で書くと、
 どこかの小節が1拍足りなくても気づけず、トラック間で小節数がずれて `totalBars` が中途半端になり、
 後半の画面が丸ごと空になる（過去に `l8` フレーズが5拍だった事故がある）。

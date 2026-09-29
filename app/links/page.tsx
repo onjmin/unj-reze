@@ -2,8 +2,8 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import LinksView from "@/components/LinksView";
+import AppShell from "@/components/layout/AppShell";
+import LinksView from "@/components/pages/LinksView";
 
 export default function LinksPage() {
 	return (

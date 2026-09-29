@@ -2,8 +2,8 @@
 
 import { ArrowLeft, Bell } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import NotificationView from "@/components/NotificationView";
+import AppShell from "@/components/layout/AppShell";
+import NotificationView from "@/components/user/NotificationView";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export default function NotificationsPage() {

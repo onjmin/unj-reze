@@ -2,8 +2,8 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import AccessibilityView from "@/components/AccessibilityView";
-import AppShell from "@/components/AppShell";
+import AccessibilityView from "@/components/pages/AccessibilityView";
+import AppShell from "@/components/layout/AppShell";
 
 export default function AccessibilityPage() {
 	return (

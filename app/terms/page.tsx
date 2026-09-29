@@ -2,8 +2,8 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import TermsView from "@/components/TermsView";
+import AppShell from "@/components/layout/AppShell";
+import TermsView from "@/components/pages/TermsView";
 
 export default function TermsPage() {
 	return (

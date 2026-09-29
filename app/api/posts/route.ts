@@ -3,8 +3,8 @@ import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
 import { getClientIp } from "@/lib/ip";
-import { parseImageDeleteRef, parseMmlRef } from "@/lib/manifest-ref";
-import { attachEmbedInfo } from "@/lib/post-embeds";
+import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
+import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { CH_FEED } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { scoreRequest } from "@/lib/security/scoring";
@@ -13,7 +13,7 @@ import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import type { FingerprintSignals } from "@/lib/security/types";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
-import { sanitizeWalkPreset } from "@/lib/walk-cycle";
+import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
 
 export async function GET(request: NextRequest) {
 	try {

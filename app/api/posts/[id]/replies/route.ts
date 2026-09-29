@@ -3,12 +3,12 @@ import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { REPLIES_PAGE_MAX, REPLIES_PAGE_SIZE } from "@/lib/db/interface";
 import { withEdgeCache } from "@/lib/edge-cache";
-import { parseImageDeleteRef, parseMmlRef } from "@/lib/manifest-ref";
-import { attachEmbedInfo } from "@/lib/post-embeds";
+import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
+import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodePost } from "@/lib/sqids";
-import { sanitizeWalkPreset } from "@/lib/walk-cycle";
+import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
 
 export const dynamic = "force-dynamic";
 
