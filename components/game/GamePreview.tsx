@@ -2,7 +2,7 @@
 import { Gamepad2, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import { loadGame } from "@/lib/game/game-mv-client";
+import { loadGame } from "@/lib/post/game-mv-client";
 import { startRemix } from "@/lib/social/remix";
 import { gameShareUrl } from "@/lib/social/share";
 import { buildGameShareText } from "@/lib/social/share-text";

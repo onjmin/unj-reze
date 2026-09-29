@@ -9,7 +9,7 @@ import { ChevronDown, ChevronUp, Copy, FileText, Image as ImageIcon, Play, Plus,
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ContentPicker, { type PickResult } from "@/components/assets/ContentPicker";
 import TalkPlayer from "@/components/talk/TalkPlayer";
-import VoiceCredits, { useVoiceCreditFor } from "@/components/talk/VoiceCredits";
+import VoiceCredits, { useVoiceCreditFor } from "@/components/ui/VoiceCredits";
 import { buildPsdRef, imageRefToUrl, isPsdRef, parseRef, walkRefFrameCrop } from "@/lib/assets/asset-ref";
 import { getStudio, speechMinBufferSec } from "@/lib/mml/dtm";
 import { DEFAULT_VOICE_MODEL, loadVoiceModelGroups, VOICE_STYLES, type VoiceModelGroup } from "@/lib/game/game-voice";

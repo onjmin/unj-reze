@@ -206,7 +206,7 @@ MV の実装を**そのまま複製**する。差分は名前だけ。
 | 孤児 GC | `hasOtherPostRef("mv_id")` / `collectOrphanManifests` / `deletePost` の delete token | `talk_id` を追加 |
 | API | `app/api/mvs/…` 3 ルート | `app/api/talks/…` 3 ルート（GET は `withEdgeCache`） |
 | 種別の登録 | `UploadKind`、`isValidPayloadUrl`、`parseManifestRef`、`saveHistory` の type、`discardType` | それぞれに `"talk"` を追加 |
-| クライアント保存 | `lib/game/game-mv-client.ts` | `createTalk/updateTalk/loadTalk` を同ファイルへ |
+| クライアント保存 | `lib/post/game-mv-client.ts` | `createTalk/updateTalk/loadTalk` を同ファイルへ |
 | ID | `encodeMv`、`encodePost` の id 変換 | `encodeTalk` を追加、`encodePost` に `talkId` |
 | 投稿 | `mvDraft` / `onOpenMvMaker` / チップ / 送信 2 箇所 | `talkDraft` 一式 |
 | フィード | `PostEmbeds` → `MvBox` → `MvPlayer` | `TalkBox` → `TalkPlayer`（`unj-game-box-open` の排他イベントも同じ） |
@@ -319,7 +319,7 @@ LLM に書かせた台本を貼る、他所で書いた台本を持ち込む、�
 (b) `SpeechHandle`（または `planSpeech` の戻り値）に **モーラ列**
     `{ startSec, endSec, alias }[]` を含める。口パクの母音を推定なしで引くため。
 (c) mp4 書き出しは `MvPlayer.startExportMp4` の中身（`canvas.captureStream(30)` +
-    `studio.getAudioStreamTrack()` + `MediaRecorder`）を `lib/mv-export.ts` へ切り出して
+    `studio.getAudioStreamTrack()` + `MediaRecorder`）を `lib/mv/mv-export.ts` へ切り出して
     両プレイヤーから呼ぶ。reze 内の改修で、ライブラリは触らない。
 
 (a)(b) は dtm の publish を伴うので、段階 1 に入る前に済ませる。段階 1 は (a) が無くても

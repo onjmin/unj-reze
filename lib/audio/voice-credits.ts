@@ -9,7 +9,7 @@
 // dtm は動的インポート必須（静的インポートは Edge/サーバー評価時にクラッシュする。
 // lib/mv/mv-engine.ts と同じ理由）。
 
-import type { TalkManifest } from "./talk-config";
+import type { TalkManifest } from "@/lib/talk/talk-config";
 
 export interface VoiceCredit {
 	/** 音源キー。内蔵音源なら koe のキーワード、持ち込みなら MML のキー／talkCustomVoiceKey の値。 */

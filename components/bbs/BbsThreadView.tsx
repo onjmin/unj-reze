@@ -13,7 +13,7 @@ import {
 	createTalk,
 	loadGame,
 	loadMv,
-} from "@/lib/game/game-mv-client";
+} from "@/lib/post/game-mv-client";
 import { useCollabAutoOpen } from "@/lib/hooks/useCollabAutoOpen";
 import {
 	useOlderReplies,

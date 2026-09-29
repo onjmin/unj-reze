@@ -281,7 +281,7 @@ node scripts/make-effect-sheets.mjs --preview=DIR    # 確認用の拡大シー�
   受け付けたキーは、数えても・間引いても・DB が失敗しても 204（エディタを止めない）。
   表が無い（移行SQL未適用、`42P01`）ときはアイソレートごとに1回だけ警告を出して黙って数え漏らす。
   同じ IP・同じキーは 10 分間 KV で間引く（IP は KV の間引きキーにだけ使い、DB には残さない）。
-- クライアント: `recordPresetOpen(key)`（`lib/game/game-mv-client.ts`）。投げっぱなし・`keepalive`・失敗は無視。
+- クライアント: `recordPresetOpen(key)`（`lib/post/game-mv-client.ts`）。投げっぱなし・`keepalive`・失敗は無視。
   ギャラリーで見本を選んだ時、「まっさらから作る」でエンジンを選んだ時、選び直さずに既定の見本のまま
   進んだ時に呼ぶ。同じキーは GameMaker を開いている間に1回だけ送る。
 

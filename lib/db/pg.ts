@@ -1360,7 +1360,7 @@ export const pgStore: DataStore = {
 		const result = await pgStore.getPost(id, userId);
 		// 旧オブジェクトの削除トークンをここにだけ載せて返す。DB更新が確定したあとに
 		// 呼び出し側（app/api/posts/[id]/route.ts）がレスポンスに載せ、クライアントが
-		// 消す（lib/game/game-mv-client.ts の updateGame/updateMv と同じ順序）。
+		// 消す（lib/post/game-mv-client.ts の updateGame/updateMv と同じ順序）。
 		if (result) {
 			const r = result as DbPost & {
 				previousMml?: typeof previousMml;

@@ -261,7 +261,7 @@ export async function PATCH(
 	]);
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
-	// （lib/game/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
+	// （lib/post/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。
 	// 差し替えで外れた旧画像（previousImage）も同じ扱い。
 	const { previousMml, previousImage } = result as typeof result & {
 		previousMml?: { deleteId: string; deleteHash: string };

@@ -51,7 +51,7 @@ import {
 	updateGame,
 	updateMv,
 	updateTalk,
-} from "@/lib/game/game-mv-client";
+} from "@/lib/post/game-mv-client";
 import {
 	countUnreadMessages,
 	MESSAGES_READ_EVENT,
@@ -1614,7 +1614,7 @@ export default function App() {
 	}, []);
 
 	// manifest はブラウザから直接R2へ上げ、DBにはURLだけ渡す（docs/NEON_EGRESS.md）。
-	// updateGame/updateMv（lib/game/game-mv-client.ts）がアップロード→PATCH→旧manifestの
+	// updateGame/updateMv（lib/post/game-mv-client.ts）がアップロード→PATCH→旧manifestの
 	// 削除まで面倒を見る。ここで直接 fetch(PATCH) して生の manifest を送ると、
 	// サーバーは manifestUrl が無いとして 400 を返す（parseManifestRef 参照）。
 	const handleSaveEditedGame = async (

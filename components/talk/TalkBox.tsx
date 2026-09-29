@@ -1,11 +1,11 @@
 "use client";
 import { Loader2, MessagesSquare } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadTalk } from "@/lib/game/game-mv-client";
+import { loadTalk } from "@/lib/post/game-mv-client";
 import { TALK_H, TALK_W, type TalkManifest } from "@/lib/talk/talk-config";
 import EmbedCollabBar from "@/components/post/EmbedCollabBar";
 import TalkPlayer from "./TalkPlayer";
-import VoiceCredits, { useTalkVoiceCredits } from "./VoiceCredits";
+import VoiceCredits, { useTalkVoiceCredits } from "@/components/ui/VoiceCredits";
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;

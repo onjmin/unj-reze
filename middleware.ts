@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCountryFromHeaders, isBlockedCountry } from '@/lib/geo';
+import { getCountryFromHeaders, isBlockedCountry } from '@/lib/security/geo';
 import { kvGet, kvSetEx } from '@/lib/kv';
 import { getClientIp } from '@/lib/ip';
 import {

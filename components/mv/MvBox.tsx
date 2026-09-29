@@ -2,7 +2,7 @@
 import { Clapperboard, Loader2 } from "lucide-react";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadMv } from "@/lib/game/game-mv-client";
+import { loadMv } from "@/lib/post/game-mv-client";
 import {
 	MV_H,
 	MV_PRESET_LABELS,
@@ -14,7 +14,7 @@ import { startMvRemix } from "@/lib/social/remix";
 import { isCollabAllowed, type OriginType } from "@/lib/types";
 import EmbedCollabBar from "@/components/post/EmbedCollabBar";
 import MvPlayer from "./MvPlayer";
-import VoiceCredits, { useMvVoiceCredits } from "@/components/talk/VoiceCredits";
+import VoiceCredits, { useMvVoiceCredits } from "@/components/ui/VoiceCredits";
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;

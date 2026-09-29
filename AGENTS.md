@@ -108,7 +108,7 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
 ## Security & Anti-Abuse
 
 Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
-`lib/fingerprint.ts`, `lib/geo.ts`. Full rationale: [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md).
+`lib/security/fingerprint.ts`, `lib/security/geo.ts`. Full rationale: [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md).
 
 - **TLS signals flow one way: `request.cf` → `middleware.ts` → headers → route handlers.** The
   Worker terminates TLS, so middleware reads `request.cf` itself; no upstream proxy is involved.
@@ -121,7 +121,7 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
 - The **fingerprint** half is still staged but unwired: no caller sends `fingerprint`, so
   `app/api/posts` skips scoring (`if (fingerprint)`) and nothing calls `app/api/security/verify`.
   Wiring `collectFingerprint()` + `useTurnstile()` into the composer activates it.
-- Geo comes from `cf-ipcountry` with `x-vercel-ip-country` / other fallbacks (`lib/geo.ts`).
+- Geo comes from `cf-ipcountry` with `x-vercel-ip-country` / other fallbacks (`lib/security/geo.ts`).
 
 ---
 

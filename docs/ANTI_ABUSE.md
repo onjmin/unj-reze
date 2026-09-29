@@ -33,7 +33,7 @@ Browser                          proxy (middleware.ts)              Next.js API 
 ```tsx
 'use client';
 import { useTurnstile } from '@/lib/hooks/useTurnstile';
-import { collectFingerprint } from '@/lib/fingerprint';
+import { collectFingerprint } from '@/lib/security/fingerprint';
 
 function PostComposer() {
   const { containerRef, getToken } = useTurnstile();
@@ -73,7 +73,7 @@ resolves `null` — this keeps local dev working without Cloudflare credentials.
 server mirrors this: if `TURNSTILE_SECRET_KEY` is unset, verification is skipped
 (`turnstileOk = true`) rather than hard-failing every request.
 
-### Browser fingerprinting — `lib/fingerprint.ts`
+### Browser fingerprinting — `lib/security/fingerprint.ts`
 
 Collected signals (see `lib/security/types.ts: FingerprintSignals`):
 

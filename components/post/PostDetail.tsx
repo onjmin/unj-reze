@@ -31,7 +31,7 @@ import {
 	loadGame,
 	loadMv,
 	loadTalk,
-} from "@/lib/game/game-mv-client";
+} from "@/lib/post/game-mv-client";
 import {
 	pollInterval,
 	useRealtimeSubscription,

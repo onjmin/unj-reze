@@ -6,7 +6,7 @@
 // 文言は読み手で変える（`variant`）。埋め込み（MvBox / TalkBox）は見る人が読むので
 // 「この動画には◯◯の音源を使用しています」＝出典、エディタは作る人が読むので
 // 「使用時には◯◯の利用規約に従ってください」＝義務の告知。@onjmin/dtm の MML プレイヤーと
-// DAW も同じ切り分けになっている。対応表は lib/talk/voice-credits.ts 経由で dtm から引く。
+// DAW も同じ切り分けになっている。対応表は lib/audio/voice-credits.ts 経由で dtm から引く。
 
 import { useEffect, useState } from "react";
 import {
@@ -14,7 +14,7 @@ import {
 	collectTalkVoiceCredits,
 	voiceCreditsOf,
 	type VoiceCredit,
-} from "@/lib/talk/voice-credits";
+} from "@/lib/audio/voice-credits";
 import type { TalkManifest } from "@/lib/talk/talk-config";
 
 /**

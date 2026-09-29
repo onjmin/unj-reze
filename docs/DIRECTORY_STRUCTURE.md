@@ -7,7 +7,7 @@
 | フォルダ | 内容 |
 |---|---|
 | `layout/` | アプリの枠（AppShell、Header、サイドバー、BottomNav、TopTabs など） |
-| `ui/` | 複数機能で使う汎用部品（Toast、VolumeControl、HistoryModal、ImagePreview、ShareButton など） |
+| `ui/` | 複数機能で使う汎用部品（Toast、VolumeControl、HistoryModal、ImagePreview、ShareButton、VoiceCredits など） |
 | `post/` | 投稿の作成・表示・編集、フィード、埋め込み、コラボ選択 |
 | `bbs/` | 2ch風の掲示板ビュー |
 | `dm/` | ダイレクトメッセージ |
@@ -26,10 +26,10 @@
 | フォルダ | 内容 |
 |---|---|
 | （直下） | 全体で使う基盤: `api.ts`、`db.ts`、`types.ts`、`types-db.ts`、`site.ts`、`session.ts`、`sqids.ts`、`edge-cache.ts`、`uploader.ts` など |
-| `db/` `kv/` `storage/` `realtime/` `security/` `auth/` | バックエンド各層（`db/` にはモックデータも置く） |
+| `db/` `kv/` `storage/` `realtime/` `security/` `auth/` | バックエンド各層（`db/` にはモックデータも置く。`security/` には fingerprint・geo も） |
 | `hooks/` | React フック |
-| `post/` `social/` `bbs/` | 投稿、ユーザー間の機能（DM・共有・アバター・既読）、掲示板 |
+| `post/` `social/` `bbs/` | 投稿（ゲーム・MV・かけあい動画の保存クライアント `game-mv-client.ts` を含む）、ユーザー間の機能（DM・共有・アバター・既読）、掲示板 |
 | `game/` `yume25d/` `mmo3d/` | ゲーム関連 |
 | `assets/` | 素材参照、歩行グラ、ローカル素材 |
-| `mv/` `talk/` `mml/` `manga/` `drawing/` `audio/` | 各制作ツールと音声 |
+| `mv/` `talk/` `mml/` `manga/` `drawing/` `audio/` | 各制作ツールと音声（`audio/` にはボーカル音源のクレジット表示も） |
 | `ui/` | ポインタ操作、undo履歴などの UI 補助 |

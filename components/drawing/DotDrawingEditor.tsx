@@ -44,7 +44,7 @@ import {
 	resizeCanvas,
 } from "@/lib/drawing/export-drawing";
 import { copyToClipboard, readPasteImage } from "@/lib/drawing/oekaki-clipboard";
-import { type FlipAxis, flipLayers } from "@/lib/drawing-macros";
+import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 import {
 	clearAutosave,
@@ -60,7 +60,7 @@ import {
 	serializeLayers,
 	serializeWalkLayers,
 } from "@/lib/ui/history";
-import DrawingMacroBar, { type MacroScope } from ".././DrawingMacroBar";
+import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";

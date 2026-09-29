@@ -80,7 +80,7 @@ import { ensureSessionId } from '@/lib/session';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/game/pixel-weather';
 import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv/mv-config';
 import { useSaveShortcut } from '@/lib/hooks/useSaveShortcut';
-import { recordPresetOpen } from '@/lib/game/game-mv-client';
+import { recordPresetOpen } from '@/lib/post/game-mv-client';
 import dynamic from 'next/dynamic';
 
 export type { PresetId };

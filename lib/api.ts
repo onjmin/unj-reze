@@ -1,6 +1,6 @@
 import type { GameManifestDraft } from "@/components/game/GameMaker";
 import { type DmGate, rejectDmReason } from "./social/dm-rules";
-import { updateGame, updateMv, updateTalk } from "./game/game-mv-client";
+import { updateGame, updateMv, updateTalk } from "./post/game-mv-client";
 import { externalizeMml } from "./mml/mml-payload";
 import type { Message, Trend } from "./db/mock-db";
 import { db as mockDbInstance } from "./db/mock-db";
@@ -735,7 +735,7 @@ const liveApi = {
 		// R2は immutable なので編集のたびに新しいMMLオブジェクトへ上げ直す（同じキーへの
 		// 上書きができない）。DB更新が確定した後だけ previousMml が返るので、それを見て
 		// 旧オブジェクトを消す。失敗しても投稿自体は成立しているので握り潰す
-		// （残るのは孤児オブジェクト1個で表示は壊れない。lib/game/game-mv-client.ts と同じ設計）。
+		// （残るのは孤児オブジェクト1個で表示は壊れない。lib/post/game-mv-client.ts と同じ設計）。
 		edit: async (
 			id: string,
 			userId: string,
@@ -785,7 +785,7 @@ const liveApi = {
 		},
 		// 削除（レス=物理削除／スレ=論理削除どちらも）はR2側のMML/ゲーム・MV manifest実体も
 		// 道連れで消す。DB削除が確定した後だけ previousXxx が返るので、それを見てから消す
-		// （edit と同じ「DB確定後に消す」順序。lib/game/game-mv-client.ts 参照）。ゲーム/MVは
+		// （edit と同じ「DB確定後に消す」順序。lib/post/game-mv-client.ts 参照）。ゲーム/MVは
 		// 他の投稿からまだ参照されていればサーバー側で削除自体をスキップしているので、
 		// previousGameManifest/previousMvManifest が無いのは「消さなかった」という意味。
 		remove: async (id: string, userId: string) => {
@@ -1114,7 +1114,7 @@ const liveApi = {
 	 * 呼び出し側に `userSlug:` と書かせるため名前付きで受け取る。
 	 */
 	// 作者判定はサーバーがセッションから行うので、呼び出し側は身元を渡さない
-	// manifest はR2へ上げてURLだけを送る必要があるので、lib/game/game-mv-client.ts の
+	// manifest はR2へ上げてURLだけを送る必要があるので、lib/post/game-mv-client.ts の
 	// updateMv / updateGame に委譲する。ここで manifest を直接PATCHすると400になる。
 	mvs: {
 		edit: (id: string, params: { title: string; manifest: MvManifest }) =>

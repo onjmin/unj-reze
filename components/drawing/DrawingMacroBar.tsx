@@ -2,7 +2,7 @@
 
 import { FlipHorizontal, FlipVertical } from "lucide-react";
 import { useState } from "react";
-import type { FlipAxis } from "@/lib/drawing-macros";
+import type { FlipAxis } from "@/lib/drawing/drawing-macros";
 
 export type MacroScope = "canvas" | "layer";
 
