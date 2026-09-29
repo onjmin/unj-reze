@@ -5,7 +5,7 @@
 //   node scripts/make-effect-sheets.mjs --preview=DIR   … 確認用の拡大シート（背景3色×全コマ）も DIR へ書く
 //                                       [--scale=N]     … 確認用シートの拡大率（既定4。2=フィールド、3=戦闘の見え方）
 //
-// 形式は EffectPreset（components/game-presets/shared.ts）どおり「横一列の等幅コマ」。
+// 形式は EffectPreset（components/game/presets/shared.ts）どおり「横一列の等幅コマ」。
 // 1コマは 24x24px。フィールドでは TILE_SIZE*1.5=48px（2倍）、戦闘では 72px（3倍）で描かれるので、
 // どちらでも整数倍になり、16px マップチップを2倍で並べた画面とドットの粒が揃う。
 // 最終コマは「消えかけ」にしておく（戦闘の EffectSpriteAnim は最終コマのまま onDone を待つため）。

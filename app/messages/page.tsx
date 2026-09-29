@@ -2,8 +2,8 @@
 
 import { ArrowLeft, Mail } from "lucide-react";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import DmInboxList from "@/components/DmInboxList";
+import AppShell from "@/components/layout/AppShell";
+import DmInboxList from "@/components/dm/DmInboxList";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export default function MessagesPage() {

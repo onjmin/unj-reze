@@ -25,7 +25,7 @@
  *
  * ## 投票・ハート・削除トークン
  * post_votes / post_hearts は持ち込んでいない。投票は unj 方式
- * （カウンタ加算のみ + lib/vote-guard.ts のインメモリ重複防止）。
+ * （カウンタ加算のみ + lib/security/vote-guard.ts のインメモリ重複防止）。
  * そのため getLikedPosts 等の「過去に反応した投稿一覧」は提供できない
  * （空配列を返す。DBに誰が反応したかを持たない設計上の帰結）。
  *
@@ -39,19 +39,19 @@
  */
 import { neon } from "@neondatabase/serverless";
 import type { Pool } from "pg";
-import { genBbsId } from "../cc-id";
-import { extractChordsFromContent } from "../chord";
-import type { Message, Trend } from "../mock-db";
-import { extractMmlFromContent } from "../mml";
-import { ensureMmlExternalized } from "../mml-payload";
-import { isThreadFull, RES_LIMIT } from "../thread-limits";
-import { formatRelativeTime } from "../time";
+import { genBbsId } from "@/lib/bbs/cc-id";
+import { extractChordsFromContent } from "@/lib/mml/chord";
+import type { Message, Trend } from "./mock-db";
+import { extractMmlFromContent } from "@/lib/mml/mml";
+import { ensureMmlExternalized } from "@/lib/mml/mml-payload";
+import { isThreadFull, RES_LIMIT } from "@/lib/bbs/thread-limits";
+import { formatRelativeTime } from "@/lib/time";
 import type {
 	AnonymousUser,
 	FollowUser,
 	GameVoteCandidate,
 	OriginType,
-} from "../types";
+} from "@/lib/types";
 import type {
 	DbGameRecord,
 	DbMediaSearchPost,
@@ -60,8 +60,8 @@ import type {
 	DbNotification,
 	DbOshiItem,
 	DbPost,
-} from "../types-db";
-import { getVoteState } from "../vote-guard";
+} from "@/lib/types-db";
+import { getVoteState } from "@/lib/security/vote-guard";
 import type {
 	AddOshiItemParams,
 	CreateGameParams,
@@ -312,7 +312,7 @@ function deriveInsertContent(data: {
 		};
 	}
 	// コード進行(#コード進行)はMMLと違ってR2へ外部化されず、本文にそのまま残る
-	// （lib/mml-payload.ts の externalizeMml は #mml/#MML作曲 行しか見ない）。
+	// （lib/mml/mml-payload.ts の externalizeMml は #mml/#MML作曲 行しか見ない）。
 	// そのため mmlUrl/imageSrc のどちらでもない場合でも本文を見て判定する。
 	if (extractChordsFromContent(content)) {
 		return {
@@ -857,7 +857,7 @@ export const pgStore: DataStore = {
 
 	async createPost(data: CreatePostParams) {
 		// クライアントが mmlUrl を付け損ねていても、本文に生MMLマーカーが残っていれば
-		// ここで自前でR2へ外部化し直す（詳細: lib/mml-payload.ts の ensureMmlExternalized）。
+		// ここで自前でR2へ外部化し直す（詳細: lib/mml/mml-payload.ts の ensureMmlExternalized）。
 		const mmlResolved = await ensureMmlExternalized(data.content, data);
 		const c = deriveInsertContent({ ...data, ...mmlResolved });
 		const authorId = data.slug ? Number(data.slug) : null;
@@ -877,7 +877,7 @@ export const pgStore: DataStore = {
 				// 見出しと本文で同じ文言が二重表示される原因だった（unj側 ThreadPage.svelte /
 				// HeadlinePage.svelte は thread.title をそのまま見出しとして描画するため）。
 				// title が空＝reze発、という前提で unj/reze 双方の表示側が振り分ける
-				// （reze側は lib/post-title.ts の getDistinctTitle 参照）。
+				// （reze側は lib/post/post-title.ts の getDistinctTitle 参照）。
 				// title は空文字のまま保存する（threads.title は NOT NULL 制約）。
 				// board_id は固定で 1。cc_user_avatar も reze発は常に0（既存踏襲）。
 				const { text: insertSql, params: insertParams } = buildInsert("threads", [
@@ -907,7 +907,7 @@ export const pgStore: DataStore = {
 					["cc_bitmask", val(DEFAULT_CC_BITMASK)],
 					["content_types_bitmask", val(DEFAULT_CONTENT_TYPES_BITMASK)],
 					["user_id", val(authorId)],
-					// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
+					// cc_user_id は reze の掲示板モード（lib/social/avatar.tsx:getUserIdLabel）が
 					// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
 					// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
 					["cc_user_id", val(genBbsId(authorId, 1))],
@@ -1360,7 +1360,7 @@ export const pgStore: DataStore = {
 		const result = await pgStore.getPost(id, userId);
 		// 旧オブジェクトの削除トークンをここにだけ載せて返す。DB更新が確定したあとに
 		// 呼び出し側（app/api/posts/[id]/route.ts）がレスポンスに載せ、クライアントが
-		// 消す（lib/game-mv-client.ts の updateGame/updateMv と同じ順序）。
+		// 消す（lib/game/game-mv-client.ts の updateGame/updateMv と同じ順序）。
 		if (result) {
 			const r = result as DbPost & {
 				previousMml?: typeof previousMml;

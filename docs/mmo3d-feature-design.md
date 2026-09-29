@@ -1,7 +1,7 @@
 # 3D MMO プリセット（`mmo3d`）設計ドキュメント
 
 三人称視点・スケルタルアニメ・簡易マルチプレイ戦闘を持つ新しいゲームエンジン種別。
-`components/GameMaker.tsx`（canvas 2D）にも `yume25d`（一人称2.5D探索）にも混ぜず、
+`components/game/GameMaker.tsx`（canvas 2D）にも `yume25d`（一人称2.5D探索）にも混ぜず、
 **独立した `EngineKind` として新設**する。理由は下記「なぜ既存に混ぜないか」を参照。
 
 参考にした外部プロダクト（[스피키 키우기](https://speakirpg.overture.io.kr/)）はソース非公開の
@@ -13,7 +13,7 @@
 ## なぜ既存エンジンに混ぜないか
 
 - `yume25d` は一人称・夢空間探索という前提で照明/色空間/システムタイルが設計済み
-  （`lib/yume25d.ts`、`Yume25DMaker.tsx`）。三人称+スケルタルアニメ+武器戦闘とは
+  （`lib/yume25d/yume25d.ts`、`Yume25DMaker.tsx`）。三人称+スケルタルアニメ+武器戦闘とは
   前提が違いすぎ、混ぜると照明・色パイプラインの整合が壊れる。
 - `GameMaker.tsx` は既に19k行で React Compiler が OOM するため lint 除外中（AGENTS.md）。
   ここにMMOの巨大な状態機械を追加するのはリスクが高い。
@@ -42,7 +42,7 @@
 
 ## モデル/アニメ素材（訂正: yume25dの基盤をそのまま再利用できる）
 
-`lib/yume25d.ts` の `loadModel()` は既に `GLTFLoader` でURL指定の3Dモデル（アニメ付き）を
+`lib/yume25d/yume25d.ts` の `loadModel()` は既に `GLTFLoader` でURL指定の3Dモデル（アニメ付き）を
 ビルボード配置にロードできる（キャッシュ＆クローンで使い回す仕組みも既存）。つまり
 「ゆめにっき3Dで選べる素材」＝GLTFモデルはmmo3dでもそのまま同じローダーを再利用してよい。
 フェーズ3のスケルタルアニメ基盤は「ゼロから作る」のではなく「`loadModel`が返す
@@ -64,17 +64,17 @@ three.js は r150前後で `MMDLoader`/`MMDAnimationHelper` を examples から�
 
 **three-stdlib（threeベース）と babylon-mmd（Babylonベース）は同じ`<canvas>`のWebGL
 コンテキストを共有できない**ため、1ゲームにつきレンダラーをどちらか一方だけ選ぶ
-（`Mmo3dRenderer`, `components/game-presets/shared.ts`）。ゲーム作者が編集画面で選択する。
+（`Mmo3dRenderer`, `components/game/presets/shared.ts`）。ゲーム作者が編集画面で選択する。
 
 | | `three`（既定） | `babylon` |
 |---|---|---|
-| 実装 | `lib/mmo3d.ts` | `lib/mmo3d-babylon.ts` |
+| 実装 | `lib/mmo3d/mmo3d.ts` | `lib/mmo3d/mmo3d-babylon.ts` |
 | 強み | yume25dと描画基盤を共有、GLTF/GLBが軽量、既存のCORSプロキシ運用実績あり | `babylon-mmd`でMMD(PMX)モデル＋モーション(VMD)がそのまま読める、Havok物理(`@babylonjs/havok`)が公式 |
 | 弱み | MMDモデルは非対応（GLTFへの変換が必要） | バンドルサイズが大きい、yume25dの照明/色パイプラインとは別系統になる |
 | 向いている用途 | 既存GLTF素材中心のワールド | ユーザー投稿MMDモデルを主役にしたいワールド |
 
 `babylonjs-inspector`（デバッグ用ビューア）はバンドルサイズが大きいため
-`devDependencies`に移し、`lib/mmo3d-babylon.ts`でも
+`devDependencies`に移し、`lib/mmo3d/mmo3d-babylon.ts`でも
 `process.env.NODE_ENV !== "production"`の動的importでしか読み込まない
 （本番バンドルから除外）。
 
@@ -83,7 +83,7 @@ MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLo
 
 ### フェーズ7完了メモ（MMDローダー実配線）
 
-- `lib/mmo3d-babylon.ts`に`loadMmdModel(url)`を追加。`babylon-mmd/esm/Loader/pmxLoader`の
+- `lib/mmo3d/mmo3d-babylon.ts`に`loadMmdModel(url)`を追加。`babylon-mmd/esm/Loader/pmxLoader`の
   `RegisterPmxLoader()`を初回呼び出し時に1回だけ実行し、`@babylonjs/core`の
   `ImportMeshAsync(url, scene)`でPMXファイルを読み込む。直リンク失敗時は
   `lib/cors-proxy.ts`経由で1回だけ再試行する（three版`loadModel`と同じフェイルオープン方式）。
@@ -94,7 +94,7 @@ MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLo
 
 ### フェーズ13完了メモ（VMDモーション再生）
 
-- `lib/mmo3d-babylon.ts`に`loadMmdModelAndPlay(pmxUrl, vmdUrl?)`を追加。
+- `lib/mmo3d/mmo3d-babylon.ts`に`loadMmdModelAndPlay(pmxUrl, vmdUrl?)`を追加。
   - `MmdRuntime`を初回呼び出し時に1回だけ生成・`register(scene)`。
   - `MmdRuntime.createMmdModel(root)`でPMXモデルを登録。
   - `vmdUrl`があれば`VmdLoader.loadAsync()`でVMDを解析（CORSプロキシへのフェイルオーバー
@@ -109,7 +109,7 @@ MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLo
 
 ### フェーズ3完了メモ（三人称スケルタルアニメ基盤）
 
-`lib/mmo3d.ts` に実装:
+`lib/mmo3d/mmo3d.ts` に実装:
 - WASD/矢印キー移動 + Shiftダッシュ（`setInput()`経由、`Mmo3dMaker.tsx`がキーイベントを中継）
 - 最短角度補間による向き変更、プレイヤー背後追従カメラ
 - idle/walk/run のクロスフェード切替（`AnimationMixer`）
@@ -126,7 +126,7 @@ MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLo
 
 ## データモデル
 
-- `EngineKind` に `'mmo3d'` を追加（`components/game-presets/shared.ts`）。
+- `EngineKind` に `'mmo3d'` を追加（`components/game/presets/shared.ts`）。
 - キャラクターモデル・アニメーションはビルトインアセット1〜2種のみで開始
   （`assets/` 内蔵シートの仕組みを踏襲、外部FBXの著作権がクリアなもの、または自作モデルに限定）。
 - 永続化は既存 `games` テーブルの `manifest`（JSON）に mmo3d 用の設定を格納。新規カラムは
@@ -157,9 +157,9 @@ export interface RealtimePlayer {
 - `services/realtime/server.mjs`: `pos`メッセージで`rotY`/`anim`を受け取り、presenceに保持して
   ブロードキャストに含める（値が無ければ省略、既存の2D勢は影響を受けない完全後方互換）。
 - `lib/realtime/client.ts`: `sendPosition()`に`{rotY, anim}`の任意第6引数を追加。
-- `lib/mmo3d.ts`: `getLocalState()`（送信用）と`setRemotePlayers()`（他プレイヤーを簡易カプセル
+- `lib/mmo3d/mmo3d.ts`: `getLocalState()`（送信用）と`setRemotePlayers()`（他プレイヤーを簡易カプセル
   で表示、sessionId単位で生成/更新/消去）を追加。
-- `components/Mmo3dMaker.tsx`: `gameId`/`sessionId`を渡すとthree版のみ200ms間隔で送受信する
+- `components/game/mmo3d/Mmo3dMaker.tsx`: `gameId`/`sessionId`を渡すとthree版のみ200ms間隔で送受信する
   （既存2Dゲームの2000ms間隔より短い。移動が速いため）。babylon版は未対応（#7と合わせて
   今後）。
 
@@ -189,8 +189,8 @@ export interface RealtimePlayer {
 
 ### フェーズ6完了メモ（DB永続化・投稿埋め込み・release準備）
 
-- `PresetId`/`EngineKind`に`'mmo3d'`を追加し、`components/game-presets/mmo3d.ts`を新設
-  （`components/game-presets/index.ts`の`PRESETS`/`PRESET_ORDER`/`PRESET_EMOJI`/`PRESET_TAGLINE`
+- `PresetId`/`EngineKind`に`'mmo3d'`を追加し、`components/game/presets/mmo3d.ts`を新設
+  （`components/game/presets/index.ts`の`PRESETS`/`PRESET_ORDER`/`PRESET_EMOJI`/`PRESET_TAGLINE`
   にも登録）。
 - `GameManifestDraft`/`PresetData`に`mmo3dConfig?: { renderer: Mmo3dRenderer }`を追加。
 - `GameMaker.tsx`のcanvasレンダー分岐を3分岐に拡張:
@@ -214,7 +214,7 @@ typecheck / lint（新規warning・errorゼロ、既存の`MvMaker.tsx`の未関
 
 ### フェーズ11完了メモ（エディタUI：レンダラー切替・掲示板postID）
 
-- [components/Mmo3dEditorPanel.tsx](../components/Mmo3dEditorPanel.tsx)を新設。MAPタブが
+- [components/game/mmo3d/Mmo3dEditorPanel.tsx](../components/game/mmo3d/Mmo3dEditorPanel.tsx)を新設。MAPタブが
   `gameData.engine === 'mmo3d'`のときこのパネルに差し替わる（yume25dの
   `Yume25DEditorPanel`と同じ吸収パターン）。
   - レンダラー（three/babylon）をボタンで切替、`gameData.mmo3dConfig.renderer`に反映。
@@ -272,11 +272,11 @@ canvasの上に重ねているだけで、`gameData.engine`による分岐が無
 
 ### フェーズ8完了メモ（ゲーム内BBS・mmo3d向け実装）
 
-- [components/GameThreadBoard.tsx](../components/GameThreadBoard.tsx): 汎用オーバーレイ。
+- [components/game/GameThreadBoard.tsx](../components/game/GameThreadBoard.tsx): 汎用オーバーレイ。
   `postId`を受け取り既存の`GET /api/posts/[id]`・`GET/POST /api/posts/[id]/replies`だけで
   閲覧・返信する（外部サイトへは一切接続しない）。2D/3D共通で使える設計。
   `useCurrentUser()`で表示名を取得。
-- `lib/mmo3d.ts`: `enableBoard()`でワールド上(0, 1.2, 4)に掲示板メッシュを設置、
+- `lib/mmo3d/mmo3d.ts`: `enableBoard()`でワールド上(0, 1.2, 4)に掲示板メッシュを設置、
   `isNearBoard()`で対話範囲(2.5m)判定。
 - `Mmo3dMaker.tsx`: `boardPostId`propを追加。近接時に「Eキーで掲示板を開く」ヒント表示、
   Eキーで`GameThreadBoard`をトグル。
@@ -293,7 +293,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 
 ### フェーズ12完了メモ（2Dエンジン: BBSタイル配置）
 
-- `TileDef`に`boardPostId?: string`を追加（`components/game-presets/shared.ts`）。
+- `TileDef`に`boardPostId?: string`を追加（`components/game/presets/shared.ts`）。
 - `GameMaker.tsx`の移動処理ループに`special === 'bbsBoard'`分岐を追加。既存の
   `warp`/`damage`分岐と同じ位置・同じパターンで、踏んだタイルの`boardPostId`
   （未指定なら埋め込み先の`postId`）で`GameThreadBoard`を開く。
@@ -310,7 +310,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 
 ### フェーズ14完了メモ（移動ロジック修正・掲示板複数設置・babylon版移動/同期）
 
-- **移動キーの操作性バグ修正**（`lib/mmo3d.ts` `updateMovement`）: キー入力をワールド座標に
+- **移動キーの操作性バグ修正**（`lib/mmo3d/mmo3d.ts` `updateMovement`）: キー入力をワールド座標に
   直結していたため、カメラが移動方向を追いかけて回るたびに「前」の意味がブレて操作感が
   滅茶苦茶になっていた。キー入力を現在の向き(`facing`)基準のローカル方向として扱い、毎フレーム
   回転してからワールド座標に変換するよう修正（カメラ相対操作）。
@@ -322,7 +322,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
   空なら既定の2体（(3,-3)/(-3,-4)）。
 - **babylon版のWASD移動＋リアルタイム位置同期**: それまで`ArcRotateCamera`の自由視点のみで
   移動手段が無かったbabylon版に、three版と同じキー配線＋カメラ相対移動を実装
-  （`lib/mmo3d-babylon.ts` `updateMovement`。`camera.target`/`camera.position`から求めた
+  （`lib/mmo3d/mmo3d-babylon.ts` `updateMovement`。`camera.target`/`camera.position`から求めた
   カメラ前方ベクトルを基準に回転）。`getLocalState()`/`setRemotePlayers()`を追加し、
   `chGame`経由のリアルタイム同期をthree/babylon共通化（`Mmo3dMaker.tsx`の`renderer==='three'`
   ガードを撤廃）。**副次的なバグ修正**: `loadMmdModelAndPlay()`で読み込んだMMDモデルの
@@ -352,7 +352,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 ### フェーズ16完了メモ（babylon版: 地形当たり判定・移動状態の同期）
 
 - **babylon版の地形障害物に当たり判定を追加**: three版と全く同じ軸分離スライド式AABB判定
-  （`resolveObstacleCollision`）を`lib/mmo3d-babylon.ts`にも実装。ArcRotateCameraの自由視点
+  （`resolveObstacleCollision`）を`lib/mmo3d/mmo3d-babylon.ts`にも実装。ArcRotateCameraの自由視点
   移動（カメラ相対）とも問題なく共存する（移動先座標に対して当たり判定するだけなので、
   カメラの向きには依存しない）。
 - **babylon版に移動状態(idle/walk/run)の判定を追加**: 実モデルのスケルタルクリップ切替は
@@ -378,7 +378,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
   やスペックの低い端末では珍しくない）に係数がちょうど1.0になり、その1フレームで向きが
   完全にスナップしてしまう＝旋回が一瞬で終わって見える不具合があった。線形式を指数減衰
   `this.facing += diff * (1 - Math.exp(-TURN_LERP * dt))`に置き換え、`dt`が多少跳ねても
-  係数が1.0に張り付かないようにした（`lib/mmo3d.ts`・`lib/mmo3d-babylon.ts`両方）。
+  係数が1.0に張り付かないようにした（`lib/mmo3d/mmo3d.ts`・`lib/mmo3d/mmo3d-babylon.ts`両方）。
   実機で0.15秒刻みのスクリーンショットを比較し、旋回が複数フレームにわたって滑らかに
   進行することを確認。
 
@@ -427,26 +427,26 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
   無限旋回という致命的な不具合と比べて優先度は低いと判断した。babylon版はArcRotateCameraの
   実カメラ向きを基準にしており自己参照が起きないため、この問題は無く、カメラ相対操作のまま。
 
-### フェーズ20完了メモ（lib/yume25d.ts 準拠のタンク操作に統一）
+### フェーズ20完了メモ（lib/yume25d/yume25d.ts 準拠のタンク操作に統一）
 
 - **ユーザー指摘**（「下キー押したら旋回するのおかしい。ゆめにっき3Dの操作感を踏襲すれば
   いいのでは」）を受けて、フェーズ19の「ワールド絶対」方式（移動キーの組み合わせから毎回
-  向きを逆算する）もやめ、`lib/yume25d.ts`と同じ**タンク操作**（前後移動・ストレイフは
+  向きを逆算する）もやめ、`lib/yume25d/yume25d.ts`と同じ**タンク操作**（前後移動・ストレイフは
   facingを一切変更せず、旋回は専用キーでしか起きない）に全面的に統一した。
   - `Mmo3dInputState`を`{ forward, back, strafeL, strafeR, turnL, turnR, run }`に変更
     （旧`left`/`right`はキー入力の意味が曖昧だったため廃止）。
   - `this.facing += turn * TURN_SPEED * dt`で旋回キー入力を直接facingに積分する
-    （lib/yume25d.tsの`this.yaw += turn * TURN_SPEED * dt`と同じ形）。移動側は
+    （lib/yume25d/yume25d.tsの`this.yaw += turn * TURN_SPEED * dt`と同じ形）。移動側は
     `forward/back`→前方ベクトル、`strafeL/strafeR`→右方ベクトルへの単純な射影で、
     facingの計算に一切関与しない。これにより「後退キーで向きが変わる」という直感に反した
     挙動も、facingの自己参照による無限回転も、構造的に起こりえなくなった。
-  - `TURN_SPEED = 2.4`ラジアン/秒、`STRAFE_SPEED = 2.0`m/sはいずれも`lib/yume25d.ts`と
+  - `TURN_SPEED = 2.4`ラジアン/秒、`STRAFE_SPEED = 2.0`m/sはいずれも`lib/yume25d/yume25d.ts`と
     同値・同じ比率感覚に揃えた。
   - babylon版もthree版と全く同じロジックに統一（旧: ArcRotateCameraの向きを毎フレーム
     参照する「カメラ相対」実装だったが、そちらもfacingの自己参照リスクを抱えていたため
     廃止）。ArcRotateCameraのドラッグ操作自体は引き続き有効で、視点は自由に見回せる
     （移動方向には影響しない）。
-  - [Mmo3dMaker.tsx](../components/Mmo3dMaker.tsx)のキー配列を`lib/yume25d.ts`
+  - [Mmo3dMaker.tsx](../components/game/mmo3d/Mmo3dMaker.tsx)のキー配列を`lib/yume25d/yume25d.ts`
     （Minecraft創造モード風）と完全に揃えた: 矢印キー＝前後移動＋旋回、WASD＝前後移動＋
     左右ストレイフ、Shift＝ダッシュ、Space＝攻撃、E＝掲示板。
 - **実機検証**: three版でSキー（後退）を1.5秒ホールドし、キャラクターの向きが一切変わらず
@@ -455,7 +455,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 
 ### フェーズ21完了メモ（babylon版: MMDモデルのidle/walk/run自動切替）
 
-- **VMDモーションのstate別自動切替を実装**（`lib/mmo3d-babylon.ts`）: `loadMmdModelAndPlay()`
+- **VMDモーションのstate別自動切替を実装**（`lib/mmo3d/mmo3d-babylon.ts`）: `loadMmdModelAndPlay()`
   を`{ idle?, walk?, run? }`の3state対応に拡張。各stateのVMDをそれぞれ`MmdModel.
   createRuntimeAnimation()`でハンドル化して保持し（`mmdAnimHandles`）、`updateMovement()`で
   求めた`curAnim`（idle/walk/run）が変化した時だけ`MmdModel.setRuntimeAnimation()`で
@@ -490,8 +490,8 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
   扱いを確認し「廃止する」を選択）。
   - `Mmo3dInputState`から`strafeL`/`strafeR`を削除し、`{ forward, back, turnL, turnR, run }`
     のみに簡略化。`STRAFE_SPEED`定数・右方ベクトルの計算も削除（前方ベクトルのみで完結）。
-  - [Mmo3dMaker.tsx](../components/Mmo3dMaker.tsx)のキー配列を変更: `KeyA`/`ArrowLeft`→
-    `turnL`、`KeyD`/`ArrowRight`→`turnR`（W/S・矢印上下は前後移動のまま）。lib/yume25d.ts
+  - [Mmo3dMaker.tsx](../components/game/mmo3d/Mmo3dMaker.tsx)のキー配列を変更: `KeyA`/`ArrowLeft`→
+    `turnL`、`KeyD`/`ArrowRight`→`turnR`（W/S・矢印上下は前後移動のまま）。lib/yume25d/yume25d.ts
     とは異なる配列になった（yume25dはA/D=ストレイフ、矢印=旋回）が、mmo3dは三人称視点で
     ストレイフの必要性が薄く、A/D=旋回の方が直感的という判断。
 - **実機検証**: three版でDキーを1秒ホールドし、カメラ/キャラクターが右方向へ旋回する
@@ -520,7 +520,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
   `castShadow`、地面に`receiveShadow`、プレイヤー/ダミー/掲示板/障害物/読み込んだGLTF
   モデル全メッシュに`castShadow`を設定。
 - **空**: 大きな球のBackSideにグラデーションシェーダー(`createSkyMaterial()`)を貼った
-  手続き的な空に変更（`lib/yume25d.ts`の「手続き的な空」と同じ外部テクスチャ非依存の方針）。
+  手続き的な空に変更（`lib/yume25d/yume25d.ts`の「手続き的な空」と同じ外部テクスチャ非依存の方針）。
   加えて`THREE.Fog`で遠景をなだらかに霞ませ、奥行きの単調さを緩和した。
 - **実機検証**: three版でmmo3dをプレイし、(1)空のグラデーション（上が濃い青、地平線側が
   白っぽく抜ける）と遠景のフォグが実際に見えること、(2)プレイヤー/ダミーの足元に影が
@@ -564,7 +564,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 - カメラFOVを60→35に狭め、望遠寄りにしてパースの歪みを減らした（見下ろしMMOに典型的な
   平坦な見え方）。
 - HPバーを画面左上の小さい表示から、画面下中央の大きなピル型バーへ移動
-  （[Mmo3dMaker.tsx](../components/Mmo3dMaker.tsx)）。敵のHPバーは左上に残置。
+  （[Mmo3dMaker.tsx](../components/game/mmo3d/Mmo3dMaker.tsx)）。敵のHPバーは左上に残置。
 - **実機検証**: three版でプレイし、(1)見下ろしアングルのカメラで地面・ダミー・プレイヤーが
   一望できること、(2)Wキー移動中もカメラが振り回されず追従し続けること、(3)HPバーが画面下
   中央の大きなバーで表示されること、(4)新規コンソールエラーが出ないこと、を確認。
@@ -576,12 +576,12 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 **永続化は一切実装していない**（下記すべてTODOコメント付きでエンジン内メモリ／リアルタイム
 ハブのインメモリのみに留めている。リロード・再起動で消える）。
 
-- **SD体型**（`lib/mmo3d.ts`）: プレイヤー/ダミー/ゴーストのプレースホルダーを、短く丸い胴体
+- **SD体型**（`lib/mmo3d/mmo3d.ts`）: プレイヤー/ダミー/ゴーストのプレースホルダーを、短く丸い胴体
   カプセル＋大きめの頭球の2パーツ構成に変更（`CHIBI_BODY_*`/`CHIBI_HEAD_*`,
   `DUMMY_BODY_*`/`DUMMY_HEAD_*`定数）。ルートオブジェクト自体は従来通り胴体カプセル1個
   のままなので、移動/カメラ/当たり判定の既存コードは変更不要だった（頭は子メッシュとして
   載せただけ）。実機で丸みのあるチビキャラ然としたシルエットになったことを確認。
-- **キャラ育成**（`lib/mmo3d.ts`/`lib/mmo3d-babylon.ts`、TODO(persist)）: ダミー撃破でXP獲得
+- **キャラ育成**（`lib/mmo3d/mmo3d.ts`/`lib/mmo3d/mmo3d-babylon.ts`、TODO(persist)）: ダミー撃破でXP獲得
   →レベルアップで最大HP・攻撃力が成長する仕組みを追加（`level`/`xp`/`xpToNext`、
   `HP_GROWTH_PER_LEVEL`/`ATTACK_GROWTH_PER_LEVEL`）。レベルアップ時はHP全回復。
   `setCombatCallbacks`に`onLevelChanged`を追加し、`Mmo3dMaker.tsx`のHUDにLvバッジ＋XPバーを
@@ -618,7 +618,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 （すべてTODO(persist)コメント付き。育成/装備選択はエンジン内メモリ、出席のみ
 `localStorage`でその場しのぎ、サーバー側のDB保存は無い）。
 
-- **装備（武器種）・複数スキルの選択制**（`lib/mmo3d.ts`/`lib/mmo3d-babylon.ts`、
+- **装備（武器種）・複数スキルの選択制**（`lib/mmo3d/mmo3d.ts`/`lib/mmo3d/mmo3d-babylon.ts`、
   `WEAPON_TYPES`/`SKILL_TYPES`をexport）: 武器3種（剣/槍/斧、ダメージ・射程・クールダウンの
   倍率がそれぞれ異なる）とスキル2種（回転斬り=全方位AOE、貫き突き=正面の狭い扇状だが
   射程・威力に優れる）を追加。`setWeapon()`/`setSkill()`/`getEquipment()`をエンジンに追加し、
@@ -661,7 +661,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 
 ユーザーから「カメラが遠い」「何かフリーズしてます」という報告を受けた。
 
-- **カメラ距離**: `CAM_OFFSET`を`(0, 16, 13)`→`(0, 8, 6.5)`に変更（`lib/mmo3d.ts`
+- **カメラ距離**: `CAM_OFFSET`を`(0, 16, 13)`→`(0, 8, 6.5)`に変更（`lib/mmo3d/mmo3d.ts`
   `updateCamera()`）。フェーズ24でFOVを60→35に狭めた際、疑似アイソメトリック効果を狙って
   オフセットも大きく取りすぎていた。
 - **フリーズ不具合の原因調査と対策**: **実機での再現確認はできなかった**
@@ -700,7 +700,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 **1. オービットカメラ（`turnBy` / `adjustCameraDistance`）**
 - 旧: `CAM_OFFSET`固定の見下ろしカメラ。視点は一切動かせなかった。
 - 新: `camYaw` / `camElev` / `camDist` を持ち、キャンバスのドラッグで回す。API名と符号は
-  `lib/yume25d.ts` の `turnBy(deltaYaw, deltaPitch)` に合わせてある（横=旋回、縦=見上げ/
+  `lib/yume25d/yume25d.ts` の `turnBy(deltaYaw, deltaPitch)` に合わせてある（横=旋回、縦=見上げ/
   見下ろし、ホイール/ピンチ=距離）。注視点は`CAM_FOLLOW_LERP`でプレイヤーへ滑らかに追従し、
   地面/足場より下へ潜らないようクランプする。
 - FOVは35°→48°に戻した。35°は「固定角の疑似アイソメトリック」前提の望遠設定で、視点を
@@ -761,7 +761,7 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 その間`requestAnimationFrame`が発火しないためエンジンが完全に止まる。スクリーンショットを
 撮った瞬間だけ数フレーム進むので、「動かない」と見えても不具合とは限らない。位置の観測は
 ミニマップのDOM（ドットの`style.left/top`とプレイヤー三角の`rotate()`）から読むのが確実。
-`lib/mmo3d.ts`には開発ビルド限定で`window.__mmo3d`ハンドルを追加した（`__yume25d`と同じ方針）。
+`lib/mmo3d/mmo3d.ts`には開発ビルド限定で`window.__mmo3d`ハンドルを追加した（`__yume25d`と同じ方針）。
 
 **未対応（既知）**:
 - `GameMaker.tsx`の`dpadProps.onPointerDown`が`setPointerCapture`を素で呼んでおり、

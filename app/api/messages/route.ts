@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
-import { rejectDmReason } from "@/lib/dm-rules";
+import { rejectDmReason } from "@/lib/social/dm-rules";
 import { chUser } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 	}
 
 	// 初回DM制限はクライアント表示だけでは意味がない（DMスパムの導線そのもの）ので
-	// ここで必ず判定する。判定ロジックは lib/dm-rules.ts でクライアントと共有している。
+	// ここで必ず判定する。判定ロジックは lib/social/dm-rules.ts でクライアントと共有している。
 	const gate = await db.getDmGate(sender, recipient);
 	const rejection = rejectDmReason(gate, text);
 	if (rejection) {

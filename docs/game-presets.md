@@ -1,15 +1,15 @@
 # ゲームの見本プリセットとまっさらテンプレート
 
-ゲームエディタ（`components/GameMaker.tsx`）でゲームを作り始める入口は2種類ある。
+ゲームエディタ（`components/game/GameMaker.tsx`）でゲームを作り始める入口は2種類ある。
 このドキュメントは、その2つの違い、保存データとの関係、見本の足し方、第三者IPの方針とその経緯、
 内蔵の効果音・エフェクトの作り方、見本がどれだけ開かれたかを数える `preset_opens` をまとめる。
 
-- 型・共通定義: [components/game-presets/shared.ts](../components/game-presets/shared.ts)（`PresetId` / `SamplePresetId` / `PresetData`）
-- 見本の登録: [components/game-presets/index.ts](../components/game-presets/index.ts)（`PRESETS` / `PRESET_ORDER` / `PRESET_TAGLINE` / `isSamplePresetId`）
-- まっさらテンプレート: [components/game-presets/templates.ts](../components/game-presets/templates.ts)（`createEngineTemplate` / `TEMPLATE_ENGINES` / `ENGINE_LABELS` / `ENGINE_TAGLINES`）
-- 保存データとの相互変換: [components/game-manifest.ts](../components/game-manifest.ts)（`buildGameManifest` / `manifestToPresetData`）
-- 見本のオリジナルBGM: [components/game-presets/bgm-library.ts](../components/game-presets/bgm-library.ts)
-- 内蔵効果音: [lib/game-sfx.ts](../lib/game-sfx.ts)
+- 型・共通定義: [components/game/presets/shared.ts](../components/game/presets/shared.ts)（`PresetId` / `SamplePresetId` / `PresetData`）
+- 見本の登録: [components/game/presets/index.ts](../components/game/presets/index.ts)（`PRESETS` / `PRESET_ORDER` / `PRESET_TAGLINE` / `isSamplePresetId`）
+- まっさらテンプレート: [components/game/presets/templates.ts](../components/game/presets/templates.ts)（`createEngineTemplate` / `TEMPLATE_ENGINES` / `ENGINE_LABELS` / `ENGINE_TAGLINES`）
+- 保存データとの相互変換: [components/game/game-manifest.ts](../components/game/game-manifest.ts)（`buildGameManifest` / `manifestToPresetData`）
+- 見本のオリジナルBGM: [components/game/presets/bgm-library.ts](../components/game/presets/bgm-library.ts)
+- 内蔵効果音: [lib/game/game-sfx.ts](../lib/game/game-sfx.ts)
 
 ---
 
@@ -18,7 +18,7 @@
 | | 見本プリセット（sample preset） | まっさらテンプレート（engine template） |
 |---|---|---|
 | 中身 | そのまま遊べる完成した見本ゲーム（キャラ・台詞・マップ・BGM） | 特定のゲームの中身を一切持たない、そのエンジンで遊べる最小限 |
-| 実体 | `PRESETS[id]`（`components/game-presets/<名前>.ts`） | `createEngineTemplate(engine)` が毎回新しく作る |
+| 実体 | `PRESETS[id]`（`components/game/presets/<名前>.ts`） | `createEngineTemplate(engine)` が毎回新しく作る |
 | ID | 見本のID（`SamplePresetId`） | `'blank'`（`PRESETS` に実体は無い） |
 | 単位 | 見本ごと | エンジンごと（`TEMPLATE_ENGINES`: rpg / action / onjReze / touhou / yume25d） |
 | エディタでの入口 | ギャラリーの見本一覧、設定の「ゲーム切り替え」 | ギャラリーの「まっさらから作る」、設定の「まっさらにする」「エンジン変換」 |
@@ -36,7 +36,7 @@ preset が見本に無いIDだと `dq` を土台にしていた）。そのた�
 - 設定の「エンジン変換」（`switchEngine`。変換先エンジン固有の設定＝物理・プレイヤーの大きさ・
   弾幕のフェーズ・`layout25d` などはテンプレートから取り、タイトル・見た目・BGM・効果音・スイッチ・
   アイテム・装備・エフェクト・戦闘・画面はそのまま引き継ぐ）
-- RPGEN の取り込み（`lib/rpgen-parser.ts` が `preset: 'blank'` を書く。以前は `'onjReze'` と記録していた）
+- RPGEN の取り込み（`lib/game/rpgen-parser.ts` が `preset: 'blank'` を書く。以前は `'onjReze'` と記録していた）
 - 保存データの preset が見本に無いID（削除した `dq` / `deltarune` / `rockman` / `undertale` など）
 
 テンプレートは「そのまま遊べる最小限」に留める。マップは地面（と外周の壁）だけ、置物は東方の
@@ -74,7 +74,7 @@ preset が見本に無いIDだと `dq` を土台にしていた）。そのた�
 ## 2. 保存データ（manifest）との関係
 
 投稿・履歴・自動保存・JSON エクスポートはどれも `buildGameManifest`、読み込み（既存ゲームの初期ロード・
-履歴復元・JSON 取り込み）は `manifestToPresetData` を通る（`components/game-manifest.ts`）。
+履歴復元・JSON 取り込み）は `manifestToPresetData` を通る（`components/game/game-manifest.ts`）。
 
 - **土台**: manifest の `preset` が見本のIDならその見本の複製、それ以外は
   `createEngineTemplate(manifest.engine ?? 'rpg')`。`dq` へのフォールバックはもう無い。
@@ -127,13 +127,13 @@ Babylon.js / babylon-mmd が他のゲームの GameMaker チャンクに入ら�
 ## 4. 見本を足す手順
 
 1. `shared.ts` の `PresetId` に ID を足す（`SamplePresetId` は `'blank'` を除いたものなので自動で増える）。
-2. `components/game-presets/<名前>.ts` で `PresetData` を export する（`id` は 1. と同じ）。
+2. `components/game/presets/<名前>.ts` で `PresetData` を export する（`id` は 1. と同じ）。
    土台は `createEngineTemplate(engine)` から始めると必須項目を取りこぼさない。
 3. `index.ts` の `PRESETS` と `PRESET_TAGLINE` に足し、ギャラリーに出すなら `PRESET_ORDER` にも足す。
 4. `app/api/games/preset-open/route.ts` の `SAMPLE_PRESETS` に足す（`Record<Exclude<PresetId, 'blank'>, true>`
    なので、足し忘れると型エラーになる）。
 5. 素材は §5 の方針に従う。BGM は `bgm-library.ts` にオリジナル MML を書いて `mmlBgm()` で使う。
-   効果音は `gameSfxRef('<役割>')`（`lib/game-sfx.ts`）か、インライン MML。
+   効果音は `gameSfxRef('<役割>')`（`lib/game/game-sfx.ts`）か、インライン MML。
 6. 見本にしか無い挙動が要るなら、ID で分岐せずフィールドを足す（§1）。
 7. `pnpm typecheck` / `pnpm lint`。ギャラリーから開く → 保存 → 読み込みの往復で中身が変わらないこと、
    外した戦闘などが復活しないことを確かめる。
@@ -187,7 +187,7 @@ Babylon.js / babylon-mmd が他のゲームの GameMaker チャンクに入ら�
 プレイ動画以外の**原作ゲームの素材（画像・音楽・効果音）を使わない**こと。そのため `touhou` はキャラクター名
 （霊夢・チルノ）とスペルカード名は使い、画像・音声・楽曲は一切使わず（BGM は `bgm-library.ts` の MML、効果音は
 内蔵音）、タイトル画面とエンディングに東方Projectの二次創作である旨（原作：上海アリス幻樂団）を出す。
-スペルカードと道中の wave は、以前の版（`git show b54ff4fc^:components/game-presets/touhou.ts`）を元に見本として戻した。
+スペルカードと道中の wave は、以前の版（`git show b54ff4fc^:components/game/presets/touhou.ts`）を元に見本として戻した。
 
 ### レビューで追加で直したもの（2026-09-28）
 
@@ -227,15 +227,15 @@ node scripts/make-game-sfx.mjs
 ```
 
 - 矩形波・三角波・サイン波・ノイズとエンベロープだけで合成する（22050Hz / モノラル / 16bit PCM）。
-- 役割（キー）とファイル名の対応は `lib/game-sfx.ts` の `GAME_SFX_FILES`、エディタ表示名は `GAME_SFX_LABELS`。
-  音を足すときはスクリプトの `SOUNDS` と `lib/game-sfx.ts` の両方に足す。
+- 役割（キー）とファイル名の対応は `lib/game/game-sfx.ts` の `GAME_SFX_FILES`、エディタ表示名は `GAME_SFX_LABELS`。
+  音を足すときはスクリプトの `SOUNDS` と `lib/game/game-sfx.ts` の両方に足す。
 - エンジンが既定音として鳴らすときは `GAME_SFX.<役割>`、見本・テンプレートの `sfx` に入れるときは
   `gameSfxRef('<役割>')`（`direct:/assets/game-sfx/…` の参照になり、保存・読み込みしても同じ音に戻る）。
 - どの見本でも同じ既定音が鳴る（見本ごとの鳴らし分けはしない）。メニュー・セリフの UI 音は
   `SfxTrigger` の `confirm` / `cancel` / `text` で差し替えられる。
 - フィールドの既定音（メッセージ送り・システム床・宝箱・yume25d の食事／被ダメージ／着地）もここから引く
-  （`shared.ts` の `SYS_TILE_*_SFX` と `chest()`、`lib/yume25d.ts`）。外部の効果音への直リンクを既定値に置かない。
-- エディタの効果音ピッカーの「内蔵SE」タブ（`components/EngineSfxPanel.tsx`）で試聴して選べる。
+  （`shared.ts` の `SYS_TILE_*_SFX` と `chest()`、`lib/yume25d/yume25d.ts`）。外部の効果音への直リンクを既定値に置かない。
+- エディタの効果音ピッカーの「内蔵SE」タブ（`components/assets/EngineSfxPanel.tsx`）で試聴して選べる。
 
 ### エフェクト: `scripts/make-effect-sheets.mjs` → `public/assets/game-effects/*.png`
 
@@ -281,7 +281,7 @@ node scripts/make-effect-sheets.mjs --preview=DIR    # 確認用の拡大シー�
   受け付けたキーは、数えても・間引いても・DB が失敗しても 204（エディタを止めない）。
   表が無い（移行SQL未適用、`42P01`）ときはアイソレートごとに1回だけ警告を出して黙って数え漏らす。
   同じ IP・同じキーは 10 分間 KV で間引く（IP は KV の間引きキーにだけ使い、DB には残さない）。
-- クライアント: `recordPresetOpen(key)`（`lib/game-mv-client.ts`）。投げっぱなし・`keepalive`・失敗は無視。
+- クライアント: `recordPresetOpen(key)`（`lib/game/game-mv-client.ts`）。投げっぱなし・`keepalive`・失敗は無視。
   ギャラリーで見本を選んだ時、「まっさらから作る」でエンジンを選んだ時、選び直さずに既定の見本のまま
   進んだ時に呼ぶ。同じキーは GameMaker を開いている間に1回だけ送る。
 
@@ -316,5 +316,5 @@ SELECT preset, SUM(opens) AS opens
 
 所有者の旧作 rpg / roguelike / walksim（GitHub Pages）は、それぞれ独立したエンジン（2〜3.7万行）で、
 全編を GameMaker へ移すと劣化コピーにしかならない（roguelike は新しい `EngineKind` も要る）。
-代わりに `lib/embed.ts` の `type: 'game'` で `https://onjmin.github.io/rpg/` / `/roguelike/` / `/walksim/` 配下を
+代わりに `lib/post/embed.ts` の `type: 'game'` で `https://onjmin.github.io/rpg/` / `/roguelike/` / `/walksim/` 配下を
 許可し、URL を投稿すればフィードで原作をそのまま遊べるようにした。

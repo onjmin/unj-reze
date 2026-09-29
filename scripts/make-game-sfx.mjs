@@ -6,7 +6,7 @@
 // 何度実行しても同じバイト列になる（差分が出たら音を作り直したということ）。
 //
 // 実行: node scripts/make-game-sfx.mjs
-// 役割（キー）とファイル名の対応は lib/game-sfx.ts が持つ。ここで音を足したらそちらにも足すこと。
+// 役割（キー）とファイル名の対応は lib/game/game-sfx.ts が持つ。ここで音を足したらそちらにも足すこと。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

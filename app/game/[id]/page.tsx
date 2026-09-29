@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { cache } from "react";
-import GamePageClient from "@/components/GamePageClient";
+import GamePageClient from "@/components/game/GamePageClient";
 import { db } from "@/lib/db";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { decodeId, encodeId } from "@/lib/sqids";

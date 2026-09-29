@@ -7,9 +7,9 @@ import {
 } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import DemoNoticeModal from "@/components/DemoNoticeModal";
-import PwaRegister from "@/components/PwaRegister";
-import { AudioFocusProvider } from "@/lib/audio-focus-context";
+import DemoNoticeModal from "@/components/layout/DemoNoticeModal";
+import PwaRegister from "@/components/layout/PwaRegister";
+import { AudioFocusProvider } from "@/lib/audio/audio-focus-context";
 import { assetPath, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 const geistSans = Geist({

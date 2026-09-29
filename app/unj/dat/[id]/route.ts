@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { formatDatLine, titleOf } from "@/lib/bbs/format";
 import { utf8ToSjisBytes } from "@/lib/bbs/sjis";
 import { db } from "@/lib/db";
-import { RES_LIMIT } from "@/lib/thread-limits";
+import { RES_LIMIT } from "@/lib/bbs/thread-limits";
 // 専ブラ対応: GET /unj/dat/スレ番.dat
 // 板ID("unj" = board_id:1 うんでも実況J。C:\_own\git\_users\onjmin\unj\src\common\request\board.ts 参照)配下に配置。
 // 仕様: https://scrapbox.io/2chtypebbs/dat

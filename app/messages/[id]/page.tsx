@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import AppShell from "@/components/AppShell";
-import DmThreadView from "@/components/DmThreadView";
-import { db as mockDb } from "@/lib/mock-db";
+import AppShell from "@/components/layout/AppShell";
+import DmThreadView from "@/components/dm/DmThreadView";
+import { db as mockDb } from "@/lib/db/mock-db";
 import { SITE_URL } from "@/lib/site";
 
 export function generateStaticParams() {

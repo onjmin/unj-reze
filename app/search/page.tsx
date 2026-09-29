@@ -4,9 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import AppShell from "@/components/AppShell";
-import SearchView from "@/components/SearchView";
-import { collabHref } from "@/lib/collab-link";
+import AppShell from "@/components/layout/AppShell";
+import SearchView from "@/components/discover/SearchView";
+import { collabHref } from "@/lib/social/collab-link";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 function SearchPageContent() {

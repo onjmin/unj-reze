@@ -1,5 +1,5 @@
-import type { GameManifestDraft } from "@/components/GameMaker";
-import type { MvManifest, MvPresetKind } from "./mv-config";
+import type { GameManifestDraft } from "@/components/game/GameMaker";
+import type { MvManifest, MvPresetKind } from "./mv/mv-config";
 import type { OriginType, OshiItemKind } from "./types";
 
 /**
@@ -40,7 +40,7 @@ export interface DbPost {
 	/** 投稿者のユーザーID（users.id） */
 	userId?: string;
 	/** 掲示板モードの「ID:」表示専用。slug(=生のuser_id)とは別に、日替わりしない
-	 *  安定ハッシュ値（lib/cc-id.ts:genBbsId）。無ければ getUserIdLabel が displayName から補う。 */
+	 *  安定ハッシュ値（lib/bbs/cc-id.ts:genBbsId）。無ければ getUserIdLabel が displayName から補う。 */
 	bbsId?: string;
 	/**
 	 * 専ブラ向け.dat/subject.txtのファイル名に使うUnixエポック秒(BIGINT)。

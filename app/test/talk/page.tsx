@@ -1,16 +1,16 @@
 "use client";
 
-// かけあい動画の開発用ページ。見本台本（lib/talk-presets.ts）をそのまま再生し、「台本を編集」で TalkMaker を開く。
+// かけあい動画の開発用ページ。見本台本（lib/talk/talk-presets.ts）をそのまま再生し、「台本を編集」で TalkMaker を開く。
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import type { TalkManifest } from "@/lib/talk-config";
-import { TALK_PRESETS } from "@/lib/talk-presets";
+import type { TalkManifest } from "@/lib/talk/talk-config";
+import { TALK_PRESETS } from "@/lib/talk/talk-presets";
 
-const TalkPlayer = dynamic(() => import("@/components/TalkPlayer"), { ssr: false });
-const TalkMaker = dynamic(() => import("@/components/TalkMaker"), { ssr: false });
+const TalkPlayer = dynamic(() => import("@/components/talk/TalkPlayer"), { ssr: false });
+const TalkMaker = dynamic(() => import("@/components/talk/TalkMaker"), { ssr: false });
 
-/** 見本の先頭（サイト紹介）をサンプルにする。見本自体は lib/talk-presets.ts。 */
+/** 見本の先頭（サイト紹介）をサンプルにする。見本自体は lib/talk/talk-presets.ts。 */
 const SAMPLE: TalkManifest = TALK_PRESETS[0].build();
 
 export default function TalkTestPage() {

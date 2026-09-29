@@ -1,11 +1,11 @@
 import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import AppShell from "@/components/AppShell";
-import ProfileView from "@/components/ProfileView";
-import VolumeControl from "@/components/VolumeControl";
+import AppShell from "@/components/layout/AppShell";
+import ProfileView from "@/components/user/ProfileView";
+import VolumeControl from "@/components/ui/VolumeControl";
 import { db } from "@/lib/db";
-import { db as mockDb } from "@/lib/mock-db";
+import { db as mockDb } from "@/lib/db/mock-db";
 import { SITE_URL } from "@/lib/site";
 
 export function generateStaticParams() {

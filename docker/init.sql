@@ -158,7 +158,7 @@ CREATE TABLE threads (
     bad_count SMALLINT NOT NULL DEFAULT 0, -- (・Ａ・)ｲｸﾅｲ!
     -- 書き込み内容
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    cc_user_id TEXT NOT NULL DEFAULT '', -- lib/cc-id.ts:genBbsId（reze由来）/ unj cc.ts:genId（unj由来）
+    cc_user_id TEXT NOT NULL DEFAULT '', -- lib/bbs/cc-id.ts:genBbsId（reze由来）/ unj cc.ts:genId（unj由来）
     cc_user_name TEXT NOT NULL DEFAULT '',
     cc_user_avatar SMALLINT NOT NULL DEFAULT 0,
     content_text TEXT NOT NULL DEFAULT '',
@@ -194,7 +194,7 @@ CREATE TABLE threads (
     -- 別カラムで持つ。歩行グラの方向数/コマ順はwalk_presetのラベルから
     anim_frames SMALLINT, -- スプライトシートのコマ数（横の列数。歩行グラは方向あたりのコマ数）
     anim_fps SMALLINT, -- 再生fps
-    walk_preset TEXT -- 歩行グラのとき lib/walk-cycle.ts の WalkPreset.label。アニメ絵ならNULL
+    walk_preset TEXT -- 歩行グラのとき lib/assets/walk-cycle.ts の WalkPreset.label。アニメ絵ならNULL
 );
 
 CREATE INDEX idx_threads_board_deleted ON threads (board_id, deleted_at);

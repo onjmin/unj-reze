@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { EngineKind, PresetId } from "@/components/game-presets/shared";
+import type { EngineKind, PresetId } from "@/components/game/presets/shared";
 import { db } from "@/lib/db";
 import { getClientIp } from "@/lib/ip";
 import { kvExists, kvSetEx } from "@/lib/kv";

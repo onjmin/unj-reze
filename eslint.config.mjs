@@ -4,7 +4,7 @@ import nextTs from "eslint-config-next/typescript";
 
 // eslint-plugin-react-hooks v6 のルールの大半は React Compiler でコンポーネント全体を
 // 解析するため、巨大な単一コンポーネントではヒープを食い潰して OOM で落ちる
-// (components/GameMaker.tsx は約19,000行。--max-old-space-size=8192 でも不足)。
+// (components/game/GameMaker.tsx は約19,000行。--max-old-space-size=8192 でも不足)。
 // 対象ファイルだけコンパイラ系ルールを無効化する。exhaustive-deps はコンパイラを
 // 使わない従来実装（19,000行でも約100ms）なので維持する。
 // ルール名を直書きせずプラグイン側の一覧から導出するため、v6 系がルールを追加しても追従する。
@@ -54,7 +54,7 @@ const eslintConfig = defineConfig([
     }
   },
   {
-    files: ["components/GameMaker.tsx", "components/MvMaker.tsx"],
+    files: ["components/game/GameMaker.tsx", "components/mv/MvMaker.tsx"],
     rules: reactCompilerRulesOff
   }
 ]);

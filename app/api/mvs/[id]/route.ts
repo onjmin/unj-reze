@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
-import { parseBgRef, parseManifestRef } from "@/lib/manifest-ref";
-import type { MvManifest } from "@/lib/mv-config";
+import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
+import type { MvManifest } from "@/lib/mv/mv-config";
 import { decodeId, encodeMv } from "@/lib/sqids";
 
 function isMvManifest(m: unknown): m is MvManifest {

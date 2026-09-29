@@ -3,8 +3,8 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import AppShell from "@/components/AppShell";
-import SettingsView from "@/components/SettingsView";
+import AppShell from "@/components/layout/AppShell";
+import SettingsView from "@/components/pages/SettingsView";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export default function SettingsPage() {

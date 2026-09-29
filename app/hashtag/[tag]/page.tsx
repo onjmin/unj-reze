@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import HashtagView from "@/components/HashtagView";
-import { db as mockDb } from "@/lib/mock-db";
+import HashtagView from "@/components/discover/HashtagView";
+import { db as mockDb } from "@/lib/db/mock-db";
 import { SITE_URL } from "@/lib/site";
 
 export function generateStaticParams() {
@@ -34,7 +34,7 @@ export async function generateMetadata({
 	};
 }
 
-import AppShell from "@/components/AppShell";
+import AppShell from "@/components/layout/AppShell";
 
 export default async function HashtagPage({
 	params,

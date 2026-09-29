@@ -3,25 +3,25 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import AttachmentDiscardModal from "@/components/AttachmentDiscardModal";
-import BottomNav from "@/components/BottomNav";
-import CollabSelector from "@/components/CollabSelector";
-import EditPostModal from "@/components/EditPostModal";
-import FAB from "@/components/FAB";
-import FeedList from "@/components/FeedList";
-import type { GameManifestDraft } from "@/components/GameMaker";
-import GameRankingView from "@/components/GameRankingView";
-import Header from "@/components/Header";
-import HeartBurst from "@/components/HeartBurst";
-import HeartPop from "@/components/HeartPop";
-import LeftSidebar from "@/components/LeftSidebar";
-import LiveGameView from "@/components/LiveGameView";
-import PostComposer from "@/components/PostComposer";
-import RankingSubTabs from "@/components/RankingSubTabs";
-import RightSidebar from "@/components/RightSidebar";
-import ScrollJumpControls from "@/components/ScrollJumpControls";
-import ToastContainer from "@/components/ToastContainer";
-import TopTabs, { type FeedSubMode } from "@/components/TopTabs";
+import AttachmentDiscardModal from "@/components/post/AttachmentDiscardModal";
+import BottomNav from "@/components/layout/BottomNav";
+import CollabSelector from "@/components/post/CollabSelector";
+import EditPostModal from "@/components/post/EditPostModal";
+import FAB from "@/components/layout/FAB";
+import FeedList from "@/components/post/FeedList";
+import type { GameManifestDraft } from "@/components/game/GameMaker";
+import GameRankingView from "@/components/game/GameRankingView";
+import Header from "@/components/layout/Header";
+import HeartBurst from "@/components/ui/HeartBurst";
+import HeartPop from "@/components/ui/HeartPop";
+import LeftSidebar from "@/components/layout/LeftSidebar";
+import LiveGameView from "@/components/game/LiveGameView";
+import PostComposer from "@/components/post/PostComposer";
+import RankingSubTabs from "@/components/layout/RankingSubTabs";
+import RightSidebar from "@/components/layout/RightSidebar";
+import ScrollJumpControls from "@/components/layout/ScrollJumpControls";
+import ToastContainer from "@/components/ui/ToastContainer";
+import TopTabs, { type FeedSubMode } from "@/components/layout/TopTabs";
 import { api } from "@/lib/api";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import { pollInterval, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
@@ -30,7 +30,7 @@ import {
 	readFeedCache,
 	writeFeedCache,
 	writeFeedCacheScrollTop,
-} from "@/lib/feed-cache";
+} from "@/lib/post/feed-cache";
 import {
 	getScrollContainer,
 	SCROLL_CONTAINER_ID,
@@ -39,10 +39,10 @@ import {
 	type DrawingEditorState,
 	getStorageKey,
 	saveHistory,
-} from "@/lib/history";
-import { extractMmlFromContent, stripMmlLine } from "@/lib/mml";
-import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
-import type { TalkManifest } from "@/lib/talk-config";
+} from "@/lib/ui/history";
+import { extractMmlFromContent, stripMmlLine } from "@/lib/mml/mml";
+import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
+import type { TalkManifest } from "@/lib/talk/talk-config";
 import {
 	createGame,
 	createMv,
@@ -51,12 +51,12 @@ import {
 	updateGame,
 	updateMv,
 	updateTalk,
-} from "@/lib/game-mv-client";
+} from "@/lib/game/game-mv-client";
 import {
 	countUnreadMessages,
 	MESSAGES_READ_EVENT,
 	NOTIFICATIONS_READ_EVENT,
-} from "@/lib/read-state";
+} from "@/lib/social/read-state";
 import { CH_FEED, chThread, chUser } from "@/lib/realtime/channels";
 import {
 	type MvRemixDraft,
@@ -65,31 +65,31 @@ import {
 	setRemixHandler,
 	takeStashedMvRemix,
 	takeStashedRemix,
-} from "@/lib/remix";
+} from "@/lib/social/remix";
 import { ensureSessionId } from "@/lib/session";
 import { decodeId } from "@/lib/sqids";
 import { showToast, triggerHeartBurst } from "@/lib/toast";
-import { cachePost, readCachedPost } from "@/lib/post-cache";
+import { cachePost, readCachedPost } from "@/lib/post/post-cache";
 import { AnonymousUser, isCollabAllowed, OriginType, Post } from "@/lib/types";
 import { fetchText } from "@/lib/uploader";
 
 /** フィード1ページあたりのスレッド数。サーバー側の上限は50。 */
 const FEED_PAGE_SIZE = 20;
 
-const DrawingEditor = dynamic(() => import("@/components/DrawingEditor"), {
+const DrawingEditor = dynamic(() => import("@/components/drawing/DrawingEditor"), {
 	ssr: false,
 });
 const DotDrawingEditor = dynamic(
-	() => import("@/components/DotDrawingEditor"),
+	() => import("@/components/drawing/DotDrawingEditor"),
 	{ ssr: false },
 );
-const MmlEditor = dynamic(() => import("@/components/MmlEditor"), {
+const MmlEditor = dynamic(() => import("@/components/mml/MmlEditor"), {
 	ssr: false,
 });
-const MvMaker = dynamic(() => import("@/components/MvMaker"), { ssr: false });
-const TalkMaker = dynamic(() => import("@/components/TalkMaker"), { ssr: false });
-const GameMaker = dynamic(() => import("@/components/GameMaker"), { ssr: false });
-const MangaEditor = dynamic(() => import("@/components/MangaEditor"), { ssr: false });
+const MvMaker = dynamic(() => import("@/components/mv/MvMaker"), { ssr: false });
+const TalkMaker = dynamic(() => import("@/components/talk/TalkMaker"), { ssr: false });
+const GameMaker = dynamic(() => import("@/components/game/GameMaker"), { ssr: false });
+const MangaEditor = dynamic(() => import("@/components/drawing/MangaEditor"), { ssr: false });
 
 export default function App() {
 	const router = useRouter();
@@ -924,7 +924,7 @@ export default function App() {
 			postsRef.current.find((p) => p.id === threadId) || targetPost;
 
 		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
-		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml/mml.ts 参照）。
 		const parts: string[] = [];
 		const bodyText = (attachedMml ? stripMmlLine(inputText) : inputText).trim();
 		if (bodyText) parts.push(bodyText);
@@ -1148,7 +1148,7 @@ export default function App() {
 		// #MML作曲行は1行目、自由コメントはその下の行として保存する
 		// （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
 		// 曲を添付したときは本文側の `#mml` 行を落とす。両方残すとマーカーが二重になり、
-		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml.ts 参照）。
+		// 2本目は外部化されないまま生MMLが content_text に残る（lib/mml/mml.ts 参照）。
 		const parts: string[] = [];
 		const bodyText = (attachedMml ? stripMmlLine(inputText) : inputText).trim();
 		if (bodyText) parts.push(bodyText);
@@ -1614,7 +1614,7 @@ export default function App() {
 	}, []);
 
 	// manifest はブラウザから直接R2へ上げ、DBにはURLだけ渡す（docs/NEON_EGRESS.md）。
-	// updateGame/updateMv（lib/game-mv-client.ts）がアップロード→PATCH→旧manifestの
+	// updateGame/updateMv（lib/game/game-mv-client.ts）がアップロード→PATCH→旧manifestの
 	// 削除まで面倒を見る。ここで直接 fetch(PATCH) して生の manifest を送ると、
 	// サーバーは manifestUrl が無いとして 400 を返す（parseManifestRef 参照）。
 	const handleSaveEditedGame = async (
