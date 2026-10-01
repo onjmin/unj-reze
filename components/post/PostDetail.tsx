@@ -27,9 +27,11 @@ import { avatarSeedOf, getAvatarInfo } from "@/lib/social/avatar";
 import {
 	createGame,
 	createMv,
+	createOtomad,
 	createTalk,
 	loadGame,
 	loadMv,
+	loadOtomad,
 	loadTalk,
 } from "@/lib/post/game-mv-client";
 import {
@@ -50,6 +52,7 @@ import {
 } from "@/lib/mml/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
 import type { TalkManifest } from "@/lib/talk/talk-config";
+import type { OtomadManifest } from "@/lib/otomad/otomad-config";
 import { getDistinctTitle } from "@/lib/post/post-title";
 import { cachePost } from "@/lib/post/post-cache";
 import { playPostSfx } from "@/lib/post/post-sfx";
@@ -83,6 +86,7 @@ const MmlEditor = dynamic(() => import("@/components/mml/MmlEditor"), { ssr: fal
 const GameMaker = dynamic(() => import("@/components/game/GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("@/components/mv/MvMaker"), { ssr: false });
 const TalkMaker = dynamic(() => import("@/components/talk/TalkMaker"), { ssr: false });
+const OtomadMaker = dynamic(() => import("@/components/otomad/OtomadMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("@/components/drawing/MangaEditor"), { ssr: false });
 const PostComposer = dynamic(() => import("./PostComposer"), { ssr: false });
 const EditPostModal = dynamic(() => import("./EditPostModal"), { ssr: false });
@@ -162,6 +166,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		manifest: TalkManifest;
 		title: string;
 	} | null>(null);
+	const [replyOtomadDraft, setReplyOtomadDraft] = useState<{
+		manifest: OtomadManifest;
+		title: string;
+	} | null>(null);
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
@@ -186,6 +194,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [editTalkDraft, setEditTalkDraft] = useState<{
 		talkId: string;
 		manifest: TalkManifest;
+		title: string;
+	} | null>(null);
+	// 返信の音MADも同じ画面で編集するため otomadId を持ち回る（editTalkDraft と同じ理由）
+	const [editOtomadDraft, setEditOtomadDraft] = useState<{
+		otomadId: string;
+		manifest: OtomadManifest;
 		title: string;
 	} | null>(null);
 	const [editGameDraft, setEditGameDraft] = useState<{
@@ -513,6 +527,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
 		const capturedTalkDraft = replyTalkDraft;
+		const capturedOtomadDraft = replyOtomadDraft;
 		const capturedOriginType = replyOriginType;
 		const capturedDotSize = replyDotSize;
 		const capturedAnim = replyAnim;
@@ -552,6 +567,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
 			hasTalk: !!replyTalkDraft,
+			hasOtomad: !!replyOtomadDraft,
 		};
 		setPost((p) => ({
 			...p,
@@ -568,6 +584,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
 		setReplyTalkDraft(null);
+		setReplyOtomadDraft(null);
 		setReplyOriginType(undefined);
 		setComposerOpen(false);
 
@@ -609,6 +626,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				});
 				talkId = saved.id;
 			}
+			let otomadId: string | undefined;
+			if (capturedOtomadDraft) {
+				const saved = await createOtomad({
+					title: capturedOtomadDraft.title,
+					manifest: capturedOtomadDraft.manifest,
+				});
+				otomadId = saved.id;
+			}
 
 			const reply = await api.posts.replies.create(post.id, {
 				content,
@@ -619,6 +644,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				gameId,
 				mvId,
 				talkId,
+				otomadId,
 				dotW: capturedDotSize?.w,
 				dotH: capturedDotSize?.h,
 				animFrames: capturedAnim?.animFrames,
@@ -922,6 +948,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		);
 	};
 
+	const handleSaveOtomad = (data: {
+		manifest: OtomadManifest;
+		title: string;
+	}) => {
+		setReplyOtomadDraft(data);
+		setActiveScreen(null);
+		setReplyText((prev) =>
+			prev.trim() ? prev : `#音MAD 「${data.title}」を作ったよ！`,
+		);
+	};
+
 	const handleSaveEdit = async (
 		newContent: string,
 		nextImageSrc?: string | null,
@@ -1070,6 +1107,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		await handleEditTalkFor(post);
 	};
 
+	/** 指定ポストの音MADを編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
+	const handleEditOtomadFor = useCallback(async (target: Post) => {
+		if (!target.otomadId) return;
+		try {
+			const loaded = await loadOtomad(target.otomadId);
+			if (!loaded) throw new Error();
+			setEditOtomadDraft({
+				otomadId: target.otomadId,
+				manifest: loaded.manifest,
+				title: loaded.record.title,
+			});
+			setActiveScreen("edit-otomad");
+		} catch {
+			showToast("error", "音MADの読み込みに失敗しました");
+		}
+	}, []);
+
+	const handleEditOtomad = async () => {
+		setMenuOpen(false);
+		await handleEditOtomadFor(post);
+	};
+
 	const handleRemixMv = async () => {
 		setMenuOpen(false);
 		if (!post.mvId) return;
@@ -1139,6 +1198,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			router.refresh();
 		} catch {
 			showToast("error", "かけあい動画の更新に失敗しました");
+		}
+	};
+
+	const handleSaveEditedOtomad = async (data: {
+		manifest: OtomadManifest;
+		title: string;
+	}) => {
+		const otomadId = editOtomadDraft?.otomadId;
+		setActiveScreen(null);
+		if (!otomadId) return;
+		try {
+			await api.otomads.edit(otomadId, {
+				title: data.title,
+				manifest: data.manifest,
+			});
+			showToast("success", "音MADを更新しました");
+			router.refresh();
+		} catch {
+			showToast("error", "音MADの更新に失敗しました");
 		}
 	};
 
@@ -1330,6 +1408,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									>
 										<Pencil size={12} className="shrink-0" />
 										<span>かけあい動画を編集</span>
+									</button>
+								)}
+								{isSelf && post.hasOtomad && (
+									<button
+										role="menuitem"
+										onClick={handleEditOtomad}
+										className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors"
+									>
+										<Pencil size={12} className="shrink-0" />
+										<span>音MADを編集</span>
 									</button>
 								)}
 								{isSelf && post.hasGame && (
@@ -1715,6 +1803,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										onOpenCollab={handleOpenCollab}
 										onEditMv={handleEditMvFor}
 										onEditTalk={handleEditTalkFor}
+										onEditOtomad={handleEditOtomadFor}
 										onEditMml={handleEditMusicFor}
 									/>
 								);
@@ -1765,6 +1854,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					setMvDraft={setReplyMvDraft}
 					talkDraft={replyTalkDraft}
 					setTalkDraft={setReplyTalkDraft}
+					otomadDraft={replyOtomadDraft}
+					setOtomadDraft={setReplyOtomadDraft}
 					originType={replyOriginType}
 					setOriginType={setReplyOriginType}
 					onClose={handleComposerClose}
@@ -1781,6 +1872,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					onOpenGameMaker={() => openScreen("gamemaker")}
 					onOpenMvMaker={() => openScreen("mvmaker")}
 					onOpenTalkMaker={() => openScreen("talkmaker")}
+					onOpenOtomadMaker={() => openScreen("otomadmaker")}
 					onOpenManga={() => {
 						setCollabImageUrl(undefined);
 						openScreen("manga");
@@ -1847,6 +1939,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					isEditing={!!replyTalkDraft}
 				/>
 			)}
+			{activeScreen === "otomadmaker" && (
+				<OtomadMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveOtomad}
+					initialManifest={replyOtomadDraft?.manifest}
+					isEditing={!!replyOtomadDraft}
+				/>
+			)}
 			{activeScreen === "mml" && (
 				<MmlEditor
 					onClose={() => {
@@ -1906,6 +2007,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					talkId={editTalkDraft.talkId}
 				/>
 			)}
+			{activeScreen === "edit-otomad" && editOtomadDraft && (
+				<OtomadMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveEditedOtomad}
+					initialManifest={editOtomadDraft.manifest}
+					isEditing={true}
+					otomadId={editOtomadDraft.otomadId}
+				/>
+			)}
 			{activeScreen === "edit-game" && editGameDraft && (
 				<GameMaker
 					onClose={() => setActiveScreen(null)}
@@ -1950,6 +2061,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						},
 						editTalk: () => {
 							handleEditTalk();
+							setShowEditModal(false);
+						},
+						editOtomad: () => {
+							handleEditOtomad();
 							setShowEditModal(false);
 						},
 					}}
@@ -2049,6 +2164,7 @@ function ReplyTreeItem({
 	onOpenCollab,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	onEditMml,
 }: {
 	post: Post;
@@ -2085,6 +2201,7 @@ function ReplyTreeItem({
 	onOpenCollab?: (post: Post) => void;
 	onEditMv?: (post: Post) => void;
 	onEditTalk?: (post: Post) => void;
+	onEditOtomad?: (post: Post) => void;
 	onEditMml?: (post: Post, mml: string) => void;
 }) {
 	const router = useRouter();
@@ -2594,6 +2711,7 @@ function ReplyTreeItem({
 									onOpenCollab={onOpenCollab}
 									onEditMv={onEditMv}
 									onEditTalk={onEditTalk}
+									onEditOtomad={onEditOtomad}
 									onEditMml={onEditMml}
 								/>
 							);
@@ -2634,6 +2752,13 @@ function ReplyTreeItem({
 							onEditTalk && localPost.talkId
 								? () => {
 										onEditTalk(localPost);
+										setShowEditModal(false);
+									}
+								: null,
+						editOtomad:
+							onEditOtomad && localPost.otomadId
+								? () => {
+										onEditOtomad(localPost);
 										setShowEditModal(false);
 									}
 								: null,

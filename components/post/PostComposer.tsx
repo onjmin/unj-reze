@@ -1,6 +1,7 @@
 "use client";
 
 import {
+	AudioLines,
 	Clapperboard,
 	Gamepad2,
 	Image,
@@ -41,6 +42,8 @@ interface PostComposerProps {
 	setMvDraft: (v: null) => void;
 	talkDraft: { title: string } | null;
 	setTalkDraft: (v: null) => void;
+	otomadDraft: { title: string } | null;
+	setOtomadDraft: (v: null) => void;
 	originType?: OriginType;
 	setOriginType: (v: OriginType | undefined) => void;
 	onClose: () => void;
@@ -51,6 +54,7 @@ interface PostComposerProps {
 	onOpenGameMaker: () => void;
 	onOpenMvMaker: () => void;
 	onOpenTalkMaker: () => void;
+	onOpenOtomadMaker: () => void;
 	onOpenManga?: () => void;
 	replyToDisplayName?: string;
 	inline?: boolean;
@@ -96,6 +100,8 @@ export default function PostComposer({
 	setMvDraft,
 	talkDraft,
 	setTalkDraft,
+	otomadDraft,
+	setOtomadDraft,
 	originType,
 	setOriginType,
 	onClose,
@@ -106,6 +112,7 @@ export default function PostComposer({
 	onOpenGameMaker,
 	onOpenMvMaker,
 	onOpenTalkMaker,
+	onOpenOtomadMaker,
 	onOpenManga,
 	replyToDisplayName,
 	inline,
@@ -353,6 +360,33 @@ export default function PostComposer({
 					</div>
 				</div>
 			)}
+			{otomadDraft && (
+				<div
+					className={`relative mt-2 flex items-center gap-2 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 max-w-[280px] ${md ? "md:px-4 md:py-3 md:max-w-[420px]" : ""}`}
+				>
+					<AudioLines size={16} className="text-pink-400 shrink-0" />
+					<div className="min-w-0 flex-1">
+						<p className="text-xs font-bold text-pink-200 truncate">
+							{otomadDraft.title}
+						</p>
+						<p className="text-[10px] text-pink-400/70">音MADを添付中</p>
+					</div>
+					<div className="flex items-center gap-1.5 ml-auto">
+						<button
+							onClick={onOpenOtomadMaker}
+							className="text-pink-300 hover:text-pink-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 active:scale-95 transition-all"
+						>
+							編集
+						</button>
+						<button
+							onClick={() => setOtomadDraft(null)}
+							className="text-pink-300/70 hover:text-red-400 shrink-0"
+						>
+							<X size={14} />
+						</button>
+					</div>
+				</div>
+			)}
 		</>
 	);
 
@@ -470,6 +504,17 @@ export default function PostComposer({
 							type="button"
 							onClick={() => {
 								setMenuOpen(false);
+								onOpenOtomadMaker();
+							}}
+							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
+						>
+							音MAD作成
+						</button>
+						<button
+							role="menuitem"
+							type="button"
+							onClick={() => {
+								setMenuOpen(false);
 								onOpenGameMaker();
 							}}
 							className="w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 hover:text-white text-left transition-colors font-medium"
@@ -514,7 +559,13 @@ export default function PostComposer({
 		<button
 			onClick={onSubmit}
 			disabled={
-				!text.trim() && !image && !mml && !gameDraft && !mvDraft && !talkDraft
+				!text.trim() &&
+				!image &&
+				!mml &&
+				!gameDraft &&
+				!mvDraft &&
+				!talkDraft &&
+				!otomadDraft
 			}
 			className={`bg-blue-600 text-white font-bold rounded-full transition-colors hover:bg-blue-500 disabled:opacity-50 ${md ? "px-4 py-1.5 md:px-6 md:py-2.5 text-xs md:text-sm" : "px-4 py-1.5 text-xs"}`}
 		>
@@ -551,7 +602,13 @@ export default function PostComposer({
 		if (e.key === "Enter" && (e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
 			const canSubmit =
-				text.trim() || image || mml || gameDraft || mvDraft || talkDraft;
+				text.trim() ||
+				image ||
+				mml ||
+				gameDraft ||
+				mvDraft ||
+				talkDraft ||
+				otomadDraft;
 			if (canSubmit) {
 				onSubmit();
 			}

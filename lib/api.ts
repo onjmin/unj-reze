@@ -1,10 +1,16 @@
 import type { GameManifestDraft } from "@/components/game/GameMaker";
 import { type DmGate, rejectDmReason } from "./social/dm-rules";
-import { updateGame, updateMv, updateTalk } from "./post/game-mv-client";
+import {
+	updateGame,
+	updateMv,
+	updateOtomad,
+	updateTalk,
+} from "./post/game-mv-client";
 import { externalizeMml } from "./mml/mml-payload";
 import type { Message, Trend } from "./db/mock-db";
 import { db as mockDbInstance } from "./db/mock-db";
 import type { MvManifest } from "./mv/mv-config";
+import type { OtomadManifest } from "./otomad/otomad-config";
 import type { TalkManifest } from "./talk/talk-config";
 import { ensureSessionId } from "./session";
 import { deleteObject, isUploaderAvailable, uploadImage } from "./uploader";
@@ -135,6 +141,7 @@ const staticApi = {
 				hasGame?: boolean;
 				hasMv?: boolean;
 				hasTalk?: boolean;
+				hasOtomad?: boolean;
 			},
 		) => {
 			const beforeId = opts?.beforeId
@@ -148,6 +155,7 @@ const staticApi = {
 				hasGame: opts?.hasGame,
 				hasMv: opts?.hasMv,
 				hasTalk: opts?.hasTalk,
+				hasOtomad: opts?.hasOtomad,
 			});
 			return posts.map(encodePost);
 		},
@@ -167,6 +175,7 @@ const staticApi = {
 			gameId?: string;
 			mvId?: string;
 			talkId?: string;
+			otomadId?: string;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -181,12 +190,16 @@ const staticApi = {
 			const decodedTalkId = data.talkId
 				? decodeIdOrThrow(data.talkId)
 				: undefined;
+			const decodedOtomadId = data.otomadId
+				? decodeIdOrThrow(data.otomadId)
+				: undefined;
 			const post = await mockDbInstance.createPost({
 				...data,
 				displayName: data.displayName || "名無し",
 				gameId: decodedGameId,
 				mvId: decodedMvId,
 				talkId: decodedTalkId,
+				otomadId: decodedOtomadId,
 			});
 			return encodePost(post);
 		},
@@ -275,6 +288,7 @@ const staticApi = {
 					gameId?: string | number;
 					mvId?: string | number;
 					talkId?: string | number;
+					otomadId?: string | number;
 					dotW?: number;
 					dotH?: number;
 					animFrames?: number;
@@ -289,6 +303,7 @@ const staticApi = {
 				const gameIdNum = data.gameId ? Number(data.gameId) : undefined;
 				const mvIdNum = data.mvId ? Number(data.mvId) : undefined;
 				const talkIdNum = data.talkId ? Number(data.talkId) : undefined;
+				const otomadIdNum = data.otomadId ? Number(data.otomadId) : undefined;
 				const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), {
 					...data,
 					displayName: data.displayName || "名無し",
@@ -296,6 +311,7 @@ const staticApi = {
 					gameId: gameIdNum,
 					mvId: mvIdNum,
 					talkId: talkIdNum,
+					otomadId: otomadIdNum,
 				});
 				if (!reply) throw new Error("Post not found");
 				return encodePost(reply);
@@ -544,6 +560,14 @@ const staticApi = {
 			return { success: true };
 		},
 	},
+	otomads: {
+		edit: async (
+			_id: string,
+			_params: { title: string; manifest: unknown },
+		) => {
+			return { success: true };
+		},
+	},
 	games: {
 		edit: async (
 			_id: string,
@@ -654,6 +678,7 @@ const liveApi = {
 				hasGame?: boolean;
 				hasMv?: boolean;
 				hasTalk?: boolean;
+				hasOtomad?: boolean;
 			},
 		) => {
 			const params = new URLSearchParams();
@@ -668,6 +693,8 @@ const liveApi = {
 			if (opts?.hasMv !== undefined) params.set("hasMv", String(opts.hasMv));
 			if (opts?.hasTalk !== undefined)
 				params.set("hasTalk", String(opts.hasTalk));
+			if (opts?.hasOtomad !== undefined)
+				params.set("hasOtomad", String(opts.hasOtomad));
 			const qs = params.toString();
 			return fetcher<Post[]>(`/posts${qs ? `?${qs}` : ""}`);
 		},
@@ -688,6 +715,7 @@ const liveApi = {
 			gameId?: string;
 			mvId?: string;
 			talkId?: string;
+			otomadId?: string;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -796,6 +824,7 @@ const liveApi = {
 				previousGameManifest?: { deleteId: string; deleteHash: string };
 				previousMvManifest?: { deleteId: string; deleteHash: string };
 				previousTalkManifest?: { deleteId: string; deleteHash: string };
+				previousOtomadManifest?: { deleteId: string; deleteHash: string };
 			}>(`/posts/${id}`, {
 				method: "DELETE",
 				body: JSON.stringify({ userId, sessionId: ensureSessionId() }),
@@ -807,6 +836,7 @@ const liveApi = {
 					["ゲームmanifest", result.previousGameManifest],
 					["MV manifest", result.previousMvManifest],
 					["かけあい動画 manifest", result.previousTalkManifest],
+					["音MAD manifest", result.previousOtomadManifest],
 				];
 			await Promise.all(
 				refs.map(async ([label, ref]) => {
@@ -855,6 +885,7 @@ const liveApi = {
 					gameId?: string | number;
 					mvId?: string | number;
 					talkId?: string | number;
+					otomadId?: string | number;
 					dotW?: number;
 					dotH?: number;
 					animFrames?: number;
@@ -1123,6 +1154,10 @@ const liveApi = {
 	talks: {
 		edit: (id: string, params: { title: string; manifest: TalkManifest }) =>
 			updateTalk(id, params),
+	},
+	otomads: {
+		edit: (id: string, params: { title: string; manifest: OtomadManifest }) =>
+			updateOtomad(id, params),
 	},
 	games: {
 		edit: (

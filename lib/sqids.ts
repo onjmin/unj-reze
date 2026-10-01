@@ -3,6 +3,7 @@ import type {
 	GameRecord as ApiGame,
 	MvRecord as ApiMv,
 	TalkRecord as ApiTalk,
+	OtomadRecord as ApiOtomad,
 	Notification as ApiNotification,
 	OshiItem as ApiOshiItem,
 	Post as ApiPost,
@@ -11,6 +12,7 @@ import type {
 	DbGameRecord,
 	DbMvRecord,
 	DbTalkRecord,
+	DbOtomadRecord,
 	DbNotification,
 	DbOshiItem,
 	DbPost,
@@ -132,6 +134,7 @@ export function encodePost(post: DbPost): ApiPost {
 		gameId: post.gameId ? encodeId(post.gameId) : undefined,
 		mvId: post.mvId ? encodeId(post.mvId) : undefined,
 		talkId: post.talkId ? encodeId(post.talkId) : undefined,
+		otomadId: post.otomadId ? encodeId(post.otomadId) : undefined,
 		threadId: encodeId(post.threadId),
 		replies: post.replies ? post.replies.map(encodePost) : [],
 	} as ApiPost;
@@ -149,6 +152,13 @@ export function encodeTalk(talk: DbTalkRecord): ApiTalk {
 		...stripDeleteTokens(talk as unknown as Record<string, unknown>),
 		id: encodeId(talk.id),
 	} as ApiTalk;
+}
+
+export function encodeOtomad(otomad: DbOtomadRecord): ApiOtomad {
+	return {
+		...stripDeleteTokens(otomad as unknown as Record<string, unknown>),
+		id: encodeId(otomad.id),
+	} as ApiOtomad;
 }
 
 export function encodeGame(game: DbGameRecord): ApiGame {

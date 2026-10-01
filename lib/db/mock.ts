@@ -1,11 +1,17 @@
 import { db as mockDb } from "./mock-db";
 import type { MvManifest } from "@/lib/mv/mv-config";
 import { OriginType } from "@/lib/types";
-import type { DbGameRecord, DbMvRecord, DbTalkRecord } from "@/lib/types-db";
+import type {
+	DbGameRecord,
+	DbMvRecord,
+	DbOtomadRecord,
+	DbTalkRecord,
+} from "@/lib/types-db";
 import type {
 	CreateGameParams,
 	CreateMvParams,
 	CreateTalkParams,
+	CreateOtomadParams,
 	CreatePostParams,
 	DataStore,
 	DotMetaEdit,
@@ -19,11 +25,13 @@ import type {
 	UpdateGameParams,
 	UpdateMvParams,
 	UpdateTalkParams,
+	UpdateOtomadParams,
 } from "./interface";
 
 const gameStore = new Map<number, DbGameRecord>();
 const mvStore = new Map<number, DbMvRecord>();
 const talkStore = new Map<number, DbTalkRecord>();
+const otomadStore = new Map<number, DbOtomadRecord>();
 /** preset_opens 相当。キーは `${preset}\0${JSTの日付}` */
 const presetOpenStore = new Map<string, number>();
 
@@ -464,6 +472,57 @@ export const mockStore: DataStore = {
 		const existing = talkStore.get(id);
 		if (!existing) return;
 		talkStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
+	},
+
+	async createOtomad(data: CreateOtomadParams): Promise<DbOtomadRecord> {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
+		const record: DbOtomadRecord = {
+			id,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+			createdAt: new Date().toISOString(),
+			creatorSlug: data.creatorSlug,
+			plays: 0,
+		};
+		otomadStore.set(id, record);
+		return record;
+	},
+
+	async getOtomad(id: number): Promise<DbOtomadRecord | null> {
+		return otomadStore.get(id) ?? null;
+	},
+
+	async getOtomadsByIds(ids: number[]): Promise<DbOtomadRecord[]> {
+		if (!ids || ids.length === 0) return [];
+		const set = new Set(ids);
+		return Array.from(otomadStore.values()).filter((t) => set.has(t.id));
+	},
+
+	async updateOtomad(
+		id: number,
+		data: UpdateOtomadParams,
+	): Promise<DbOtomadRecord | null> {
+		const existing = otomadStore.get(id);
+		if (!existing) return null;
+		const updated: DbOtomadRecord = {
+			...existing,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+		};
+		otomadStore.set(id, updated);
+		return updated;
+	},
+
+	async recordOtomadPlay(id: number) {
+		const existing = otomadStore.get(id);
+		if (!existing) return;
+		otomadStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
 	},
 
 	async recordGamePlay(

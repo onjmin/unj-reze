@@ -1,9 +1,11 @@
 "use client";
 
 import {
+	AudioLines,
 	Clapperboard,
 	ListMusic,
 	Loader2,
+	MessagesSquare,
 	Music,
 	PlaySquare,
 	Plus,
@@ -368,6 +370,20 @@ export default function BbsBoardView({
 										return (
 											<div className="shrink-0 w-11 h-11 rounded bg-purple-600/20 border border-purple-600/40 flex items-center justify-center">
 												<Clapperboard size={18} className="text-purple-400" />
+											</div>
+										);
+									}
+									if (post.hasTalk) {
+										return (
+											<div className="shrink-0 w-11 h-11 rounded bg-amber-600/20 border border-amber-600/40 flex items-center justify-center">
+												<MessagesSquare size={18} className="text-amber-400" />
+											</div>
+										);
+									}
+									if (post.hasOtomad) {
+										return (
+											<div className="shrink-0 w-11 h-11 rounded bg-pink-600/20 border border-pink-600/40 flex items-center justify-center">
+												<AudioLines size={18} className="text-pink-400" />
 											</div>
 										);
 									}

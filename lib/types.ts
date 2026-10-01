@@ -136,6 +136,13 @@ export interface Post {
 	talkThumbnail?: string;
 	/** かけあい動画の累計再生数 */
 	talkPlays?: number;
+	hasOtomad?: boolean;
+	otomadId?: string;
+	otomadTitle?: string;
+	/** 音MADのサムネイル（背景画像か最初の画像素材のURL。無ければ既定のアイコンで描く） */
+	otomadThumbnail?: string;
+	/** 音MADの累計再生数 */
+	otomadPlays?: number;
 	/** 自己申告の権利表記。未設定(申告なし)なら undefined */
 	originType?: OriginType;
 	/** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
@@ -217,6 +224,21 @@ export interface TalkRecord {
 	manifestDeleteId?: string;
 	manifestDeleteHash?: string;
 	/** サムネイル用。背景画像かキャラ1人目の立ち絵URLの非正規化 */
+	bgUrl?: string;
+	createdAt: string;
+	creatorSlug?: string;
+	/** 累計再生回数 */
+	plays?: number;
+}
+
+export interface OtomadRecord {
+	id: string;
+	title: string;
+	/** manifest 本体の保存先URL（R2）。TalkRecord.manifestUrl と同じ扱い */
+	manifestUrl: string;
+	manifestDeleteId?: string;
+	manifestDeleteHash?: string;
+	/** サムネイル用。背景画像か最初の image 素材URLの非正規化 */
 	bgUrl?: string;
 	createdAt: string;
 	creatorSlug?: string;

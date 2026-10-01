@@ -247,7 +247,7 @@ export const isSimilarMml = (a: string, b: string): boolean => {
 };
 
 export const getStorageKey = (
-	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk",
+	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk" | "otomad",
 	idSuffix?: string,
 ): string => {
 	switch (type) {
@@ -255,6 +255,8 @@ export const getStorageKey = (
 			return `unj-mvmaker-history-${idSuffix || "new"}`;
 		case "talk":
 			return `unj-talkmaker-history-${idSuffix || "new"}`;
+		case "otomad":
+			return `unj-otomadmaker-history-${idSuffix || "new"}`;
 		case "mml":
 			return `dtm-work-history-${idSuffix || "new"}`;
 		case "drawing":
@@ -330,7 +332,7 @@ export type SaveHistoryResult =
 export const saveHistory = async <T = unknown>(
 	key: string,
 	data: T,
-	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk",
+	type: "mml" | "drawing" | "dotdrawing" | "gamemaker" | "gameplay" | "mv" | "talk" | "otomad",
 	maxItems = 50,
 ): Promise<SaveHistoryResult> => {
 	const store = getStore();
@@ -402,6 +404,9 @@ export const saveHistory = async <T = unknown>(
 		} else if (type === "mv") {
 			const mv = data as MvPreviewData;
 			previewText = `${mv.title || "無題"} (${mv.preset || "preset"})`;
+		} else if (type === "talk" || type === "otomad") {
+			const t = data as { title?: string };
+			previewText = t.title || "無題";
 		}
 
 		const newItem: HistoryItem<T> = {

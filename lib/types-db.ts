@@ -92,6 +92,12 @@ export interface DbPost {
 	talkThumbnail?: string;
 	/** かけあい動画の累計再生数 */
 	talkPlays?: number;
+	hasOtomad?: boolean;
+	otomadId?: number;
+	otomadTitle?: string;
+	otomadThumbnail?: string;
+	/** 音MADの累計再生数 */
+	otomadPlays?: number;
 	hasMml?: boolean;
 	/**
 	 * MML本文の保存先URL（R2）。content にはマーカー（`#mml`）だけが残る。
@@ -171,6 +177,21 @@ export interface DbTalkRecord {
 	manifestDeleteId?: string;
 	manifestDeleteHash?: string;
 	/** サムネイル用。背景画像かキャラ1人目の立ち絵URLの非正規化 */
+	bgUrl?: string;
+	createdAt: string;
+	creatorSlug?: string;
+	/** 累計再生回数 */
+	plays?: number;
+}
+
+export interface DbOtomadRecord {
+	id: number;
+	title: string;
+	/** manifest 本体の保存先URL（R2）。DbTalkRecord.manifestUrl と同じ扱い */
+	manifestUrl: string;
+	manifestDeleteId?: string;
+	manifestDeleteHash?: string;
+	/** サムネイル用。背景画像か最初の image 素材URLの非正規化 */
 	bgUrl?: string;
 	createdAt: string;
 	creatorSlug?: string;

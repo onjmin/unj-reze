@@ -36,6 +36,7 @@ function SearchPageContent() {
 			onEditMml={null}
 			onEditMv={null}
 			onEditTalk={null}
+			onEditOtomad={null}
 		/>
 	);
 }

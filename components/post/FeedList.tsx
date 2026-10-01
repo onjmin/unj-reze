@@ -35,6 +35,7 @@ interface FeedListProps {
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditTalk: ((post: Post) => void) | null;
+	onEditOtomad: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	/** 編集成功後に PATCH レスポンスの更新済ぽストを渡す。該当エントリだけを差し替えるために使う。 */
 	onPostUpdated?: (post: Post) => void;
@@ -69,6 +70,7 @@ export default function FeedList({
 	onEditMml,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	onEditPost,
 	userId,
 	onLoadMore,
@@ -237,6 +239,7 @@ export default function FeedList({
 							onEditMml={onEditMml}
 							onEditMv={onEditMv}
 							onEditTalk={onEditTalk}
+							onEditOtomad={onEditOtomad}
 							onEditPost={onEditPost}
 							userId={userId}
 						/>
@@ -311,6 +314,7 @@ export default function FeedList({
 							onEditMml={onEditMml}
 							onEditMv={onEditMv}
 							onEditTalk={onEditTalk}
+							onEditOtomad={onEditOtomad}
 							onEditPost={onEditPost}
 							onPostUpdated={onPostUpdated}
 							userId={userId}

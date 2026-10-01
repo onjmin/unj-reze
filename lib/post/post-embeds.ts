@@ -1,5 +1,6 @@
 import { attachGameInfo } from "@/lib/game/game-embed";
 import { attachMvInfo } from "@/lib/mv/mv-embed";
+import { attachOtomadInfo } from "@/lib/otomad/otomad-embed";
 import { attachTalkInfo } from "@/lib/talk/talk-embed";
 import type { DbPost } from "@/lib/types-db";
 
@@ -16,5 +17,6 @@ export async function attachEmbedInfo<
 	await attachGameInfo(posts);
 	await attachMvInfo(posts);
 	await attachTalkInfo(posts);
+	await attachOtomadInfo(posts);
 	return posts;
 }

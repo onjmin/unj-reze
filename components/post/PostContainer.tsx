@@ -71,6 +71,7 @@ interface PostContainerProps {
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditTalk: ((post: Post) => void) | null;
+	onEditOtomad: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	/**
 	 * 編集成功後に API レスポンスの更新済ぽストを渡す。
@@ -104,6 +105,7 @@ export default function PostContainer({
 	onEditMml,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	onEditPost,
 	userId,
 	quotedPost,
@@ -727,8 +729,12 @@ export default function PostContainer({
 						onPreviewImage={setPreviewImage}
 						userId={userId}
 						mvClassName="mb-3"
+						talkClassName="mb-3"
+						otomadClassName="mb-3"
 						gameClassName="mb-3"
-						suppressGenericEmbedIf={(p) => !!(p.hasImage || p.hasGame)}
+						suppressGenericEmbedIf={(p) =>
+							!!(p.hasImage || p.hasGame || p.hasTalk || p.hasOtomad)
+						}
 					/>
 
 					{quotedPost &&
@@ -944,6 +950,12 @@ export default function PostContainer({
 						editTalk: onEditTalk
 							? () => {
 									onEditTalk(post);
+									setShowEditModal(false);
+								}
+							: null,
+						editOtomad: onEditOtomad
+							? () => {
+									onEditOtomad(post);
 									setShowEditModal(false);
 								}
 							: null,

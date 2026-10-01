@@ -17,7 +17,13 @@ const UPLOAD_SECRET_PEPPER =
 export const isUploaderAvailable = UPLOADER_URL !== "";
 
 /** uploader 側の kind。content_type のビットと1対1で対応する */
-export type UploadKind = "mml" | "encrypt" | "mv" | "game" | "talk";
+export type UploadKind =
+	| "mml"
+	| "encrypt"
+	| "mv"
+	| "game"
+	| "talk"
+	| "otomad";
 
 /** kind ごとの gzip 要否。mv/game のJSONは30倍近く縮む。
  *  mml は encodeMml 済み、encrypt は base64 なので圧縮は効かない */
@@ -27,6 +33,7 @@ const NEEDS_GZIP: Record<UploadKind, boolean> = {
 	mv: true,
 	game: true,
 	talk: true,
+	otomad: true,
 };
 
 export interface UploadResult {
@@ -156,7 +163,7 @@ export async function uploadImage(dataUrl: string): Promise<UploadResult> {
 
 /** manifest（JSON）をR2へ。JSON.stringify してから上げる */
 export async function uploadJson(
-	kind: "mv" | "game" | "talk",
+	kind: "mv" | "game" | "talk" | "otomad",
 	value: unknown,
 ): Promise<UploadResult> {
 	return uploadText(kind, JSON.stringify(value));

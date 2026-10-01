@@ -5,7 +5,7 @@ import { AlertTriangle, X } from "lucide-react";
 interface AttachmentDiscardModalProps {
 	onClose: () => void;
 	onConfirm: () => void;
-	discardType: "image" | "mml" | "game" | "mv" | "talk";
+	discardType: "image" | "mml" | "game" | "mv" | "talk" | "otomad";
 }
 
 const DISCARD_TYPE_NAMES = {
@@ -14,6 +14,7 @@ const DISCARD_TYPE_NAMES = {
 	game: "ゲーム",
 	mv: "MV",
 	talk: "かけあい動画",
+	otomad: "音MAD",
 };
 
 export default function AttachmentDiscardModal({

@@ -13,6 +13,7 @@ import {
 	DbMediaSearchPost,
 	DbMvRecord,
 	DbTalkRecord,
+	DbOtomadRecord,
 	DbNotification,
 	DbOshiItem,
 	DbPost,
@@ -60,6 +61,17 @@ export interface CreateTalkParams extends ManifestRef {
 }
 
 export interface UpdateTalkParams extends ManifestRef {
+	title: string;
+	bgUrl?: string;
+}
+
+export interface CreateOtomadParams extends ManifestRef {
+	title: string;
+	bgUrl?: string;
+	creatorSlug?: string;
+}
+
+export interface UpdateOtomadParams extends ManifestRef {
 	title: string;
 	bgUrl?: string;
 }
@@ -126,6 +138,7 @@ export interface CreatePostParams extends MmlRef, ImageDeleteRef {
 	gameId?: number;
 	mvId?: number;
 	talkId?: number;
+	otomadId?: number;
 	/** ドット絵コラボ用のグリッド横解像度 */
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
@@ -175,6 +188,7 @@ export interface ReplyParams extends MmlRef, ImageDeleteRef {
 	gameId?: number;
 	mvId?: number;
 	talkId?: number;
+	otomadId?: number;
 	/** ドット絵コラボ用のグリッド横解像度 */
 	dotW?: number;
 	/** ドット絵コラボ用のグリッド縦解像度 */
@@ -209,6 +223,7 @@ export interface GetPostsOptions {
 	hasGame?: boolean;
 	hasMv?: boolean;
 	hasTalk?: boolean;
+	hasOtomad?: boolean;
 	/**
 	 * 各スレッドに直近の返信を埋めるか（既定 true）。
 	 * 返信本文を一切使わない一覧——専ブラの subject.txt や sitemap——は false にする。
@@ -322,6 +337,8 @@ export interface DataStore {
 				mvManifestDeleteHash?: string;
 				talkManifestDeleteId?: string;
 				talkManifestDeleteHash?: string;
+				otomadManifestDeleteId?: string;
+				otomadManifestDeleteHash?: string;
 		  }
 		| false
 	>;
@@ -468,6 +485,16 @@ export interface DataStore {
 	updateTalk(id: number, data: UpdateTalkParams): Promise<DbTalkRecord | null>;
 	/** かけあい動画の再生数を1加算する。 */
 	recordTalkPlay(id: number): Promise<void>;
+	createOtomad(data: CreateOtomadParams): Promise<DbOtomadRecord>;
+	getOtomad(id: number): Promise<DbOtomadRecord | null>;
+	/** 投稿一覧に埋める音MADの情報をまとめて引く（manifest 本体は載らない）。 */
+	getOtomadsByIds(ids: number[]): Promise<DbOtomadRecord[]>;
+	updateOtomad(
+		id: number,
+		data: UpdateOtomadParams,
+	): Promise<DbOtomadRecord | null>;
+	/** 音MADの再生数を1加算する。 */
+	recordOtomadPlay(id: number): Promise<void>;
 	/** プレイ結果を記録する。plays/clears を加算し、スコアが上回っていればハイスコアを更新する。 */
 	recordGamePlay(
 		gameId: number,

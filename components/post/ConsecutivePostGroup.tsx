@@ -26,6 +26,7 @@ interface ConsecutivePostGroupProps {
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditTalk: ((post: Post) => void) | null;
+	onEditOtomad: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	onPostUpdated?: (post: Post) => void;
 	userId?: string;
@@ -53,6 +54,7 @@ export default function ConsecutivePostGroup({
 	onEditMml,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	onEditPost,
 	userId,
 	startIndex,
@@ -84,6 +86,7 @@ export default function ConsecutivePostGroup({
 				onEditMml={onEditMml}
 				onEditMv={onEditMv}
 				onEditTalk={onEditTalk}
+				onEditOtomad={onEditOtomad}
 				onEditPost={onEditPost}
 				onPostUpdated={onPostUpdated}
 				userId={userId}
@@ -118,6 +121,7 @@ export default function ConsecutivePostGroup({
 				onEditMml={onEditMml}
 				onEditMv={onEditMv}
 				onEditTalk={onEditTalk}
+				onEditOtomad={onEditOtomad}
 				onEditPost={onEditPost}
 				onPostUpdated={onPostUpdated}
 				userId={userId}
@@ -152,6 +156,7 @@ export default function ConsecutivePostGroup({
 							onEditMml={onEditMml}
 							onEditMv={onEditMv}
 							onEditTalk={onEditTalk}
+							onEditOtomad={onEditOtomad}
 							onEditPost={onEditPost}
 							onPostUpdated={onPostUpdated}
 							userId={userId}

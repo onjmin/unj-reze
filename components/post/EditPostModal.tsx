@@ -1,6 +1,13 @@
 "use client";
 
-import { Clapperboard, Gamepad2, MessagesSquare, Music, X } from "lucide-react";
+import {
+	AudioLines,
+	Clapperboard,
+	Gamepad2,
+	MessagesSquare,
+	Music,
+	X,
+} from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { mmlMarkerOfLine } from "@/lib/mml/mml";
@@ -43,6 +50,8 @@ export interface PostEditCapabilities {
 	editMv: (() => void) | null;
 	/** かけあい動画エディタを開く。非対応なら null */
 	editTalk: (() => void) | null;
+	/** 音MADエディタを開く。非対応なら null */
+	editOtomad: (() => void) | null;
 }
 
 /**
@@ -535,6 +544,29 @@ export default function EditPostModal({
 								<button
 									onClick={capabilities.editTalk}
 									className="text-amber-300 hover:text-amber-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-700/40 hover:bg-amber-500/25 active:scale-95 transition-all"
+								>
+									編集
+								</button>
+							</div>
+						)}
+					</div>
+				)}
+
+				{/* 音MAD添付 */}
+				{post.hasOtomad && (
+					<div className="relative flex items-center gap-2.5 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 max-w-[280px] self-start w-full">
+						<AudioLines size={16} className="text-pink-400 shrink-0" />
+						<div className="min-w-0 flex-1">
+							<p className="text-xs font-bold text-pink-200 truncate">
+								{post.otomadTitle || "音MAD"}
+							</p>
+							<p className="text-[10px] text-pink-400/70">音MADを添付中</p>
+						</div>
+						{capabilities.editOtomad && (
+							<div className="flex items-center gap-1.5 ml-auto">
+								<button
+									onClick={capabilities.editOtomad}
+									className="text-pink-300 hover:text-pink-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 active:scale-95 transition-all"
 								>
 									編集
 								</button>

@@ -16,6 +16,7 @@ import MmlSource from "@/components/mml/MmlSource";
 import MvBox from "@/components/mv/MvBox";
 import SpriteImage from "@/components/assets/SpriteImage";
 import TalkBox from "@/components/talk/TalkBox";
+import OtomadBox from "@/components/otomad/OtomadBox";
 
 const MmlPlayer = dynamic(() => import("@/components/mml/MmlPlayer"), { ssr: false });
 
@@ -43,6 +44,7 @@ export interface PostEmbedsProps {
 	imageWrapperClassName?: string;
 	mvClassName?: string;
 	talkClassName?: string;
+	otomadClassName?: string;
 	gameClassName?: string;
 	/** MML/コード進行/汎用埋め込みの外枠（BBS表示はpl-6 mt-2でインデントを揃える） */
 	textEmbedWrapperClassName?: string;
@@ -76,11 +78,12 @@ export default function PostEmbeds({
 	imageWrapperClassName = "rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]",
 	mvClassName = "mb-2.5",
 	talkClassName = "mb-2.5",
+	otomadClassName = "mb-2.5",
 	gameClassName = "mb-2.5",
 	textEmbedWrapperClassName,
 	hashtagLinkClassName = "text-blue-400 hover:underline mb-1 inline-block text-[15px]",
 	suppressGenericEmbedIf = (p) =>
-		!!(p.hasImage || p.hasGame || p.hasMv || p.hasTalk),
+		!!(p.hasImage || p.hasGame || p.hasMv || p.hasTalk || p.hasOtomad),
 }: PostEmbedsProps) {
 	const router = useRouter();
 
@@ -151,6 +154,17 @@ export default function PostEmbeds({
 			talkThumbnail={post.talkThumbnail}
 			talkPlays={post.talkPlays}
 			className={talkClassName}
+		/>
+	);
+
+	const otomad = post.hasOtomad && post.otomadId && (
+		<OtomadBox
+			otomadId={post.otomadId}
+			postId={post.id}
+			otomadTitle={post.otomadTitle || "音MAD"}
+			otomadThumbnail={post.otomadThumbnail}
+			otomadPlays={post.otomadPlays}
+			className={otomadClassName}
 		/>
 	);
 
@@ -250,6 +264,7 @@ export default function PostEmbeds({
 			{image}
 			{mv}
 			{talk}
+			{otomad}
 			{game}
 		</>
 	);

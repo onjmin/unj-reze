@@ -43,13 +43,17 @@ import {
 import { extractMmlFromContent, stripMmlLine } from "@/lib/mml/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
 import type { TalkManifest } from "@/lib/talk/talk-config";
+import type { OtomadManifest } from "@/lib/otomad/otomad-config";
 import {
 	createGame,
 	createMv,
+	createOtomad,
 	createTalk,
+	loadOtomad,
 	loadTalk,
 	updateGame,
 	updateMv,
+	updateOtomad,
 	updateTalk,
 } from "@/lib/post/game-mv-client";
 import {
@@ -88,6 +92,7 @@ const MmlEditor = dynamic(() => import("@/components/mml/MmlEditor"), {
 });
 const MvMaker = dynamic(() => import("@/components/mv/MvMaker"), { ssr: false });
 const TalkMaker = dynamic(() => import("@/components/talk/TalkMaker"), { ssr: false });
+const OtomadMaker = dynamic(() => import("@/components/otomad/OtomadMaker"), { ssr: false });
 const GameMaker = dynamic(() => import("@/components/game/GameMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("@/components/drawing/MangaEditor"), { ssr: false });
 
@@ -240,6 +245,10 @@ export default function App() {
 		manifest: TalkManifest;
 		title: string;
 	} | null>(null);
+	const [otomadDraft, setOtomadDraft] = useState<{
+		manifest: OtomadManifest;
+		title: string;
+	} | null>(null);
 	const [playingGame, setPlayingGame] = useState<{
 		manifest: GameManifestDraft;
 		title: string;
@@ -264,10 +273,18 @@ export default function App() {
 		talkId?: string;
 		creatorSlug?: string;
 	} | null>(null);
+	/** 投稿済みの音MADを編集中（作者本人のときだけ更新できる）。 */
+	const [playingOtomad, setPlayingOtomad] = useState<{
+		manifest: OtomadManifest;
+		title: string;
+		postId?: string;
+		otomadId?: string;
+		creatorSlug?: string;
+	} | null>(null);
 	const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
 	const postGameLastIdRef = useRef(0);
 	const [discardModalConfig, setDiscardModalConfig] = useState<{
-		discardType: "image" | "mml" | "game" | "mv" | "talk";
+		discardType: "image" | "mml" | "game" | "mv" | "talk" | "otomad";
 		targetScreen:
 			| "drawing"
 			| "dotdrawing"
@@ -275,7 +292,8 @@ export default function App() {
 			| "mml"
 			| "gamemaker"
 			| "mvmaker"
-			| "talkmaker";
+			| "talkmaker"
+			| "otomadmaker";
 	} | null>(null);
 	const [editingPost, setEditingPost] = useState<Post | null>(null);
 	const [originalPostContent, setOriginalPostContent] = useState<string>("");
@@ -962,6 +980,8 @@ export default function App() {
 			mvTitle: mvDraft?.title,
 			hasTalk: !!talkDraft,
 			talkTitle: talkDraft?.title,
+			hasOtomad: !!otomadDraft,
+			otomadTitle: otomadDraft?.title,
 			hasGame: !!gameDraft,
 			gameTitle: gameDraft?.title,
 			originType,
@@ -994,6 +1014,7 @@ export default function App() {
 		setGameDraft(null);
 		setMvDraft(null);
 		setTalkDraft(null);
+		setOtomadDraft(null);
 		setOriginType(undefined);
 
 		try {
@@ -1031,6 +1052,14 @@ export default function App() {
 				});
 				talkId = savedTalk.id;
 			}
+			let otomadId: string | undefined;
+			if (otomadDraft) {
+				const savedOtomad = await createOtomad({
+					title: otomadDraft.title,
+					manifest: otomadDraft.manifest,
+				});
+				otomadId = savedOtomad.id;
+			}
 
 			const reply = await api.posts.replies.create(postId, {
 				content,
@@ -1046,6 +1075,7 @@ export default function App() {
 				gameId,
 				mvId,
 				talkId,
+				otomadId,
 				originType,
 			});
 
@@ -1136,7 +1166,8 @@ export default function App() {
 			!attachedMml &&
 			!gameDraft &&
 			!mvDraft &&
-			!talkDraft
+			!talkDraft &&
+			!otomadDraft
 		)
 			return;
 
@@ -1186,6 +1217,8 @@ export default function App() {
 			mvTitle: mvDraft?.title,
 			hasTalk: !!talkDraft,
 			talkTitle: talkDraft?.title,
+			hasOtomad: !!otomadDraft,
+			otomadTitle: otomadDraft?.title,
 			hasGame: !!gameDraft,
 			gameTitle: gameDraft?.title,
 			originType,
@@ -1202,6 +1235,7 @@ export default function App() {
 		setGameDraft(null);
 		setMvDraft(null);
 		setTalkDraft(null);
+		setOtomadDraft(null);
 		setOriginType(undefined);
 
 		try {
@@ -1241,6 +1275,14 @@ export default function App() {
 				});
 				talkId = savedTalk.id;
 			}
+			let otomadId: string | undefined;
+			if (otomadDraft) {
+				const savedOtomad = await createOtomad({
+					title: otomadDraft.title,
+					manifest: otomadDraft.manifest,
+				});
+				otomadId = savedOtomad.id;
+			}
 			const post = await api.posts.create({
 				content,
 				hasImage: !!attachedImage,
@@ -1250,6 +1292,7 @@ export default function App() {
 				gameId,
 				mvId,
 				talkId,
+				otomadId,
 				dotW: attachedDotSize?.w,
 				dotH: attachedDotSize?.h,
 				animFrames: attachedAnim?.animFrames,
@@ -1283,6 +1326,7 @@ export default function App() {
 			setGameDraft(gameDraft);
 			setMvDraft(mvDraft);
 			setTalkDraft(talkDraft);
+			setOtomadDraft(otomadDraft);
 			setOriginType(originType);
 			showToast("error", "投稿に失敗しました。内容は戻してあります");
 		}
@@ -1427,6 +1471,26 @@ export default function App() {
 					creatorSlug: loaded.record.creatorSlug,
 				});
 				openScreen("talkmaker");
+			} catch {}
+		}
+	};
+
+	const handleEditPostOtomad = async (post: Post) => {
+		setEditingPost(post);
+		setOriginalPostContent((prev) => prev || post.content);
+		setShowGlobalEditModal(false);
+		if (post.otomadId) {
+			try {
+				const loaded = await loadOtomad(post.otomadId);
+				if (!loaded) return;
+				setPlayingOtomad({
+					manifest: loaded.manifest,
+					title: loaded.record.title,
+					postId: post.id,
+					otomadId: post.otomadId,
+					creatorSlug: loaded.record.creatorSlug,
+				});
+				openScreen("otomadmaker");
 			} catch {}
 		}
 	};
@@ -1678,6 +1742,35 @@ export default function App() {
 		);
 	};
 
+	const handleSaveEditedOtomad = async (data: {
+		manifest: OtomadManifest;
+		title: string;
+	}) => {
+		if (!playingOtomad?.otomadId) return;
+		try {
+			await updateOtomad(playingOtomad.otomadId, {
+				title: data.title,
+				manifest: data.manifest,
+			});
+		} catch {}
+		closeScreen();
+		setPlayingOtomad(null);
+		if (editingPost) {
+			setShowGlobalEditModal(true);
+		}
+	};
+
+	const handleSaveOtomad = (data: {
+		manifest: OtomadManifest;
+		title: string;
+	}) => {
+		setOtomadDraft(data);
+		closeScreen();
+		setInputText((prev) =>
+			prev.trim() ? prev : `#音MAD 「${data.title}」を作ったよ！`,
+		);
+	};
+
 	const handleSaveGame = (
 		manifest: GameManifestDraft,
 		meta: { title: string; preset: string },
@@ -1782,13 +1875,15 @@ export default function App() {
 			| "mml"
 			| "gamemaker"
 			| "mvmaker"
-			| "talkmaker",
+			| "talkmaker"
+			| "otomadmaker",
 	) => {
 		const hasImage = !!attachedImage;
 		const hasMml = !!attachedMml;
 		const hasGame = !!gameDraft;
 		const hasMv = !!mvDraft;
 		const hasTalk = !!talkDraft;
+		const hasOtomad = !!otomadDraft;
 
 		if (
 			screenType === "drawing" ||
@@ -1813,6 +1908,13 @@ export default function App() {
 			if (hasTalk) {
 				setDiscardModalConfig({
 					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasOtomad) {
+				setDiscardModalConfig({
+					discardType: "otomad",
 					targetScreen: screenType,
 				});
 				return;
@@ -1843,6 +1945,13 @@ export default function App() {
 				});
 				return;
 			}
+			if (hasOtomad) {
+				setDiscardModalConfig({
+					discardType: "otomad",
+					targetScreen: screenType,
+				});
+				return;
+			}
 		} else if (screenType === "gamemaker") {
 			if (hasImage) {
 				setDiscardModalConfig({
@@ -1862,6 +1971,13 @@ export default function App() {
 			if (hasTalk) {
 				setDiscardModalConfig({
 					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasOtomad) {
+				setDiscardModalConfig({
+					discardType: "otomad",
 					targetScreen: screenType,
 				});
 				return;
@@ -1892,6 +2008,13 @@ export default function App() {
 				});
 				return;
 			}
+			if (hasOtomad) {
+				setDiscardModalConfig({
+					discardType: "otomad",
+					targetScreen: screenType,
+				});
+				return;
+			}
 		} else if (screenType === "talkmaker") {
 			if (hasImage) {
 				setDiscardModalConfig({
@@ -1915,6 +2038,43 @@ export default function App() {
 				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
 				return;
 			}
+			if (hasOtomad) {
+				setDiscardModalConfig({
+					discardType: "otomad",
+					targetScreen: screenType,
+				});
+				return;
+			}
+		} else if (screenType === "otomadmaker") {
+			if (hasImage) {
+				setDiscardModalConfig({
+					discardType: "image",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasMml) {
+				setDiscardModalConfig({ discardType: "mml", targetScreen: screenType });
+				return;
+			}
+			if (hasGame) {
+				setDiscardModalConfig({
+					discardType: "game",
+					targetScreen: screenType,
+				});
+				return;
+			}
+			if (hasMv) {
+				setDiscardModalConfig({ discardType: "mv", targetScreen: screenType });
+				return;
+			}
+			if (hasTalk) {
+				setDiscardModalConfig({
+					discardType: "talk",
+					targetScreen: screenType,
+				});
+				return;
+			}
 		}
 
 		// 返信コンポーザから来た場合は、保存/キャンセル後にコンポーザ（＝返信先）へ戻す
@@ -1935,6 +2095,7 @@ export default function App() {
 		if (discardType === "game") setGameDraft(null);
 		if (discardType === "mv") setMvDraft(null);
 		if (discardType === "talk") setTalkDraft(null);
+		if (discardType === "otomad") setOtomadDraft(null);
 
 		openScreen(targetScreen, composerOpen);
 		setDiscardModalConfig(null);
@@ -2025,6 +2186,26 @@ export default function App() {
 					initialManifest={playingTalk?.manifest || talkDraft?.manifest}
 					isEditing={!!playingTalk || !!talkDraft}
 					talkId={playingTalk?.talkId}
+				/>
+			)}
+			{activeScreen === "otomadmaker" && (
+				<OtomadMaker
+					onClose={() => {
+						closeScreen();
+						setPlayingOtomad(null);
+						if (editingPost) setShowGlobalEditModal(true);
+					}}
+					userId={userId}
+					onSave={
+						editingPost &&
+						!!currentUser?.slug &&
+						playingOtomad?.creatorSlug === currentUser.slug
+							? handleSaveEditedOtomad
+							: handleSaveOtomad
+					}
+					initialManifest={playingOtomad?.manifest || otomadDraft?.manifest}
+					isEditing={!!playingOtomad || !!otomadDraft}
+					otomadId={playingOtomad?.otomadId}
 				/>
 			)}
 			{activeScreen === "postgame" && playingGame && (
@@ -2180,6 +2361,8 @@ export default function App() {
 													setMvDraft={setMvDraft}
 													talkDraft={talkDraft}
 													setTalkDraft={setTalkDraft}
+													otomadDraft={otomadDraft}
+													setOtomadDraft={setOtomadDraft}
 													originType={originType}
 													setOriginType={setOriginType}
 													onClose={() => {}}
@@ -2196,6 +2379,7 @@ export default function App() {
 													onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 													onOpenMvMaker={() => handleOpenEditor("mvmaker")}
 													onOpenTalkMaker={() => handleOpenEditor("talkmaker")}
+													onOpenOtomadMaker={() => handleOpenEditor("otomadmaker")}
 													onOpenManga={() => {
 														setCollabImageUrl(attachedImage || undefined);
 														handleOpenEditor("manga");
@@ -2258,6 +2442,7 @@ export default function App() {
 												onEditMml={handleEditPostMml}
 												onEditMv={handleEditPostMv}
 												onEditTalk={handleEditPostTalk}
+												onEditOtomad={handleEditPostOtomad}
 												onEditPost={handleEditPost}
 												userId={userId}
 											/>
@@ -2300,6 +2485,8 @@ export default function App() {
 							setMvDraft={setMvDraft}
 							talkDraft={talkDraft}
 							setTalkDraft={setTalkDraft}
+							otomadDraft={otomadDraft}
+							setOtomadDraft={setOtomadDraft}
 							originType={originType}
 							setOriginType={setOriginType}
 							onClose={() => {
@@ -2328,6 +2515,7 @@ export default function App() {
 							onOpenGameMaker={() => handleOpenEditor("gamemaker")}
 							onOpenMvMaker={() => handleOpenEditor("mvmaker")}
 							onOpenTalkMaker={() => handleOpenEditor("talkmaker")}
+							onOpenOtomadMaker={() => handleOpenEditor("otomadmaker")}
 							onOpenManga={() => {
 								setCollabImageUrl(attachedImage || undefined);
 								handleOpenEditor("manga");
@@ -2416,6 +2604,7 @@ export default function App() {
 								removeGame: null,
 								editMv: () => handleEditPostMv(editingPost),
 								editTalk: () => handleEditPostTalk(editingPost),
+								editOtomad: () => handleEditPostOtomad(editingPost),
 							}}
 						/>
 					)}

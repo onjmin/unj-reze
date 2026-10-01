@@ -17,13 +17,13 @@ export interface ParsedManifestRef {
 }
 
 /**
- * `kind` は uploader 側のキー接頭辞（`mv` / `game` / `talk` / `mml`）。
+ * `kind` は uploader 側のキー接頭辞（`mv` / `game` / `talk` / `otomad` / `mml`）。
  * パス形式を確認することで、MML URL をゲーム manifest として登録するといった
  * 種別取り違えを防ぐ。
  */
 export function isValidPayloadUrl(
 	url: unknown,
-	kind: "mv" | "game" | "talk" | "mml",
+	kind: "mv" | "game" | "talk" | "otomad" | "mml",
 ): url is string {
 	if (typeof url !== "string" || url === "") return false;
 	let parsed: URL;
@@ -51,7 +51,7 @@ function sanitizeToken(value: unknown): string | undefined {
  */
 export function parseManifestRef(
 	body: unknown,
-	kind: "mv" | "game" | "talk",
+	kind: "mv" | "game" | "talk" | "otomad",
 ): ParsedManifestRef | null {
 	const b = body as Record<string, unknown> | null | undefined;
 	if (!isValidPayloadUrl(b?.manifestUrl, kind)) return null;

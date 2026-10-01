@@ -3,8 +3,18 @@
 import type { GameManifestDraft } from "@/components/game/GameMaker";
 import type { EngineKind, PresetId } from "@/components/game/presets/shared";
 import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
+import {
+	type OtomadManifest,
+	otomadBgUrlOf,
+	otomadPostability,
+} from "@/lib/otomad/otomad-config";
 import type { TalkManifest } from "@/lib/talk/talk-config";
-import type { GameRecord, MvRecord, TalkRecord } from "@/lib/types";
+import type {
+	GameRecord,
+	MvRecord,
+	OtomadRecord,
+	TalkRecord,
+} from "@/lib/types";
 import { deleteObject, fetchJson, uploadJson } from "@/lib/uploader";
 
 /**
@@ -170,6 +180,56 @@ export async function updateTalk(
 	return json;
 }
 
+/** 投稿前チェック（ローカル素材が残っていないか・大きすぎないか・曲があるか）。通らなければ投げる */
+function assertOtomadPostable(manifest: OtomadManifest): void {
+	const p = otomadPostability(manifest);
+	if (!p.ok) throw new Error(p.reasons.join("\n"));
+}
+
+export async function createOtomad(params: {
+	title: string;
+	manifest: OtomadManifest;
+}): Promise<OtomadRecord> {
+	assertOtomadPostable(params.manifest);
+	const uploaded = await uploadJson("otomad", params.manifest);
+	const res = await fetch("/api/otomads", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			title: params.title,
+			manifestUrl: uploaded.link,
+			manifestDeleteId: uploaded.deleteId,
+			manifestDeleteHash: uploaded.deleteHash,
+			bgUrl: otomadBgUrlOf(params.manifest) ?? undefined,
+		}),
+	});
+	if (!res.ok) throw new Error(`音MADの保存に失敗しました: ${res.status}`);
+	return res.json();
+}
+
+export async function updateOtomad(
+	otomadId: string,
+	params: { title: string; manifest: OtomadManifest },
+): Promise<OtomadRecord> {
+	assertOtomadPostable(params.manifest);
+	const uploaded = await uploadJson("otomad", params.manifest);
+	const res = await fetch(`/api/otomads/${otomadId}`, {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			title: params.title,
+			manifestUrl: uploaded.link,
+			manifestDeleteId: uploaded.deleteId,
+			manifestDeleteHash: uploaded.deleteHash,
+			bgUrl: otomadBgUrlOf(params.manifest) ?? undefined,
+		}),
+	});
+	if (!res.ok) throw new Error(`音MADの更新に失敗しました: ${res.status}`);
+	const json = await res.json();
+	await cleanupPrevious(json.previousManifest);
+	return json;
+}
+
 /**
  * 旧オブジェクトの後始末。失敗しても投稿は成立しているので握り潰す
  * （残るのは孤児オブジェクト1個で、表示は壊れない）。
@@ -244,5 +304,19 @@ export async function loadTalk(
 	return {
 		record,
 		manifest: await fetchJson<TalkManifest>(record.manifestUrl),
+	};
+}
+
+/** 音MAD1件を manifest 込みで取得する */
+export async function loadOtomad(
+	otomadId: string,
+): Promise<{ record: OtomadRecord; manifest: OtomadManifest } | null> {
+	const res = await fetch(`/api/otomads/${otomadId}`);
+	if (!res.ok) return null;
+	const record: OtomadRecord = await res.json();
+	if (!record.manifestUrl) return null;
+	return {
+		record,
+		manifest: await fetchJson<OtomadManifest>(record.manifestUrl),
 	};
 }

@@ -10,6 +10,7 @@ import { getUserIdLabel } from "@/lib/social/avatar";
 import {
 	createGame,
 	createMv,
+	createOtomad,
 	createTalk,
 	loadGame,
 	loadMv,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/mml/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv/mv-config";
 import type { TalkManifest } from "@/lib/talk/talk-config";
+import type { OtomadManifest } from "@/lib/otomad/otomad-config";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/social/share";
 import { buildPostShareText } from "@/lib/social/share-text";
@@ -51,6 +53,7 @@ const MmlEditor = dynamic(() => import("@/components/mml/MmlEditor"), { ssr: fal
 const GameMaker = dynamic(() => import("@/components/game/GameMaker"), { ssr: false });
 const MvMaker = dynamic(() => import("@/components/mv/MvMaker"), { ssr: false });
 const TalkMaker = dynamic(() => import("@/components/talk/TalkMaker"), { ssr: false });
+const OtomadMaker = dynamic(() => import("@/components/otomad/OtomadMaker"), { ssr: false });
 const MangaEditor = dynamic(() => import("@/components/drawing/MangaEditor"), { ssr: false });
 
 type ReplyGameDraft = {
@@ -158,6 +161,10 @@ export default function BbsThreadView({
 		manifest: TalkManifest;
 		title: string;
 	} | null>(null);
+	const [replyOtomadDraft, setReplyOtomadDraft] = useState<{
+		manifest: OtomadManifest;
+		title: string;
+	} | null>(null);
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
@@ -191,6 +198,7 @@ export default function BbsThreadView({
 		| "gamemaker"
 		| "mvmaker"
 		| "talkmaker"
+		| "otomadmaker"
 		| null
 	>(null);
 	const [submitting, setSubmitting] = useState(false);
@@ -309,7 +317,8 @@ export default function BbsThreadView({
 			!replyMml &&
 			!replyGameDraft &&
 			!replyMvDraft &&
-			!replyTalkDraft
+			!replyTalkDraft &&
+			!replyOtomadDraft
 		)
 			return;
 		if (submitting) return;
@@ -357,6 +366,7 @@ export default function BbsThreadView({
 			hasGame: !!replyGameDraft,
 			hasMv: !!replyMvDraft,
 			hasTalk: !!replyTalkDraft,
+			hasOtomad: !!replyOtomadDraft,
 		};
 		setPost((p) => ({
 			...p,
@@ -371,6 +381,7 @@ export default function BbsThreadView({
 		const capturedGameDraft = replyGameDraft;
 		const capturedMvDraft = replyMvDraft;
 		const capturedTalkDraft = replyTalkDraft;
+		const capturedOtomadDraft = replyOtomadDraft;
 		const capturedOriginType = replyOriginType;
 		const capturedDotSize = replyDotSize;
 		const capturedAnim = replyAnim;
@@ -383,6 +394,7 @@ export default function BbsThreadView({
 		setReplyGameDraft(null);
 		setReplyMvDraft(null);
 		setReplyTalkDraft(null);
+		setReplyOtomadDraft(null);
 		setReplyOriginType(undefined);
 		setReplyTo(null);
 
@@ -424,6 +436,14 @@ export default function BbsThreadView({
 				});
 				talkId = saved.id;
 			}
+			let otomadId: string | undefined;
+			if (capturedOtomadDraft) {
+				const saved = await createOtomad({
+					title: capturedOtomadDraft.title,
+					manifest: capturedOtomadDraft.manifest,
+				});
+				otomadId = saved.id;
+			}
 
 			const reply = await api.posts.replies.create(post.id, {
 				content,
@@ -434,6 +454,7 @@ export default function BbsThreadView({
 				gameId,
 				mvId,
 				talkId,
+				otomadId,
 				dotW: capturedDotSize?.w,
 				dotH: capturedDotSize?.h,
 				animFrames: capturedAnim?.animFrames,
@@ -540,6 +561,17 @@ export default function BbsThreadView({
 		setActiveScreen(null);
 		setReplyText((prev) =>
 			prev.trim() ? prev : `#かけあい動画 「${data.title}」を作ったよ！`,
+		);
+	};
+
+	const handleSaveOtomad = (data: {
+		manifest: OtomadManifest;
+		title: string;
+	}) => {
+		setReplyOtomadDraft(data);
+		setActiveScreen(null);
+		setReplyText((prev) =>
+			prev.trim() ? prev : `#音MAD 「${data.title}」を作ったよ！`,
 		);
 	};
 
@@ -803,6 +835,8 @@ export default function BbsThreadView({
 								userId={userId}
 								order="text-first"
 								mvClassName="pl-6 mt-2"
+								talkClassName="pl-6 mt-2"
+								otomadClassName="pl-6 mt-2"
 								gameClassName="pl-6 mt-2"
 								textEmbedWrapperClassName="pl-6 mt-2"
 								suppressGenericEmbedIf={() => false}
@@ -862,6 +896,8 @@ export default function BbsThreadView({
 					setMvDraft={setReplyMvDraft}
 					talkDraft={replyTalkDraft}
 					setTalkDraft={setReplyTalkDraft}
+					otomadDraft={replyOtomadDraft}
+					setOtomadDraft={setReplyOtomadDraft}
 					originType={replyOriginType}
 					setOriginType={setReplyOriginType}
 					onClose={() => {}}
@@ -873,6 +909,7 @@ export default function BbsThreadView({
 					onOpenGameMaker={() => setActiveScreen("gamemaker")}
 					onOpenMvMaker={() => setActiveScreen("mvmaker")}
 					onOpenTalkMaker={() => setActiveScreen("talkmaker")}
+					onOpenOtomadMaker={() => setActiveScreen("otomadmaker")}
 				/>
 			</div>
 
@@ -940,6 +977,15 @@ export default function BbsThreadView({
 					onSave={handleSaveTalk}
 					initialManifest={replyTalkDraft?.manifest}
 					isEditing={!!replyTalkDraft}
+				/>
+			)}
+			{activeScreen === "otomadmaker" && (
+				<OtomadMaker
+					onClose={() => setActiveScreen(null)}
+					userId={userId}
+					onSave={handleSaveOtomad}
+					initialManifest={replyOtomadDraft?.manifest}
+					isEditing={!!replyOtomadDraft}
 				/>
 			)}
 

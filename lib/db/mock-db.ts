@@ -503,6 +503,11 @@ class MockDB {
 					threadPosts.some((tp) => !!tp.hasTalk) !== options.hasTalk
 				)
 					return false;
+				if (
+					options.hasOtomad !== undefined &&
+					threadPosts.some((tp) => !!tp.hasOtomad) !== options.hasOtomad
+				)
+					return false;
 				return true;
 			})
 			.filter((p) => !hidden.has(p.slug ?? ""))
@@ -669,6 +674,7 @@ class MockDB {
 		gameId?: number;
 		mvId?: number;
 		talkId?: number;
+		otomadId?: number;
 		dotW?: number;
 		dotH?: number;
 		animFrames?: number;
@@ -704,6 +710,7 @@ class MockDB {
 				data.gameId ||
 				data.mvId ||
 				data.talkId ||
+				data.otomadId ||
 				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 				hasMml
 			),
@@ -714,6 +721,8 @@ class MockDB {
 			mvId: data.mvId,
 			hasTalk: !!data.talkId,
 			talkId: data.talkId,
+			hasOtomad: !!data.otomadId,
+			otomadId: data.otomadId,
 			hasMml,
 			dotW: data.dotW,
 			dotH: data.dotH,
@@ -827,7 +836,8 @@ class MockDB {
 			avatarColor?: string;
 			gameId?: number;
 			mvId?: number;
-		talkId?: number;
+			talkId?: number;
+			otomadId?: number;
 			dotW?: number;
 			dotH?: number;
 			animFrames?: number;
@@ -870,12 +880,15 @@ class MockDB {
 			hasMv: !!data.mvId,
 			talkId: data.talkId,
 			hasTalk: !!data.talkId,
+			otomadId: data.otomadId,
+			hasOtomad: !!data.otomadId,
 			hasMml: replyHasMml,
 			// createPost と同じ判定基準（画像はimageIsDrawnのときだけコラボ対象）
 			hasCollabButton: !!(
 				data.gameId ||
 				data.mvId ||
 				data.talkId ||
+				data.otomadId ||
 				(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
 				replyHasMml
 			),
@@ -1570,6 +1583,8 @@ class MockDB {
 			post.mvId = undefined;
 			post.hasTalk = false;
 			post.talkId = undefined;
+			post.hasOtomad = false;
+			post.otomadId = undefined;
 			return true;
 		}
 

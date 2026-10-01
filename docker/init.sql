@@ -31,6 +31,7 @@ DROP TABLE IF EXISTS res CASCADE;
 DROP TABLE IF EXISTS threads CASCADE;
 DROP TABLE IF EXISTS mvs CASCADE;
 DROP TABLE IF EXISTS talks CASCADE;
+DROP TABLE IF EXISTS otomads CASCADE;
 DROP TABLE IF EXISTS games CASCADE;
 DROP TABLE IF EXISTS auth_tokens CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
@@ -123,6 +124,22 @@ CREATE TABLE talks (
 CREATE INDEX idx_talks_plays ON talks (plays DESC);
 CREATE INDEX idx_talks_creator_user_id ON talks (creator_user_id);
 
+-- ========== otomads テーブル（reze 音MAD。manifest本体はR2。docs/otomad-feature-design.md） ==========
+CREATE TABLE otomads (
+    id BIGINT PRIMARY KEY,
+    title TEXT NOT NULL,
+    manifest_url TEXT NOT NULL,
+    manifest_delete_id TEXT,
+    manifest_delete_hash TEXT,
+    bg_url TEXT, -- サムネ用。背景画像か最初の image 素材URLの非正規化（動画素材は使えない）
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    plays BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_otomads_plays ON otomads (plays DESC);
+CREATE INDEX idx_otomads_creator_user_id ON otomads (creator_user_id);
+
 -- ========== threads テーブル ==========
 CREATE TABLE threads (
     id SERIAL PRIMARY KEY,
@@ -189,6 +206,7 @@ CREATE TABLE threads (
     game_id BIGINT REFERENCES games(id) ON DELETE SET NULL,
     mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL,
     talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL,
+    otomad_id BIGINT REFERENCES otomads(id) ON DELETE SET NULL,
     dot_w SMALLINT, -- ドット絵コラボ用のグリッド横解像度（例: 16, 24, 32, 48, 64）
     dot_h SMALLINT, -- ドット絵コラボ用のグリッド縦解像度
     -- 別カラムで持つ。歩行グラの方向数/コマ順はwalk_presetのラベルから
@@ -246,6 +264,7 @@ CREATE TABLE res (
     game_id BIGINT REFERENCES games(id) ON DELETE SET NULL,
     mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL,
     talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL,
+    otomad_id BIGINT REFERENCES otomads(id) ON DELETE SET NULL,
     dot_w SMALLINT,
     dot_h SMALLINT,
     anim_frames SMALLINT,
@@ -259,6 +278,7 @@ CREATE INDEX idx_res_created_at ON res (created_at DESC);
 CREATE INDEX idx_res_game_id ON res (game_id) WHERE game_id IS NOT NULL;
 CREATE INDEX idx_res_mv_id ON res (mv_id) WHERE mv_id IS NOT NULL;
 CREATE INDEX idx_res_talk_id ON res (talk_id) WHERE talk_id IS NOT NULL;
+CREATE INDEX idx_res_otomad_id ON res (otomad_id) WHERE otomad_id IS NOT NULL;
 CREATE UNIQUE INDEX unq_res_reze_origin_post_id
     ON res (reze_origin_post_id) WHERE reze_origin_post_id IS NOT NULL;
 

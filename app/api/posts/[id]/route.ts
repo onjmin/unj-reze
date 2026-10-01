@@ -320,7 +320,7 @@ export async function DELETE(
 				]
 			: []),
 	]);
-	// 削除確定後だけMML/ゲーム・MV manifestの削除トークンを載せる。クライアント
+	// 削除確定後だけMML/ゲーム・MV・かけあい動画・音MAD manifestの削除トークンを載せる。クライアント
 	// （lib/api.ts posts.remove）がこれを見てR2の実体を消す
 	// （editPostのpreviousMmlと同じ仕組み）。ゲーム/MVは他の投稿からまだ参照されて
 	// いれば db.deletePost 側で削除自体をスキップしているので、この時点で無ければ
@@ -343,6 +343,18 @@ export async function DELETE(
 			? {
 					deleteId: result.mvManifestDeleteId,
 					deleteHash: result.mvManifestDeleteHash,
+				}
+			: undefined,
+		previousTalkManifest: result.talkManifestDeleteId
+			? {
+					deleteId: result.talkManifestDeleteId,
+					deleteHash: result.talkManifestDeleteHash,
+				}
+			: undefined,
+		previousOtomadManifest: result.otomadManifestDeleteId
+			? {
+					deleteId: result.otomadManifestDeleteId,
+					deleteHash: result.otomadManifestDeleteHash,
 				}
 			: undefined,
 	});

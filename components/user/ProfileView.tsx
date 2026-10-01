@@ -85,6 +85,7 @@ interface ProfileViewProps {
 	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
 	onEditTalk?: (post: Post) => void;
+	onEditOtomad?: (post: Post) => void;
 	onEditPost?: (post: Post) => void;
 	onModerationChange?: () => void;
 }
@@ -100,6 +101,7 @@ function ProfilePostMenu({
 	onEditMml,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	openGame,
 	onOptimisticDelete,
 	onUndoDelete,
@@ -113,6 +115,7 @@ function ProfilePostMenu({
 	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
 	onEditTalk?: (post: Post) => void;
+	onEditOtomad?: (post: Post) => void;
 	openGame?: (gameId?: string, postId?: string) => void;
 	onOptimisticDelete?: (postId: string) => void;
 	onUndoDelete?: (postId: string) => void;
@@ -484,6 +487,12 @@ function ProfilePostMenu({
 									setShowEditModal(false);
 								}
 							: null,
+						editOtomad: onEditOtomad
+							? () => {
+									onEditOtomad(post);
+									setShowEditModal(false);
+								}
+							: null,
 					}}
 				/>
 			)}
@@ -569,6 +578,7 @@ export default function ProfileView({
 	onEditMml,
 	onEditMv,
 	onEditTalk,
+	onEditOtomad,
 	onEditPost,
 	onModerationChange,
 }: ProfileViewProps) {
@@ -1485,6 +1495,7 @@ export default function ProfileView({
 													onEditMml={onEditMml}
 													onEditMv={onEditMv}
 													onEditTalk={onEditTalk}
+													onEditOtomad={onEditOtomad}
 													openGame={openGame}
 													onOptimisticDelete={handleOptimisticDelete}
 													onUndoDelete={handleUndoDelete}
@@ -1568,6 +1579,8 @@ export default function ProfileView({
 												onPreviewImage={(img) => setPreviewImage(img)}
 												userId={viewerSlug}
 												mvClassName="mb-3"
+												talkClassName="mb-3"
+												otomadClassName="mb-3"
 												gameClassName="mb-3"
 												hashtagLinkClassName="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 											/>

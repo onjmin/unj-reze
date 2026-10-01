@@ -111,6 +111,53 @@ R2 パブリックアクセスの有効化：バケットの **Settings → Publ
 流さないこと。スキーマを変えたときは、既存DBに当てる差分SQLを新しい順にここへ書き足す。
 （`docker/init.sql` と unj リポジトリの `wiki/init.sql` にも同じ変更を入れておく。）
 
+**2026-10-02 — `otomads`（音MAD。manifest 本体は R2、`docs/otomad-feature-design.md` §7）**
+
+`POST /api/otomads` が書く。当てるまでは音MAD付きの投稿が 500 になる（`GET /api/otomads/1` が 404 を返すかで
+表の有無を確認できる）。uploader-worker 側の `otomad` 種別（`TEXT_KINDS`）のデプロイも必要。
+
+```sql
+CREATE TABLE otomads (
+    id BIGINT PRIMARY KEY,
+    title TEXT NOT NULL,
+    manifest_url TEXT NOT NULL,
+    manifest_delete_id TEXT,
+    manifest_delete_hash TEXT,
+    bg_url TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    plays BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_otomads_plays ON otomads (plays DESC);
+CREATE INDEX idx_otomads_creator_user_id ON otomads (creator_user_id);
+ALTER TABLE threads ADD COLUMN otomad_id BIGINT REFERENCES otomads(id) ON DELETE SET NULL;
+ALTER TABLE res ADD COLUMN otomad_id BIGINT REFERENCES otomads(id) ON DELETE SET NULL;
+CREATE INDEX idx_res_otomad_id ON res (otomad_id) WHERE otomad_id IS NOT NULL;
+```
+
+**2026-09-21 — `talks`（かけあい動画。本番 Neon には適用済み）**
+
+記録のために残す。`docs/talk-video-feature-design.md` §5 と同じ内容。
+
+```sql
+CREATE TABLE talks (
+    id BIGINT PRIMARY KEY,
+    title TEXT NOT NULL,
+    manifest_url TEXT NOT NULL,
+    manifest_delete_id TEXT,
+    manifest_delete_hash TEXT,
+    bg_url TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    plays BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_talks_plays ON talks (plays DESC);
+CREATE INDEX idx_talks_creator_user_id ON talks (creator_user_id);
+ALTER TABLE threads ADD COLUMN talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL;
+ALTER TABLE res ADD COLUMN talk_id BIGINT REFERENCES talks(id) ON DELETE SET NULL;
+CREATE INDEX idx_res_talk_id ON res (talk_id) WHERE talk_id IS NOT NULL;
+```
+
 **2026-09-28 — `preset_opens`（ゲームエディタの見本プリセット／テンプレートが開かれた回数、日別）**
 
 `POST /api/games/preset-open` が書く。当てるまではその API が黙って数え漏らすだけで、エディタは壊れない。
