@@ -70,6 +70,8 @@ export interface OtomadPlayerHandle {
 	prepare: () => Promise<{ timeline: OtomadTimeline; media: OtomadMediaCache } | null>;
 	getMedia: () => OtomadMediaCache | null;
 	getTimeline: () => OtomadTimeline | null;
+	/** いま映している秒（停止中は停止位置）。 */
+	getTimeSec: () => number;
 	stop: () => void;
 }
 
@@ -363,6 +365,7 @@ export default function OtomadPlayer({
 			prepare: ensureReady,
 			getMedia: () => rt.current.media,
 			getTimeline: () => rt.current.timeline,
+			getTimeSec: () => currentTimeSec(),
 			stop: () => {
 				const r = rt.current;
 				r.startGen++;
@@ -371,7 +374,7 @@ export default function OtomadPlayer({
 			},
 		});
 		return () => handleRef(null);
-	}, [handleRef, ensureReady, stopSession, setStatusSync]);
+	}, [handleRef, ensureReady, stopSession, setStatusSync, currentTimeSec]);
 
 	// ── シークバー ──
 	const barTimeline = timeline ?? EMPTY_OTOMAD_TIMELINE;

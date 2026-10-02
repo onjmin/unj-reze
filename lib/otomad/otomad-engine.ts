@@ -9,9 +9,9 @@
 import { imageRefToUrl } from "@/lib/assets/asset-ref";
 import { loadImage, peekImage } from "@/lib/assets/walk-sprite";
 import type { MvAssetRef } from "@/lib/mv/mv-config";
-import { OTOMAD_H, OTOMAD_W, type OtomadManifest, type OtomadSlot } from "./otomad-config";
+import { effectiveStage, OTOMAD_H, OTOMAD_W, type OtomadManifest, type OtomadSlot, sortedScenes } from "./otomad-config";
 import type { OtomadMediaCache } from "./otomad-media";
-import { type OtomadEvent, type OtomadTimeline, mediaTimeOf, visibleEventsAt } from "./otomad-timeline";
+import { type OtomadEvent, type OtomadTimeline, mediaTimeOf, sceneIndexAtSec, visibleEventsAt } from "./otomad-timeline";
 
 const FONT_STACK = '"Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Meiryo", system-ui, sans-serif';
 /** 曲頭・曲尾のフェード（秒）。 */
@@ -22,10 +22,10 @@ const assetRefUrl = (ref: MvAssetRef | undefined): string | null => {
 	return ref.url ?? imageRefToUrl(ref.ref);
 };
 
-/** 背景画像の先読み。 */
+/** 背景画像の先読み（場面ごとの背景も）。 */
 export const preloadOtomadImages = async (manifest: OtomadManifest): Promise<void> => {
-	const u = assetRefUrl(manifest.stage.bg);
-	if (u) await loadImage(u).catch(() => null);
+	const urls = [assetRefUrl(manifest.stage.bg), ...sortedScenes(manifest).map((sc) => (sc.stage?.bg ? assetRefUrl(sc.stage.bg) : null))];
+	await Promise.all(urls.filter((u): u is string => !!u).map((u) => loadImage(u).catch(() => null)));
 };
 
 export interface OtomadDrawOptions {
@@ -87,6 +87,33 @@ const bitmapSize = (img: CanvasImageSource): { w: number; h: number } => {
 	return { w: any.naturalWidth ?? any.width ?? 0, h: any.naturalHeight ?? any.height ?? 0 };
 };
 
+/** 窓の形のパス（中心原点）。 */
+const windowPath = (
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	shape: "rect" | "circle" | "hexagon" | "diamond",
+	w: number,
+	h: number,
+) => {
+	ctx.beginPath();
+	if (shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+	else if (shape === "hexagon") {
+		for (let i = 0; i < 6; i++) {
+			const a = (Math.PI / 3) * i - Math.PI / 6;
+			const x = (Math.cos(a) * w) / 2;
+			const y = (Math.sin(a) * h) / 2;
+			if (i === 0) ctx.moveTo(x, y);
+			else ctx.lineTo(x, y);
+		}
+		ctx.closePath();
+	} else if (shape === "diamond") {
+		ctx.moveTo(0, -h / 2);
+		ctx.lineTo(w / 2, 0);
+		ctx.lineTo(0, h / 2);
+		ctx.lineTo(-w / 2, 0);
+		ctx.closePath();
+	} else ctx.rect(-w / 2, -h / 2, w, h);
+};
+
 const drawSlotOutline = (
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	slot: OtomadSlot,
@@ -120,11 +147,11 @@ const drawWindow = (
 	ev: OtomadEvent,
 	t: number,
 ) => {
-	const track = manifest.tracks[ev.trackIdx];
-	const v = track.visual;
+	const v = ev.sceneIdx >= 0 ? timeline.scenes[ev.sceneIdx].visuals[ev.trackIdx] : timeline.baseVisuals[ev.trackIdx];
+	if (!v) return;
 	const slot = v.slots[Math.min(ev.slot, v.slots.length - 1)];
 	if (!slot) return;
-	const img = media.frameAt(ev.source.id, mediaTimeOf(ev, track, t));
+	const img = media.frameAt(ev.source.id, mediaTimeOf(ev, v, t));
 	if (!img) return;
 	const { w: sw, h: sh } = bitmapSize(img);
 	if (sw <= 0 || sh <= 0) return;
@@ -181,33 +208,59 @@ const drawWindow = (
 		cy = gy + dx * Math.sin(a) + dyy * Math.cos(a);
 	}
 	const dy = v.pitchY ? -(ev.pitch - (timeline.trackCenterPitch[ev.trackIdx] ?? 60)) * v.pitchY : 0;
+	// 拍の脈動（全窓共通）
+	if (v.beatPulse) {
+		const phase = (t / beatSec) % 1;
+		const p = 1 + Math.max(0, Math.min(0.5, v.beatPulse)) * (1 - phase) ** 2;
+		sx *= p;
+		sy *= p;
+	}
+	// 流す（画面端で折り返し）
+	if (v.scrollPerBeat && (v.scrollPerBeat.x || v.scrollPerBeat.y)) {
+		const beats = t / beatSec;
+		const wrap = (val: number, size: number, span: number) => {
+			const period = span + size;
+			return ((((val + size / 2) % period) + period) % period) - size / 2;
+		};
+		cx = wrap(cx + beats * v.scrollPerBeat.x, slot.w, OTOMAD_W);
+		cy = wrap(cy + beats * v.scrollPerBeat.y, slot.h, OTOMAD_H);
+	}
 
-	ctx.save();
+	const shape = v.shape ?? "rect";
+	const fit = v.fit ?? "cover";
 	let alpha = Math.max(0, Math.min(1, v.opacity));
 	if (v.velocityToOpacity) alpha *= Math.max(0.15, Math.min(1, ev.velocity / 100));
-	ctx.globalAlpha *= alpha;
-	ctx.translate(cx + ox, cy + dy + oy);
-	if (slot.rotate) ctx.rotate((slot.rotate * Math.PI) / 180);
-	if (rot) ctx.rotate((rot * Math.PI) / 180);
-	ctx.scale(sx * (ev.flip ? -1 : 1), sy);
-	if (v.frame && v.frame.width > 0) {
-		ctx.strokeStyle = v.frame.color;
-		ctx.lineWidth = v.frame.width;
-		ctx.strokeRect(-slot.w / 2, -slot.h / 2, slot.w, slot.h);
-	}
-	ctx.beginPath();
-	ctx.rect(-slot.w / 2, -slot.h / 2, slot.w, slot.h);
-	ctx.clip();
-	// ドット絵のような透過画像は contain のほうが自然（cover は端が切れる）
-	ctx.imageSmoothingEnabled = !(ev.source.kind === "image" && (orig.w <= 128 || orig.h <= 128));
-	drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, v.fit ?? "cover");
-	if (flash > 0) {
-		// 描いた画素だけ明るくする（透過部分は光らない）
-		ctx.globalCompositeOperation = "lighter";
-		ctx.globalAlpha *= flash * 0.8;
-		drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, v.fit ?? "cover");
-	}
-	ctx.restore();
+	const paint = (px: number, py: number, flipX: boolean, flipY: boolean) => {
+		ctx.save();
+		ctx.globalAlpha *= alpha;
+		ctx.translate(px + ox * (flipX ? -1 : 1), py + dy + oy);
+		if (slot.rotate) ctx.rotate(((slot.rotate * (flipX !== flipY ? -1 : 1)) * Math.PI) / 180);
+		if (rot) ctx.rotate(((rot * (flipX !== flipY ? -1 : 1)) * Math.PI) / 180);
+		ctx.scale(sx * (flipX ? -1 : 1), sy * (flipY ? -1 : 1));
+		if (v.frame && v.frame.width > 0) {
+			ctx.strokeStyle = v.frame.color;
+			ctx.lineWidth = v.frame.width;
+			windowPath(ctx, shape, slot.w, slot.h);
+			ctx.stroke();
+		}
+		windowPath(ctx, shape, slot.w, slot.h);
+		ctx.clip();
+		// ドット絵のような透過画像は contain のほうが自然（cover は端が切れる）
+		ctx.imageSmoothingEnabled = !(ev.source.kind === "image" && (orig.w <= 128 || orig.h <= 128));
+		drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, fit);
+		if (flash > 0) {
+			// 描いた画素だけ明るくする（透過部分は光らない）
+			ctx.globalCompositeOperation = "lighter";
+			ctx.globalAlpha *= flash * 0.8;
+			drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, fit);
+		}
+		ctx.restore();
+	};
+	paint(cx, cy, ev.flip, false);
+	const mirror = v.mirror ?? "none";
+	if (mirror === "horizontal" || mirror === "quad") paint(OTOMAD_W - cx, cy, !ev.flip, false);
+	if (mirror === "vertical" || mirror === "quad") paint(cx, OTOMAD_H - cy, ev.flip, true);
+	if (mirror === "quad") paint(OTOMAD_W - cx, OTOMAD_H - cy, !ev.flip, true);
 };
 
 export const drawOtomadFrame = (
@@ -224,10 +277,21 @@ export const drawOtomadFrame = (
 	ctx.globalAlpha = 1;
 	ctx.imageSmoothingEnabled = true;
 
-	// 背景
-	ctx.fillStyle = manifest.stage.bgColor || "#000";
+	// 背景（場面の上書きを反映）
+	const sceneIdx = timeline ? sceneIndexAtSec(timeline, timeSec) : -1;
+	const scene = timeline && sceneIdx >= 0 ? timeline.scenes[sceneIdx] : null;
+	const stage = effectiveStage(manifest.stage, scene?.scene ?? null);
+	// 画面全体のフィルタ（場面の雰囲気。反転・白黒など）。重ね文字と枠には掛けない
+	if (stage.filter && "filter" in ctx) {
+		try {
+			ctx.filter = stage.filter;
+		} catch {
+			// 読めないフィルタは無視
+		}
+	}
+	ctx.fillStyle = stage.bgColor || "#000";
 	ctx.fillRect(0, 0, OTOMAD_W, OTOMAD_H);
-	const bgUrl = assetRefUrl(manifest.stage.bg);
+	const bgUrl = assetRefUrl(stage.bg);
 	if (bgUrl) {
 		const img = peekImage(bgUrl);
 		if (img && img.naturalWidth > 0) {
@@ -237,21 +301,42 @@ export const drawOtomadFrame = (
 			ctx.restore();
 		}
 	}
-	if (manifest.stage.bgDim > 0) {
-		ctx.fillStyle = `rgba(0,0,0,${Math.min(1, manifest.stage.bgDim)})`;
+	if (stage.bgDim > 0) {
+		ctx.fillStyle = `rgba(0,0,0,${Math.min(1, stage.bgDim)})`;
 		ctx.fillRect(0, 0, OTOMAD_W, OTOMAD_H);
 	}
 
 	// 窓（z 順。同じ z ならトラック順）
 	if (timeline && media) {
 		const visible = visibleEventsAt(timeline, timeSec);
-		visible.sort(
-			(a, b) =>
-				manifest.tracks[a.trackIdx].visual.z - manifest.tracks[b.trackIdx].visual.z ||
-				a.trackIdx - b.trackIdx ||
-				a.startSec - b.startSec,
-		);
+		const zOf = (ev: OtomadEvent) => (ev.sceneIdx >= 0 ? timeline.scenes[ev.sceneIdx].visuals[ev.trackIdx] : timeline.baseVisuals[ev.trackIdx])?.z ?? 0;
+		visible.sort((a, b) => zOf(a) - zOf(b) || a.trackIdx - b.trackIdx || a.startSec - b.startSec);
 		for (const ev of visible) drawWindow(ctx, manifest, timeline, media, ev, timeSec);
+	}
+
+	if ("filter" in ctx) ctx.filter = "none";
+
+	// 場面の転換（単色からの明け。MV と同じく 2 画面を合成しない）
+	if (scene?.scene.transition && scene.scene.transition.style !== "cut" && timeline) {
+		const tr = scene.scene.transition;
+		const dur = Math.max(0.05, tr.beats * timeline.secPerStep * 48);
+		const age = timeSec - scene.startSec;
+		if (age >= 0 && age < dur) {
+			const k = age / dur;
+			ctx.save();
+			if (tr.style === "fade" || tr.style === "flash") {
+				ctx.fillStyle = tr.style === "fade" ? `rgba(0,0,0,${1 - k})` : `rgba(255,255,255,${(1 - k) ** 2})`;
+				ctx.fillRect(0, 0, OTOMAD_W, OTOMAD_H);
+			} else {
+				ctx.fillStyle = "#000";
+				const e = 1 - (1 - k) ** 2;
+				if (tr.style === "wipeLeft") ctx.fillRect(0, 0, OTOMAD_W * (1 - e), OTOMAD_H);
+				else if (tr.style === "wipeRight") ctx.fillRect(OTOMAD_W * e, 0, OTOMAD_W * (1 - e), OTOMAD_H);
+				else if (tr.style === "wipeUp") ctx.fillRect(0, 0, OTOMAD_W, OTOMAD_H * (1 - e));
+				else ctx.fillRect(0, OTOMAD_H * e, OTOMAD_W, OTOMAD_H * (1 - e));
+			}
+			ctx.restore();
+		}
 	}
 
 	// 曲頭・曲尾のフェード
@@ -266,11 +351,12 @@ export const drawOtomadFrame = (
 		}
 	}
 
-	// エディタ用の枠（フェードより上）
+	// エディタ用の枠（フェードより上）。いまの場面の配置を描く
 	if (options.showSlotOutlines || options.highlight) {
 		manifest.tracks.forEach((track, ti) => {
-			if (track.visual.kind !== "window") return;
-			track.visual.slots.forEach((slot, si) => {
+			const vis = timeline ? ((sceneIdx >= 0 ? timeline.scenes[sceneIdx].visuals[ti] : timeline.baseVisuals[ti]) ?? track.visual) : track.visual;
+			if (vis.kind !== "window") return;
+			vis.slots.forEach((slot, si) => {
 				const hl = options.highlight && options.highlight.trackIdx === ti && options.highlight.slot === si;
 				if (!hl && !options.showSlotOutlines) return;
 				drawSlotOutline(
@@ -278,7 +364,7 @@ export const drawOtomadFrame = (
 					slot,
 					hl ? "rgba(96,165,250,0.95)" : "rgba(255,255,255,0.35)",
 					hl ? 2 : 1,
-					`@${track.track}${track.visual.slots.length > 1 ? ` #${si + 1}` : ""}`,
+					`@${track.track}${vis.slots.length > 1 ? ` #${si + 1}` : ""}`,
 				);
 			});
 		});

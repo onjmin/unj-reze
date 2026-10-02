@@ -64,7 +64,23 @@ export interface OtomadStage {
 	bg?: MvAssetRef;
 	/** 0〜1。背景を暗くする。 */
 	bgDim: number;
+	/**
+	 * 画面全体の CSS フィルタ（canvas の ctx.filter）。場面ごとに雰囲気を変える用。
+	 * 例: "invert(1) grayscale(1)"（白黒反転の線画風）、"hue-rotate(180deg)"、"sepia(1)"。
+	 */
+	filter?: string;
 }
+
+/** 窓の形。rect 以外はその形で切り抜く（縁取りも同じ形）。 */
+export type OtomadWindowShape = "rect" | "circle" | "hexagon" | "diamond";
+export const OTOMAD_WINDOW_SHAPES: ReadonlyArray<{ value: OtomadWindowShape; label: string }> = [
+	{ value: "rect", label: "四角" },
+	{ value: "circle", label: "丸" },
+	{ value: "hexagon", label: "六角形" },
+	{ value: "diamond", label: "ひし形" },
+];
+/** 鏡像の複製。窓を画面の中心線で折り返した位置にもう 1 つ描く（左右対称の配置を 1 つの設定で）。 */
+export type OtomadMirror = "none" | "horizontal" | "vertical" | "quad";
 
 export interface OtomadBacking {
 	/** kind: audio か video（音だけ使う）。 */
@@ -118,8 +134,8 @@ export interface OtomadTrackAudio {
 export type OtomadSlotPick = "cycle" | "pitch" | "random" | "velocity" | "voice";
 /** 左右反転の方式。alternate＝奇数番目の音、changed＝その窓の音が前と変わったときに反転を切り替える、none＝しない。 */
 export type OtomadFlipMode = "alternate" | "changed" | "none";
-/** 窓の並べ方（生成用）。 */
-export type OtomadSlotLayout = "row" | "column" | "grid" | "circle";
+/** 窓の並べ方（生成用）。hexgrid＝1 行おきに半分ずらした蜂の巣、tile＝画面いっぱいに敷き詰め。 */
+export type OtomadSlotLayout = "row" | "column" | "grid" | "circle" | "hexgrid" | "tile";
 /**
  * 音の頭の演出（1 拍で戻る）。講座の定番に対応: zoom＝拡大（主旋律・キック）、bounce＝下を支点に
  * 縦に跳ねて減衰（スネアの「プルン」・立ち絵）、shake＝横に震える（ハット）、flash＝一瞬光る
@@ -173,6 +189,14 @@ export interface OtomadTrackVisual {
 	frame?: { color: string; width: number };
 	/** 全部の窓を重心のまわりに回す（度/拍）。円形配置のアルペジオ用。 */
 	orbitDegPerBeat?: number;
+	/** 窓の形。既定 rect。 */
+	shape?: OtomadWindowShape;
+	/** 鏡像の複製。既定 none。 */
+	mirror?: OtomadMirror;
+	/** 拍ごとに全窓が脈打つ量（0〜0.5。拍の頭で大きく、拍の中で戻る）。 */
+	beatPulse?: number;
+	/** 全窓を流す速さ（px/拍）。画面端で折り返す（敷き詰めた窓の背景スクロール）。 */
+	scrollPerBeat?: { x: number; y: number };
 	/** 音程で縦位置を変える（半音あたり px、0 で無効）。 */
 	pitchY: number;
 	/** 音符の長さに合わせて映像の再生速度を変える。 */
@@ -191,6 +215,39 @@ export interface OtomadTrack {
 	visual: OtomadTrackVisual;
 }
 
+export type OtomadTransitionStyle = "cut" | "fade" | "flash" | "wipeLeft" | "wipeRight" | "wipeUp" | "wipeDown";
+export const OTOMAD_TRANSITIONS: ReadonlyArray<{ value: OtomadTransitionStyle; label: string }> = [
+	{ value: "cut", label: "カット" },
+	{ value: "fade", label: "黒からフェード" },
+	{ value: "flash", label: "白からフラッシュ" },
+	{ value: "wipeLeft", label: "ワイプ（左へ）" },
+	{ value: "wipeRight", label: "ワイプ（右へ）" },
+	{ value: "wipeUp", label: "ワイプ（上へ）" },
+	{ value: "wipeDown", label: "ワイプ（下へ）" },
+];
+
+/** 場面ごとのトラックの上書き。hidden ならこの場面では窓を出さない。visual は base にかぶせる。 */
+export interface OtomadSceneTrack {
+	hidden?: boolean;
+	visual?: Partial<OtomadTrackVisual>;
+}
+
+/**
+ * 場面（シーン）。曲のパートごとに画面の雰囲気を変える。MV の MvSection と同じ思想で、
+ * 開始小節だけを持ち、次の場面の開始小節まで続く。最初の場面の前は manifest の base（stage / tracks）。
+ */
+export interface OtomadScene {
+	id: string;
+	name: string;
+	/** 開始小節（0 始まり、小数可）。 */
+	startBar: number;
+	/** 背景の上書き。指定した項目だけ差し替える。bg を外すなら `bg: null`。 */
+	stage?: Partial<Omit<OtomadStage, "bg">> & { bg?: MvAssetRef | null };
+	transition?: { style: OtomadTransitionStyle; beats: number };
+	/** manifest.tracks のインデックス（文字列）→ 上書き。 */
+	tracks?: Record<string, OtomadSceneTrack>;
+}
+
 export interface OtomadManifest {
 	version: 1;
 	title: string;
@@ -201,6 +258,8 @@ export interface OtomadManifest {
 	stage: OtomadStage;
 	sources: OtomadSource[];
 	tracks: OtomadTrack[];
+	/** 場面。startBar 昇順。無ければ曲全体が base。 */
+	scenes?: OtomadScene[];
 	backing?: OtomadBacking;
 	/** MML シンセのガイド音（書き出しに入れない）。 */
 	guide: { enabled: boolean; volume: number };
@@ -348,10 +407,34 @@ export const generateSlots = (
 	center: { x: number; y: number } = { x: OTOMAD_W / 2, y: OTOMAD_H / 2 },
 	gap = 8,
 ): OtomadSlot[] => {
-	const n = Math.max(1, Math.min(32, Math.round(count)));
+	const n = Math.max(1, Math.min(64, Math.round(count)));
 	const s = Math.max(8, Math.round(size));
 	const step = s + gap;
 	const out: OtomadSlot[] = [];
+	if (layout === "tile") {
+		// 画面いっぱいに敷き詰める（count は無視して埋まるだけ）。端も埋めるよう 1 周り余分に
+		const cols = Math.ceil(OTOMAD_W / step) + 1;
+		const rows = Math.ceil(OTOMAD_H / step) + 1;
+		for (let r = 0; r < rows; r++)
+			for (let c = 0; c < cols; c++) out.push({ x: Math.round(c * step), y: Math.round(r * step), w: s, h: s });
+		return out.slice(0, 64);
+	}
+	if (layout === "hexgrid") {
+		// 蜂の巣: 1 行おきに半分ずらし、行間は 0.87 倍
+		const cols = Math.ceil(Math.sqrt(n));
+		const rows = Math.ceil(n / cols);
+		for (let i = 0; i < n; i++) {
+			const c = i % cols;
+			const r = Math.floor(i / cols);
+			out.push({
+				x: Math.round(center.x + (c - (cols - 1) / 2) * step + (r % 2 ? step / 2 : 0)),
+				y: Math.round(center.y + (r - (rows - 1) / 2) * step * 0.87),
+				w: s,
+				h: s,
+			});
+		}
+		return out;
+	}
 	if (layout === "row") {
 		for (let i = 0; i < n; i++) out.push({ x: Math.round(center.x + (i - (n - 1) / 2) * step), y: Math.round(center.y), w: s, h: s });
 	} else if (layout === "column") {
@@ -407,6 +490,43 @@ export const otomadPostability = (manifest: OtomadManifest): OtomadPostability =
 	if (tooLarge) reasons.push(`データが大きすぎます（${Math.round(bytes / 1024)} KB）`);
 	if (noMml) reasons.push("曲（MML）がありません");
 	return { ok: reasons.length === 0, localSources, bytes, tooLarge, noMml, reasons };
+};
+
+// ── 場面 ─────────────────────────────────────────────────────
+
+/** startBar 昇順に並べた場面。 */
+export const sortedScenes = (manifest: OtomadManifest): OtomadScene[] =>
+	[...(manifest.scenes ?? [])].sort((a, b) => a.startBar - b.startBar);
+
+/** 小節 bar にかかる場面のインデックス（sortedScenes 基準）。無ければ -1（base）。 */
+export const sceneIndexAtBar = (scenes: OtomadScene[], bar: number): number => {
+	let idx = -1;
+	for (let i = 0; i < scenes.length; i++) {
+		if (scenes[i].startBar <= bar + 1e-9) idx = i;
+		else break;
+	}
+	return idx;
+};
+
+/** 場面を反映したトラックの見た目。hidden なら kind: none。 */
+export const effectiveVisual = (track: OtomadTrack, scene: OtomadScene | null, trackIdx: number): OtomadTrackVisual => {
+	const o = scene?.tracks?.[String(trackIdx)];
+	if (!o) return track.visual;
+	if (o.hidden) return { ...track.visual, kind: "none" };
+	if (!o.visual) return track.visual;
+	const merged: OtomadTrackVisual = { ...track.visual, ...o.visual };
+	if (!merged.slots || merged.slots.length === 0) merged.slots = track.visual.slots;
+	return merged;
+};
+
+/** 場面を反映した背景。 */
+export const effectiveStage = (base: OtomadStage, scene: OtomadScene | null): OtomadStage => {
+	if (!scene?.stage) return base;
+	const { bg, ...rest } = scene.stage;
+	const out: OtomadStage = { ...base, ...rest };
+	if (bg === null) out.bg = undefined;
+	else if (bg) out.bg = bg;
+	return out;
 };
 
 /** 音を出す（ミュートでなく素材を持つ）トラックの MML 番号。原曲から抜く既定。 */
@@ -465,6 +585,7 @@ export const normalizeOtomadManifest = (raw: unknown): OtomadManifest => {
 		stage: { ...createDefaultStage(), ...(m.stage ?? {}) },
 		sources,
 		tracks,
+		scenes: Array.isArray(m.scenes) ? m.scenes.filter((sc) => sc && typeof sc.startBar === "number") : undefined,
 		guide: { ...base.guide, ...(m.guide ?? {}) },
 		leadInSec: typeof m.leadInSec === "number" ? m.leadInSec : 0,
 	};

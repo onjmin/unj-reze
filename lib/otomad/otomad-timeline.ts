@@ -5,14 +5,19 @@
 // 音（otomad-audio.ts）と絵（otomad-engine.ts）は同じイベント列を読むだけにする。
 // 実時間再生とオフライン書き出しが同じ結果になるのはこのため。
 
-import { MV_STEPS_PER_BEAT } from "@/lib/mv/mv-config";
+import { MV_STEPS_PER_BAR, MV_STEPS_PER_BEAT } from "@/lib/mv/mv-config";
 import type { MvNote, MvSong } from "@/lib/mv/mv-engine";
 import {
 	type OtomadManifest,
+	type OtomadScene,
 	type OtomadSource,
 	type OtomadTrack,
+	type OtomadTrackVisual,
+	effectiveVisual,
 	flipModeOf,
 	playbackRateFor,
+	sceneIndexAtBar,
+	sortedScenes,
 	resolveNoteSource,
 	sourceHasAudio,
 	sourceHasVisual,
@@ -53,6 +58,15 @@ export interface OtomadEvent {
 	hasAudio: boolean;
 	/** 窓を出すか。 */
 	hasVisual: boolean;
+	/** 場面（timeline.scenes のインデックス、-1 は base）。 */
+	sceneIdx: number;
+}
+
+export interface OtomadTimelineScene {
+	scene: OtomadScene;
+	startSec: number;
+	/** この場面でのトラックごとの見た目（effectiveVisual を先に解決したもの）。 */
+	visuals: OtomadTrackVisual[];
 }
 
 export interface OtomadTimeline {
@@ -68,6 +82,10 @@ export interface OtomadTimeline {
 	barSec: number[];
 	/** 各トラックの音高の中央値（pitchY の基準）。 */
 	trackCenterPitch: number[];
+	/** 場面（startBar 昇順）。 */
+	scenes: OtomadTimelineScene[];
+	/** base（場面の外）でのトラックごとの見た目。 */
+	baseVisuals: OtomadTrackVisual[];
 }
 
 export const EMPTY_OTOMAD_TIMELINE: OtomadTimeline = {
@@ -78,6 +96,24 @@ export const EMPTY_OTOMAD_TIMELINE: OtomadTimeline = {
 	totalSec: 0,
 	barSec: [],
 	trackCenterPitch: [],
+	scenes: [],
+	baseVisuals: [],
+};
+
+/** 時刻 t の場面インデックス（-1 は base）。 */
+export const sceneIndexAtSec = (tl: OtomadTimeline, t: number): number => {
+	let idx = -1;
+	for (let i = 0; i < tl.scenes.length; i++) {
+		if (tl.scenes[i].startSec <= t + 1e-9) idx = i;
+		else break;
+	}
+	return idx;
+};
+
+/** 時刻 t でのトラックの見た目。 */
+export const visualAt = (tl: OtomadTimeline, trackIdx: number, t: number): OtomadTrackVisual | undefined => {
+	const si = sceneIndexAtSec(tl, t);
+	return si >= 0 ? tl.scenes[si].visuals[trackIdx] : tl.baseVisuals[trackIdx];
 };
 
 /** 固定シードの疑似乱数（pick: random を再現可能にする）。 */
@@ -122,11 +158,22 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 	const trackCenterPitch: number[] = manifest.tracks.map((t) =>
 		median((song.byTrack.get(t.track) ?? []).map((n) => n.pitch)),
 	);
+	const scenesSorted = sortedScenes(manifest);
+	const scenes: OtomadTimelineScene[] = scenesSorted.map((sc) => ({
+		scene: sc,
+		startSec: lead + sc.startBar * secPerStep * MV_STEPS_PER_BAR,
+		visuals: manifest.tracks.map((t, ti) => effectiveVisual(t, sc, ti)),
+	}));
+	const baseVisuals = manifest.tracks.map((t) => t.visual);
+	const visualFor = (trackIdx: number, sceneIdx: number): OtomadTrackVisual =>
+		sceneIdx >= 0 ? scenes[sceneIdx].visuals[trackIdx] : baseVisuals[trackIdx];
 
 	manifest.tracks.forEach((track: OtomadTrack, trackIdx) => {
 		const notes = song.byTrack.get(track.track) ?? [];
 		const list = byTrack[trackIdx];
 		notes.forEach((n, i) => {
+			const sceneIdx = sceneIndexAtBar(scenesSorted, n.startStep / MV_STEPS_PER_BAR);
+			const vis = visualFor(trackIdx, sceneIdx);
 			const resolved = resolveNoteSource(manifest, track, n.pitch);
 			if (!resolved) return;
 			const { source, inSec, outSec } = resolved;
@@ -143,11 +190,11 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 							: noteLen;
 				endSec = startSec + avail / rate;
 			}
-			const slots = track.visual.slots.length;
+			const slots = vis.slots.length;
 			let slot = 0;
 			if (slots > 1) {
 				const k = chordOffset(notes, i);
-				switch (track.visual.pick) {
+				switch (vis.pick) {
 					case "cycle":
 						slot = (i + k) % slots;
 						break;
@@ -188,27 +235,36 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 				changed: true,
 				hit: true,
 				hasAudio: !track.muted && sourceHasAudio(source),
-				hasVisual: track.visual.kind === "window" && sourceHasVisual(source),
+				hasVisual: vis.kind === "window" && sourceHasVisual(source),
+				sceneIdx,
 			});
 		});
-		// 窓ごとに「前と変わったか」を見て、反転と拡大を決める
+		// 窓ごとに「前と変わったか」を見て、反転と拡大を決める（場面が変わったら窓の記憶はリセット）
 		{
-			const mode = flipModeOf(track.visual);
-			const lastBySlot = new Map<number, { pitch: number; sourceId: string; flip: boolean }>();
+			let lastScene = Number.NaN;
+			let lastBySlot = new Map<number, { pitch: number; sourceId: string; flip: boolean }>();
 			for (const ev of list) {
+				if (ev.sceneIdx !== lastScene) {
+					lastScene = ev.sceneIdx;
+					lastBySlot = new Map();
+				}
+				const vis = visualFor(trackIdx, ev.sceneIdx);
+				const mode = flipModeOf(vis);
 				const prev = lastBySlot.get(ev.slot);
 				ev.changed = !prev || prev.pitch !== ev.pitch || prev.sourceId !== ev.source.id;
 				if (mode === "alternate") ev.flip = ev.noteIdx % 2 === 1;
 				else if (mode === "changed") ev.flip = prev ? (ev.changed ? !prev.flip : prev.flip) : false;
 				else ev.flip = false;
-				ev.hit = track.visual.hitOnlyChanged ? ev.changed : true;
+				ev.hit = vis.hitOnlyChanged ? ev.changed : true;
 				lastBySlot.set(ev.slot, { pitch: ev.pitch, sourceId: ev.source.id, flip: ev.flip });
 			}
 		}
-		// 表示の終わり
+		// 表示の終わり（場面の境で切る）
 		for (let i = 0; i < list.length; i++) {
 			const ev = list[i];
-			switch (track.visual.show) {
+			const vis = visualFor(trackIdx, ev.sceneIdx);
+			const sceneEnd = ev.sceneIdx + 1 < scenes.length ? scenes[ev.sceneIdx + 1].startSec : Number.POSITIVE_INFINITY;
+			switch (vis.show) {
 				case "note":
 					ev.visibleUntilSec = ev.endSec;
 					break;
@@ -228,6 +284,7 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 					ev.visibleUntilSec = Number.POSITIVE_INFINITY;
 					break;
 			}
+			ev.visibleUntilSec = Math.min(ev.visibleUntilSec, sceneEnd);
 		}
 		events.push(...list);
 	});
@@ -244,7 +301,7 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 	const barSec: number[] = [];
 	for (let b = 0; b <= song.totalBars; b++) barSec.push(lead + b * secPerBar);
 
-	return { bpm, secPerStep, events, byTrack, totalSec, barSec, trackCenterPitch };
+	return { bpm, secPerStep, events, byTrack, totalSec, barSec, trackCenterPitch, scenes, baseVisuals };
 };
 
 /** 時刻 t に見えているイベント（トラック順 → 開始順）。 */
@@ -263,14 +320,15 @@ export const visibleEventsAt = (tl: OtomadTimeline, t: number): OtomadEvent[] =>
 /** 素材ごとに、映像で必要になる区間（秒）の和集合。コマ取りの範囲。 */
 export const requiredVideoRanges = (
 	tl: OtomadTimeline,
-	manifest: OtomadManifest,
+	_manifest: OtomadManifest,
 ): Map<string, Array<[number, number]>> => {
+	void _manifest;
 	const ranges = new Map<string, Array<[number, number]>>();
 	for (const ev of tl.events) {
 		if (!ev.hasVisual || ev.source.kind !== "video") continue;
-		const track = manifest.tracks[ev.trackIdx];
+		const vis = ev.sceneIdx >= 0 ? tl.scenes[ev.sceneIdx].visuals[ev.trackIdx] : tl.baseVisuals[ev.trackIdx];
 		const shownSec = Math.min(ev.visibleUntilSec, ev.startSec + 30) - ev.startSec;
-		const speed = track.visual.stretch ? ev.rate : 1;
+		const speed = vis.stretch ? ev.rate : 1;
 		const from = ev.inSec;
 		let to = ev.inSec + shownSec * speed;
 		if (ev.outSec !== undefined) to = Math.min(to, ev.outSec);
@@ -294,8 +352,8 @@ export const requiredVideoRanges = (
 };
 
 /** 素材の映像位置（秒）。stretch なら音符の経過 × 再生速度。 */
-export const mediaTimeOf = (ev: OtomadEvent, track: OtomadTrack, t: number): number => {
+export const mediaTimeOf = (ev: OtomadEvent, vis: { stretch: boolean }, t: number): number => {
 	const elapsed = Math.max(0, t - ev.startSec);
-	const pos = ev.inSec + elapsed * (track.visual.stretch ? ev.rate : 1);
+	const pos = ev.inSec + elapsed * (vis.stretch ? ev.rate : 1);
 	return ev.outSec !== undefined ? Math.min(pos, ev.outSec - 1e-3) : pos;
 };

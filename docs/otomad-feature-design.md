@@ -62,6 +62,7 @@ export interface OtomadManifest {
   sources: OtomadSource[];         // 素材。id で track から参照
   tracks: OtomadTrack[];           // MML トラック → 鳴らし方・見せ方
   backing?: OtomadBacking;         // 原曲（off vocal）。無くても動く
+  scenes?: OtomadScene[];          // 場面（§2 の「場面と幾何学の部品」）
   guide: { enabled: boolean; volume: number };  // MML シンセのガイド音（書き出しに入れない）
   leadInSec: number;               // 曲頭の余白（0〜2）。原曲の頭出しに使う
 }
@@ -70,6 +71,7 @@ export interface OtomadStage {
   bgColor: string;
   bg?: MvAssetRef;                 // 背景画像（MV と同じ参照形式）
   bgDim: number;                   // 0〜1。背景を暗くする
+  filter?: string;                 // 画面全体の CSS filter（場面の雰囲気。"invert(1) grayscale(1)" など）
 }
 
 export type OtomadSourceKind = "video" | "audio" | "image";
@@ -136,6 +138,10 @@ export interface OtomadTrackVisual {
   velocityToOpacity?: boolean;     // v → 不透明度
   frame?: { color: string; width: number };  // 窓の縁取り
   orbitDegPerBeat?: number;        // 全窓を重心のまわりに回す（円形配置のアルペジオ）
+  shape?: "rect" | "circle" | "hexagon" | "diamond";
+  mirror?: "none" | "horizontal" | "vertical" | "quad";  // 鏡像の複製
+  beatPulse?: number;              // 拍で脈打つ（0〜0.5）
+  scrollPerBeat?: { x: number; y: number };  // 流す（画面端で折り返し）
   hitOnlyChanged?: boolean;        // 音の頭の拡大を「変わった窓」だけに掛ける
   fit?: "cover" | "contain";       // 窓への収め方（透過のドット絵は contain）
   hitZoom: number;                 // 音の頭で拡大（1.0〜1.5）。1 拍で戻す
@@ -189,6 +195,26 @@ event = {
   ふつうに窓を持てる（低音は 1 窓、コードは声部ぶんの窓、というのが典型）。
 
 ---
+
+### 場面（シーン）と幾何学の部品
+
+参考動画は曲のパートごとに画面がガラッと変わり、配置は「幾何学的なルール」（対称・格子・蜂の巣・
+敷き詰め・鏡像）で組まれている。これを**組み合わせ可能な部品**として持ち、名前付きの型（§10）は
+その上のデータにする。
+
+- **場面** `OtomadScene { startBar, stage?, transition?, tracks? }`（`manifest.scenes`、startBar 昇順）。
+  開始小節から次の場面までのあいだ、背景（色・画像・暗さ・**画面フィルタ** `stage.filter`＝CSS filter。
+  白黒反転の線画風、色相反転など）と、トラックごとの見た目（`hidden` か `visual` の上書き）を
+  差し替える。最初の場面より前は base。時間軸は音符ごとに `sceneIdx` を持ち、窓の選び方・反転・
+  表示の終わり（場面の境で切る）を場面の見た目で解く。転換は MV と同じ「単色からの明け」
+  （cut / fade / flash / wipe×4、`beats` 拍）。
+- **窓の形** `shape`（四角・丸・六角形・ひし形。縁取りも同じ形）。
+- **鏡像の複製** `mirror`（左右・上下・四方）。1 つの設定で左右対称の配置を作る。
+- **並べる** `generateSlots`（横・縦・格子・**蜂の巣**（半分ずらし）・円・**画面いっぱいの敷き詰め**）。
+- **窓群の動き** `orbitDegPerBeat`（重心のまわりに回す）、`beatPulse`（拍で脈打つ）、
+  `scrollPerBeat`（流す。画面端で折り返すので敷き詰めた背景がスクロールする）。
+- エディタの「場面」タブで、いま映している小節から場面を足し、トラックごとに「そのまま／出さない／
+  この場面だけ変える」を選ぶ。プレビューのドラッグは**いま映している場面**の配置を動かす。
 
 ## 3. 素材の実体（`otomad-media.ts`）
 

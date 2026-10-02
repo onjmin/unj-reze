@@ -27,22 +27,24 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ContentPicker, { type PickResult } from "@/components/assets/ContentPicker";
 import OtomadPlayer, { type OtomadPlayerHandle } from "@/components/otomad/OtomadPlayer";
+import OtomadVisualFields from "@/components/otomad/OtomadVisualFields";
+import { BTN_ADD, BTN_DEL, BTN_ICON, BTN_REF, HEADING, INPUT, INPUT_SM, LABEL, NumField, SECTION, SUBHEAD, Toggle } from "@/components/otomad/otomad-ui";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 import { getStudio } from "@/lib/mml/dtm";
 import { EMPTY_SONG, type MvSong } from "@/lib/mv/mv-engine";
 import { auditionSample, recordMmlBacking } from "@/lib/otomad/otomad-audio";
 import {
 	audibleMmlTracks,
-	createDefaultSlot,
+	effectiveStage,
+	effectiveVisual,
+	OTOMAD_TRANSITIONS,
+	type OtomadScene,
+	type OtomadTrackVisual,
+	type OtomadTransitionStyle,
+	sortedScenes,
 	createDefaultSource,
 	createDefaultTrack,
-	flipModeOf,
-	generateSlots,
-	type OtomadFlipMode,
-	type OtomadHitStyle,
-	OTOMAD_HIT_STYLES,
 	type OtomadKeymapEntry,
-	type OtomadSlotLayout,
 	type OtomadManifest,
 	type OtomadSlot,
 	type OtomadSource,
@@ -70,6 +72,8 @@ import {
 	resolveSourceUrl,
 } from "@/lib/otomad/otomad-media";
 import { buildOtomadMidi, downloadBlob } from "@/lib/otomad/otomad-midi";
+import { MV_STEPS_PER_BAR } from "@/lib/mv/mv-config";
+import { sceneIndexAtSec } from "@/lib/otomad/otomad-timeline";
 import { audioBufferToWav, renderSynthBacking } from "@/lib/otomad/otomad-synth";
 import { BUILTIN_SOURCES, createDefaultOtomadManifest, OTOMAD_PRESETS } from "@/lib/otomad/otomad-presets";
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from "@/lib/ui/history";
@@ -86,18 +90,7 @@ export interface OtomadMakerProps {
 	otomadId?: string;
 }
 
-const SECTION = "rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2";
-const HEADING = "text-[12px] font-bold text-gray-200";
-const SUBHEAD = "text-[10px] font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50";
-const INPUT = "w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[12px] text-gray-100 outline-none";
-const INPUT_SM = "bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-100 outline-none";
-const BTN_REF = "flex items-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300 px-2 py-1 text-[11px] disabled:opacity-40";
-const BTN_ADD = "w-full flex items-center justify-center gap-1 rounded border border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5 py-1.5 text-[11px]";
-const BTN_DEL = "p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10";
-const BTN_ICON = "p-1 rounded text-gray-400 hover:text-white hover:bg-gray-700/60 disabled:opacity-30";
-const LABEL = "text-[10px] text-gray-400";
-
-type Tab = "preset" | "song" | "sources" | "tracks" | "finish";
+type Tab = "preset" | "song" | "sources" | "tracks" | "scenes" | "finish";
 
 const newId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -114,64 +107,6 @@ const KindIcon = ({ kind, size = 12 }: { kind: OtomadSourceKind; size?: number }
 	kind === "video" ? <FileVideo size={size} /> : kind === "audio" ? <FileAudio size={size} /> : <FileImage size={size} />;
 
 const fmtSec = (s: number | undefined) => (s === undefined ? "?" : `${s.toFixed(2)}s`);
-
-/** 数値入力（空欄は undefined にできる）。 */
-function NumField({
-	label,
-	value,
-	onChange,
-	step = 0.01,
-	min,
-	max,
-	width = 72,
-	allowEmpty,
-	suffix,
-}: {
-	label: string;
-	value: number | undefined;
-	onChange: (v: number | undefined) => void;
-	step?: number;
-	min?: number;
-	max?: number;
-	width?: number;
-	allowEmpty?: boolean;
-	suffix?: string;
-}) {
-	return (
-		<label className="flex flex-col gap-0.5">
-			<span className={LABEL}>{label}</span>
-			<span className="flex items-center gap-1">
-				<input
-					type="number"
-					value={value === undefined ? "" : value}
-					step={step}
-					min={min}
-					max={max}
-					onChange={(e) => {
-						if (e.target.value === "") {
-							onChange(allowEmpty ? undefined : (min ?? 0));
-							return;
-						}
-						const n = Number(e.target.value);
-						if (Number.isFinite(n)) onChange(n);
-					}}
-					className={INPUT_SM}
-					style={{ width }}
-				/>
-				{suffix && <span className="text-[10px] text-gray-500">{suffix}</span>}
-			</span>
-		</label>
-	);
-}
-
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-	return (
-		<label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer select-none">
-			<input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} className="accent-blue-500" />
-			{label}
-		</label>
-	);
-}
 
 export default function OtomadMaker({ onClose, onSave, initialManifest, isEditing, otomadId }: OtomadMakerProps) {
 	const [manifest, setManifestRaw] = useState<OtomadManifest>(() =>
@@ -190,8 +125,9 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	const [exportWidth, setExportWidth] = useState(1280);
 	const [exoDir, setExoDir] = useState("");
 	const [exoBacking, setExoBacking] = useState(true);
-	/** 「窓を並べる」の設定（トラック共通）。 */
-	const [layoutGen, setLayoutGen] = useState<{ layout: OtomadSlotLayout; count: number; size: number }>({ layout: "row", count: 4, size: 120 });
+	/** 場面タブで開いている場面の id。 */
+	const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+	const [sceneBgPicker, setSceneBgPicker] = useState<string | null>(null);
 	const [urlDraft, setUrlDraft] = useState("");
 	/** 原曲を MML から録音するときに抜くトラック（@n）。null＝割り当て済みのトラック。 */
 	const [backingExclude, setBackingExclude] = useState<number[] | null>(null);
@@ -471,11 +407,56 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 		setManifest((m) => ({ ...m, tracks: m.tracks.filter((_, i) => i !== idx) }));
 		setSelected(null);
 	};
-	const updateSlot = (trackIdx: number, slotIdx: number, patch: Partial<OtomadSlot>) =>
+	const maxPolyphonyOf = (mmlTrack: number): number =>
+		Math.max(1, ...(song.byTrack.get(mmlTrack) ?? []).reduce((m, n) => { m.set(n.startStep, (m.get(n.startStep) ?? 0) + 1); return m; }, new Map<number, number>()).values());
+
+	// ── 場面 ──
+	const scenes = sortedScenes(manifest);
+	const updateScene = (id: string, fn: (sc: OtomadScene) => OtomadScene) =>
+		setManifest((m) => ({ ...m, scenes: (m.scenes ?? []).map((sc) => (sc.id === id ? fn(sc) : sc)) }));
+	const removeScene = (id: string) => setManifest((m) => ({ ...m, scenes: (m.scenes ?? []).filter((sc) => sc.id !== id) }));
+	/** 曲の秒 → 小節（lead を除く）。 */
+	const barAtSec = (sec: number): number => {
+		const secPerBar = (MV_STEPS_PER_BAR / 48) * (60 / Math.max(1, song.bpm));
+		return Math.max(0, Math.floor((sec - manifest.leadInSec) / secPerBar));
+	};
+	const addSceneAt = (startBar: number) => {
+		const id = newId("scene");
+		setManifest((m) => ({ ...m, scenes: [...(m.scenes ?? []), { id, name: `場面 ${(m.scenes?.length ?? 0) + 1}`, startBar, transition: { style: "cut", beats: 1 } }] }));
+		setOpenSceneId(id);
+	};
+	/** いま映している場面（-1 は base）。プレビューの時刻から。 */
+	const currentSceneIdx = (): number => {
+		const h = playerHandle.current;
+		const tl = h?.getTimeline();
+		if (!h || !tl) return -1;
+		return sceneIndexAtSec(tl, h.getTimeSec());
+	};
+	/** いま映している場面を反映したトラックの見た目（ドラッグの当たり判定と書き込み先）。 */
+	const visualNow = (ti: number): OtomadTrackVisual => {
+		const si = currentSceneIdx();
+		return effectiveVisual(manifest.tracks[ti], si >= 0 ? scenes[si] : null, ti);
+	};
+	/** 窓の位置を書き込む。いまの場面にそのトラックの上書きがあれば上書き側へ、無ければ base へ。 */
+	const updateSlot = (trackIdx: number, slotIdx: number, patch: Partial<OtomadSlot>) => {
+		const si = currentSceneIdx();
+		const sc = si >= 0 ? scenes[si] : null;
+		const o = sc?.tracks?.[String(trackIdx)];
+		if (sc && o?.visual?.slots) {
+			updateScene(sc.id, (x) => ({
+				...x,
+				tracks: {
+					...x.tracks,
+					[String(trackIdx)]: { ...o, visual: { ...o.visual, slots: o.visual!.slots!.map((s, i) => (i === slotIdx ? { ...s, ...patch } : s)) } },
+				},
+			}));
+			return;
+		}
 		updateTrack(trackIdx, (t) => ({
 			...t,
 			visual: { ...t.visual, slots: t.visual.slots.map((s, i) => (i === slotIdx ? { ...s, ...patch } : s)) },
 		}));
+	};
 
 	/** 音域の警告（再生速度方式は ±8 半音で破綻しやすい）。 */
 	const pitchWarningFor = (t: OtomadTrack): string | null => {
@@ -494,20 +475,20 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	const dragRef = useRef<{ trackIdx: number; slot: number; dx: number; dy: number; resize: boolean; w0: number; h0: number; x0: number; y0: number } | null>(null);
 	const handleCanvasPointer = useCallback(
 		(e: { type: "down" | "move" | "up"; x: number; y: number; shift: boolean }): boolean => {
-			if (tab !== "tracks") return false;
+			if (tab !== "tracks" && tab !== "scenes") return false;
 			if (e.type === "down") {
-				// 選択中の slot を優先、なければ当たった slot
+				// 選択中の slot を優先、なければ当たった slot（いま映している場面の配置で判定）
 				const hit = (ti: number, si: number) => {
-					const s = manifest.tracks[ti]?.visual.slots[si];
+					const s = visualNow(ti).slots[si];
 					return !!s && Math.abs(e.x - s.x) <= s.w / 2 && Math.abs(e.y - s.y) <= s.h / 2;
 				};
 				let target: { trackIdx: number; slot: number } | null = null;
 				if (selected && hit(selected.trackIdx, selected.slot)) target = selected;
 				else {
 					outer: for (let ti = manifest.tracks.length - 1; ti >= 0; ti--) {
-						const t = manifest.tracks[ti];
-						if (t.visual.kind !== "window") continue;
-						for (let si = t.visual.slots.length - 1; si >= 0; si--) {
+						const vis = visualNow(ti);
+						if (vis.kind !== "window") continue;
+						for (let si = vis.slots.length - 1; si >= 0; si--) {
 							if (hit(ti, si)) {
 								target = { trackIdx: ti, slot: si };
 								break outer;
@@ -516,7 +497,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 					}
 				}
 				if (!target) return false;
-				const s = manifest.tracks[target.trackIdx].visual.slots[target.slot];
+				const s = visualNow(target.trackIdx).slots[target.slot];
 				setSelected(target);
 				dragRef.current = { ...target, dx: e.x - s.x, dy: e.y - s.y, resize: e.shift, w0: s.w, h0: s.h, x0: e.x, y0: e.y };
 				return true;
@@ -539,10 +520,10 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 			return true;
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[tab, manifest.tracks, selected],
+		[tab, manifest.tracks, manifest.scenes, selected],
 	);
 	const drawOptions = useMemo(
-		() => ({ highlight: tab === "tracks" ? selected : null, showSlotOutlines: tab === "tracks" }),
+		() => ({ highlight: tab === "tracks" || tab === "scenes" ? selected : null, showSlotOutlines: tab === "tracks" || tab === "scenes" }),
 		[tab, selected],
 	);
 
@@ -705,8 +686,8 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 						onCanvasPointer={handleCanvasPointer}
 						handleRef={handleRef}
 					/>
-					{tab === "tracks" && (
-						<p className="mt-1 text-[10px] text-gray-500">窓はドラッグで移動、Shift＋ドラッグで大きさを変えられます。</p>
+					{(tab === "tracks" || tab === "scenes") && (
+						<p className="mt-1 text-[10px] text-gray-500">窓はドラッグで移動、Shift＋ドラッグで大きさを変えられます。場面タブでは、いま映している場面の配置を動かします。</p>
 					)}
 				</div>
 			</div>
@@ -719,6 +700,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 						["song", "曲"],
 						["sources", "素材"],
 						["tracks", "トラック"],
+						["scenes", "場面"],
 						["finish", "仕上げ"],
 					] as [Tab, string][]
 				).map(([k, label]) => (
@@ -1181,159 +1163,13 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 
 									{/* 窓 */}
 									<p className={SUBHEAD}>窓（映像）</p>
-									<div className="flex flex-wrap items-end gap-2">
-										<label className="flex flex-col gap-0.5">
-											<span className={LABEL}>表示</span>
-											<select value={t.visual.kind} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, kind: e.target.value as "window" | "none" } }))} className={INPUT_SM}>
-												<option value="window">窓を出す</option>
-												<option value="none">出さない（音だけ）</option>
-											</select>
-										</label>
-										{t.visual.kind === "window" && (
-											<>
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>いつまで出す</span>
-													<select value={t.visual.show} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, show: e.target.value as OtomadTrack["visual"]["show"] } }))} className={INPUT_SM}>
-														<option value="note">鳴っている間</option>
-														<option value="untilNext">次の音まで</option>
-														<option value="hold">出しっぱなし</option>
-													</select>
-												</label>
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>窓の選び方（複数のとき）</span>
-													<select value={t.visual.pick} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, pick: e.target.value as OtomadTrack["visual"]["pick"] } }))} className={INPUT_SM}>
-														<option value="cycle">順番に</option>
-														<option value="pitch">音の高さで</option>
-														<option value="velocity">強さで</option>
-														<option value="random">ランダム</option>
-														<option value="voice">和音の声部ごと（低い順に固定）</option>
-													</select>
-												</label>
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>収め方</span>
-													<select value={t.visual.fit ?? "cover"} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, fit: e.target.value as "cover" | "contain" } }))} className={INPUT_SM}>
-														<option value="cover">窓を埋める（端を切る）</option>
-														<option value="contain">全体を収める</option>
-													</select>
-												</label>
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>左右反転</span>
-													<select value={flipModeOf(t.visual)} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, flipMode: e.target.value as OtomadFlipMode, flipAlternate: e.target.value === "alternate" } }))} className={INPUT_SM}>
-														<option value="alternate">奇数番の音で（定番）</option>
-														<option value="changed">窓の音が変わったとき</option>
-														<option value="none">しない</option>
-													</select>
-												</label>
-												<Toggle label="強さで薄くする（v→不透明度）" value={!!t.visual.velocityToOpacity} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, velocityToOpacity: v } }))} />
-												<Toggle label="縁取り" value={!!t.visual.frame} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: v ? { color: "#ffffff", width: 4 } : undefined } }))} />
-												{t.visual.frame && (
-													<>
-														<label className="flex flex-col gap-0.5">
-															<span className={LABEL}>縁の色</span>
-															<input type="color" value={t.visual.frame.color} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: { ...x.visual.frame!, color: e.target.value } } }))} className="h-7 w-10 bg-transparent" />
-														</label>
-														<NumField label="縁の太さ" value={t.visual.frame.width} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: { ...x.visual.frame!, width: Math.max(1, v ?? 4) } } }))} step={1} min={1} max={40} width={50} />
-													</>
-												)}
-												<NumField label="窓全体を回す（度/拍）" value={t.visual.orbitDegPerBeat ?? 0} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, orbitDegPerBeat: v || undefined } }))} step={5} min={-360} max={360} width={60} />
-												<Toggle label="演出は変わった窓だけ" value={!!t.visual.hitOnlyChanged} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitOnlyChanged: v } }))} />
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>音の頭の演出</span>
-													<select value={t.visual.hitStyle ?? "zoom"} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitStyle: e.target.value as OtomadHitStyle } }))} className={INPUT_SM}>
-														{OTOMAD_HIT_STYLES.map((h) => (
-															<option key={h.value} value={h.value}>
-																{h.label}
-															</option>
-														))}
-													</select>
-												</label>
-												<NumField label="演出の強さ（1〜1.5）" value={t.visual.hitZoom} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitZoom: Math.max(1, Math.min(1.5, v ?? 1)) } }))} step={0.01} min={1} max={1.5} width={60} />
-												<NumField label="音程で上下（px/半音）" value={t.visual.pitchY} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, pitchY: v ?? 0 } }))} step={1} min={-30} max={30} width={60} />
-												<Toggle label="音符の長さに合わせて早回し" value={t.visual.stretch} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, stretch: v } }))} />
-												<NumField label="重なり順（z）" value={t.visual.z} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, z: v ?? 0 } }))} step={1} min={-10} max={10} width={50} />
-												<NumField label="不透明度" value={t.visual.opacity} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, opacity: Math.max(0, Math.min(1, v ?? 1)) } }))} step={0.05} min={0} max={1} width={55} />
-											</>
-										)}
-									</div>
-									{t.visual.kind === "window" && (
-										<div className="space-y-1">
-											{t.visual.slots.map((s, si) => (
-												<div
-													key={si}
-													className={`flex flex-wrap items-end gap-2 rounded px-1.5 py-1 ${isSel && selected?.slot === si ? "bg-blue-500/10" : ""}`}
-													onClick={(e) => {
-														e.stopPropagation();
-														setSelected({ trackIdx: ti, slot: si });
-													}}
-												>
-													<span className="text-[10px] text-gray-400 w-7">#{si + 1}</span>
-													<NumField label="X" value={s.x} onChange={(v) => updateSlot(ti, si, { x: v ?? 0 })} step={1} width={55} />
-													<NumField label="Y" value={s.y} onChange={(v) => updateSlot(ti, si, { y: v ?? 0 })} step={1} width={55} />
-													<NumField label="幅" value={s.w} onChange={(v) => updateSlot(ti, si, { w: Math.max(8, v ?? 8) })} step={1} min={8} width={55} />
-													<NumField label="高さ" value={s.h} onChange={(v) => updateSlot(ti, si, { h: Math.max(8, v ?? 8) })} step={1} min={8} width={55} />
-													<NumField label="回転" value={s.rotate ?? 0} onChange={(v) => updateSlot(ti, si, { rotate: v ?? 0 })} step={1} width={50} />
-													<button type="button" onClick={() => updateSlot(ti, si, { x: OTOMAD_W - s.x })} className={BTN_REF} title="左右対称の位置へ">
-														左右対称
-													</button>
-													<button
-														type="button"
-														onClick={() => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, slots: x.visual.slots.filter((_, i) => i !== si) } }))}
-														disabled={t.visual.slots.length <= 1}
-														className={BTN_DEL}
-													>
-														<Trash2 size={13} />
-													</button>
-												</div>
-											))}
-											<div className="flex flex-wrap items-end gap-2 rounded border border-dashed border-gray-700 px-2 py-1.5">
-												<span className="text-[10px] text-gray-400 w-full">窓を並べる（和音の構成音ぶん。選び方は「声部ごと」にすると各構成音が同じ窓に固定される）</span>
-												<label className="flex flex-col gap-0.5">
-													<span className={LABEL}>並べ方</span>
-													<select value={layoutGen.layout} onChange={(e) => setLayoutGen({ ...layoutGen, layout: e.target.value as OtomadSlotLayout })} className={INPUT_SM}>
-														<option value="row">横一列</option>
-														<option value="column">縦一列</option>
-														<option value="grid">正方形（格子）</option>
-														<option value="circle">円</option>
-													</select>
-												</label>
-												<NumField label="数" value={layoutGen.count} onChange={(v) => setLayoutGen({ ...layoutGen, count: Math.max(1, Math.min(32, v ?? 4)) })} step={1} min={1} max={32} width={50} />
-												<NumField label="一辺（px）" value={layoutGen.size} onChange={(v) => setLayoutGen({ ...layoutGen, size: Math.max(8, v ?? 120) })} step={4} min={8} width={60} />
-												<button
-													type="button"
-													onClick={() => {
-														const c = t.visual.slots[0] ? { x: t.visual.slots[0].x, y: t.visual.slots[0].y } : undefined;
-														updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, slots: generateSlots(layoutGen.layout, layoutGen.count, layoutGen.size, c), pick: x.visual.pick === "cycle" ? "voice" : x.visual.pick } }));
-													}}
-													className={BTN_REF}
-												>
-													並べる（いまの窓を置き換え）
-												</button>
-												<button
-													type="button"
-													onClick={() => {
-														const maxPoly = Math.max(1, ...(song.byTrack.get(t.track) ?? []).reduce((m, n) => { m.set(n.startStep, (m.get(n.startStep) ?? 0) + 1); return m; }, new Map<number, number>()).values());
-														setLayoutGen({ ...layoutGen, count: maxPoly });
-													}}
-													className={BTN_REF}
-													title="この MML トラックで同時に鳴る音の最大数を「数」に入れる"
-												>
-													数＝同時発音数
-												</button>
-											</div>
-											<button
-												type="button"
-												onClick={() =>
-													updateTrack(ti, (x) => {
-														const last = x.visual.slots[x.visual.slots.length - 1] ?? createDefaultSlot();
-														return { ...x, visual: { ...x.visual, slots: [...x.visual.slots, { ...last, x: Math.min(OTOMAD_W - 20, last.x + 40), y: Math.min(OTOMAD_H - 20, last.y + 24) }] } };
-													})
-												}
-												className={BTN_ADD}
-											>
-												<Plus size={11} /> 窓を追加（音符ごとに巡回）
-											</button>
-										</div>
-									)}
+									<OtomadVisualFields
+										visual={t.visual}
+										onChange={(fn) => updateTrack(ti, (x) => ({ ...x, visual: fn(x.visual) }))}
+										maxPolyphony={maxPolyphonyOf(t.track)}
+										selectedSlot={isSel ? (selected?.slot ?? null) : null}
+										onSelectSlot={(si) => setSelected({ trackIdx: ti, slot: si })}
+									/>
 									{sourceOf(t.audio.sourceId)?.kind === "audio" && t.visual.kind === "window" && !t.audio.keymap && (
 										<p className="text-[10px] text-gray-500">音声だけの素材なので窓には何も出ません。絵を出すなら同じ MML トラックにもう 1 本（ミュート）を足して画像/動画を割り当ててください。</p>
 									)}
@@ -1353,6 +1189,150 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 							)}
 						</div>
 						{manifest.tracks.length === 0 && <p className="text-[11px] text-gray-500">「曲」タブで MML を入れると、トラックをここに追加できます。</p>}
+					</div>
+				)}
+
+				{tab === "scenes" && (
+					<div className="space-y-2">
+						<p className="text-[11px] text-gray-400 leading-relaxed">
+							場面＝曲のパートごとの画面。開始小節から次の場面までのあいだ、背景・フィルタ・各トラックの窓の配置と演出を
+							差し替えます。最初の場面より前は「トラック」タブの設定（base）がそのまま使われます。
+						</p>
+						<div className="flex flex-wrap gap-1">
+							<button type="button" onClick={() => addSceneAt(barAtSec(playerHandle.current?.getTimeSec() ?? 0))} className={BTN_REF} disabled={song.totalSteps <= 0}>
+								<Plus size={11} /> いま映している小節から場面を追加
+							</button>
+							<button type="button" onClick={() => addSceneAt(scenes.length ? Math.min(song.totalBars, (scenes[scenes.length - 1]?.startBar ?? 0) + 8) : 0)} className={BTN_REF} disabled={song.totalSteps <= 0}>
+								<Plus size={11} /> 8 小節後に場面を追加
+							</button>
+						</div>
+						{scenes.map((sc, si) => {
+							const open = openSceneId === sc.id;
+							const endBar = scenes[si + 1]?.startBar ?? song.totalBars;
+							const stage = effectiveStage(manifest.stage, sc);
+							return (
+								<div key={sc.id} className={SECTION}>
+									<div className="flex items-center gap-2">
+										<button type="button" onClick={() => setOpenSceneId(open ? null : sc.id)} className="text-[12px] font-bold text-gray-100 text-left flex-1">
+											{sc.name || `場面 ${si + 1}`} <span className="text-[10px] font-normal text-gray-400">小節 {sc.startBar + 1}〜{endBar}</span>
+										</button>
+										<button type="button" onClick={() => setManifest((m) => ({ ...m, scenes: [...(m.scenes ?? []), { ...sc, id: newId("scene"), name: `${sc.name} のコピー`, startBar: Math.min(song.totalBars, endBar) }] }))} className={BTN_REF}>
+											複製
+										</button>
+										<button type="button" onClick={() => removeScene(sc.id)} className={BTN_DEL} title="削除">
+											<Trash2 size={14} />
+										</button>
+									</div>
+									{open && (
+										<>
+											<div className="flex flex-wrap items-end gap-2">
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>名前</span>
+													<input value={sc.name} onChange={(e) => updateScene(sc.id, (x) => ({ ...x, name: e.target.value }))} className={INPUT_SM} />
+												</label>
+												<NumField label="開始小節（1 始まり）" value={sc.startBar + 1} onChange={(v) => updateScene(sc.id, (x) => ({ ...x, startBar: Math.max(0, (v ?? 1) - 1) }))} step={1} min={1} width={60} />
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>転換</span>
+													<select value={sc.transition?.style ?? "cut"} onChange={(e) => updateScene(sc.id, (x) => ({ ...x, transition: { style: e.target.value as OtomadTransitionStyle, beats: x.transition?.beats ?? 1 } }))} className={INPUT_SM}>
+														{OTOMAD_TRANSITIONS.map((t) => (
+															<option key={t.value} value={t.value}>
+																{t.label}
+															</option>
+														))}
+													</select>
+												</label>
+												<NumField label="転換の長さ（拍）" value={sc.transition?.beats ?? 1} onChange={(v) => updateScene(sc.id, (x) => ({ ...x, transition: { style: x.transition?.style ?? "cut", beats: Math.max(0.25, v ?? 1) } }))} step={0.25} min={0.25} max={8} width={55} />
+											</div>
+											<p className={SUBHEAD}>背景（この場面だけ）</p>
+											<div className="flex flex-wrap items-end gap-2">
+												<Toggle label="色を変える" value={sc.stage?.bgColor !== undefined} onChange={(on) => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, bgColor: on ? stage.bgColor : undefined } }))} />
+												{sc.stage?.bgColor !== undefined && (
+													<input type="color" value={sc.stage.bgColor} onChange={(e) => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, bgColor: e.target.value } }))} className="h-7 w-10 bg-transparent" />
+												)}
+												<button type="button" onClick={() => setSceneBgPicker(sc.id)} className={BTN_REF}>
+													画像を参照
+												</button>
+												{sc.stage?.bg !== undefined && (
+													<button type="button" onClick={() => updateScene(sc.id, (x) => { const st = { ...x.stage }; delete st.bg; return { ...x, stage: st }; })} className={BTN_REF}>
+														画像の上書きを外す
+													</button>
+												)}
+												<button type="button" onClick={() => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, bg: null } }))} className={BTN_REF} title="全体の背景画像をこの場面では出さない">
+													背景画像なしにする
+												</button>
+												<NumField label="暗くする（空＝全体の設定）" value={sc.stage?.bgDim} onChange={(v) => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, bgDim: v === undefined ? undefined : Math.max(0, Math.min(1, v)) } }))} step={0.05} min={0} max={1} allowEmpty width={60} />
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>画面フィルタ</span>
+													<select
+														value={["", "invert(1) grayscale(1)", "grayscale(1)", "sepia(1)", "hue-rotate(180deg)", "contrast(1.6) saturate(1.4)", "blur(2px)"].includes(sc.stage?.filter ?? "") ? (sc.stage?.filter ?? "") : "custom"}
+														onChange={(e) => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, filter: e.target.value === "" ? undefined : e.target.value === "custom" ? (x.stage?.filter ?? "invert(1)") : e.target.value } }))}
+														className={INPUT_SM}
+													>
+														<option value="">なし</option>
+														<option value="invert(1) grayscale(1)">白黒反転（線画風）</option>
+														<option value="grayscale(1)">白黒</option>
+														<option value="sepia(1)">セピア</option>
+														<option value="hue-rotate(180deg)">色相反転</option>
+														<option value="contrast(1.6) saturate(1.4)">コントラスト強</option>
+														<option value="blur(2px)">ぼかし</option>
+														<option value="custom">CSS で指定…</option>
+													</select>
+												</label>
+												{sc.stage?.filter !== undefined && (
+													<input value={sc.stage.filter} onChange={(e) => updateScene(sc.id, (x) => ({ ...x, stage: { ...x.stage, filter: e.target.value } }))} className={`${INPUT} max-w-[220px]`} placeholder="invert(1) grayscale(1)" />
+												)}
+											</div>
+											<p className={SUBHEAD}>トラックごとの見た目（この場面だけ）</p>
+											{manifest.tracks.map((t, ti) => {
+												const o = sc.tracks?.[String(ti)];
+												const mode = o?.hidden ? "hidden" : o?.visual ? "override" : "inherit";
+												return (
+													<div key={ti} className="rounded border border-gray-700/60 p-2 space-y-2">
+														<div className="flex items-center gap-2">
+															<span className="font-mono text-[11px] text-gray-200">@{t.track}</span>
+															<span className="text-[11px] text-gray-300 flex-1 truncate">{t.label || ""}</span>
+															<select
+																value={mode}
+																onChange={(e) => {
+																	const v = e.target.value;
+																	updateScene(sc.id, (x) => {
+																		const tracks = { ...(x.tracks ?? {}) };
+																		if (v === "inherit") delete tracks[String(ti)];
+																		else if (v === "hidden") tracks[String(ti)] = { hidden: true };
+																		else tracks[String(ti)] = { visual: { ...t.visual, slots: t.visual.slots.map((sl) => ({ ...sl })) } };
+																		return { ...x, tracks };
+																	});
+																}}
+																className={INPUT_SM}
+															>
+																<option value="inherit">トラックの設定のまま</option>
+																<option value="hidden">この場面では出さない</option>
+																<option value="override">この場面だけ変える</option>
+															</select>
+														</div>
+														{mode === "override" && o?.visual && (
+															<OtomadVisualFields
+																visual={effectiveVisual(t, sc, ti)}
+																onChange={(fn) =>
+																	updateScene(sc.id, (x) => ({
+																		...x,
+																		tracks: { ...x.tracks, [String(ti)]: { visual: fn(effectiveVisual(t, sc, ti)) } },
+																	}))
+																}
+																maxPolyphony={maxPolyphonyOf(t.track)}
+																selectedSlot={selected?.trackIdx === ti ? (selected?.slot ?? null) : null}
+																onSelectSlot={(sidx) => setSelected({ trackIdx: ti, slot: sidx })}
+															/>
+														)}
+													</div>
+												);
+											})}
+										</>
+									)}
+								</div>
+							);
+						})}
+						{scenes.length === 0 && <p className="text-[11px] text-gray-500">まだ場面がありません。曲全体が「トラック」タブの設定で描かれます。</p>}
 					</div>
 				)}
 
@@ -1484,6 +1464,17 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 				)}
 			</div>
 
+			{sceneBgPicker && (
+				<ContentPicker
+					mode="image"
+					userId="otomad"
+					onPick={(res) => {
+						updateScene(sceneBgPicker, (x) => ({ ...x, stage: { ...x.stage, bg: { ref: res.ref, url: res.url } } }));
+						setSceneBgPicker(null);
+					}}
+					onClose={() => setSceneBgPicker(null)}
+				/>
+			)}
 			{picker && (
 				<ContentPicker
 					mode={picker.kind === "mml" ? "bgm" : "image"}
