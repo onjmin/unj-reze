@@ -17,9 +17,31 @@ import {
 	type OtomadLocalFile,
 	type OtomadManifest,
 	type OtomadSource,
+	parseHexColor,
 	sourceHasAudio,
 	sourceHasVisual,
 } from "./otomad-config";
+
+/**
+ * クロマキー: 指定色に近い画素を透明にする（ImageData を破壊的に書き換える）。
+ * 距離は RGB のユークリッド距離。tolerance は 0〜100（100 で距離 255 まで）。縁は距離に応じて半透明にする。
+ */
+export const applyChromaKey = (data: ImageData, color: string, tolerance: number): void => {
+	const rgb = parseHexColor(color);
+	if (!rgb) return;
+	const [kr, kg, kb] = rgb;
+	const th = (Math.max(0, Math.min(100, tolerance)) / 100) * 255;
+	const soft = Math.max(1, th * 0.35);
+	const d = data.data;
+	for (let i = 0; i < d.length; i += 4) {
+		const dr = d[i] - kr;
+		const dg = d[i + 1] - kg;
+		const db = d[i + 2] - kb;
+		const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+		if (dist < th) d[i + 3] = 0;
+		else if (dist < th + soft) d[i + 3] = Math.round((d[i + 3] * (dist - th)) / soft);
+	}
+};
 import { type OtomadTimeline, requiredVideoRanges } from "./otomad-timeline";
 
 // ── ローカルファイル ─────────────────────────────────────────
@@ -266,7 +288,8 @@ export class OtomadMediaCache {
 	constructor(private readonly audioContext: BaseAudioContext) {}
 
 	private identityOf(s: OtomadSource): string {
-		return s.url ? `url:${s.url}` : s.local ? `local:${s.local.hash}` : "none";
+		const key = s.chromaKey ? `|ck:${s.chromaKey.color}:${s.chromaKey.tolerance}` : "";
+		return (s.url ? `url:${s.url}` : s.local ? `local:${s.local.hash}` : "none") + key;
 	}
 
 	audioOf(sourceId: string): AudioBuffer | null {
@@ -433,7 +456,7 @@ export class OtomadMediaCache {
 						const img = await loadImageElement(url);
 						m.width = img.naturalWidth;
 						m.height = img.naturalHeight;
-						m.image = await createImageBitmap(img);
+						m.image = s.chromaKey ? await keyedBitmap(img, img.naturalWidth, img.naturalHeight, s.chromaKey) : await createImageBitmap(img);
 						m.tainted = isHttp(url) && !(await canReadPixels(m.image));
 					} catch (err) {
 						console.warn("[otomad] 画像の読み込みに失敗", s.name, err);
@@ -525,6 +548,11 @@ export class OtomadMediaCache {
 				let bmp: ImageBitmap;
 				try {
 					ctx.drawImage(video, 0, 0, w, h);
+					if (s.chromaKey) {
+						const data = ctx.getImageData(0, 0, w, h);
+						applyChromaKey(data, s.chromaKey.color, s.chromaKey.tolerance);
+						ctx.putImageData(data, 0, 0);
+					}
 					bmp = await createImageBitmap(off);
 				} catch {
 					// CORS 無しの動画で canvas が汚染されたとき。縮小だけして直接取る（表示はできる）
@@ -560,6 +588,31 @@ export class OtomadMediaCache {
 		this.objectUrls.clear();
 	}
 }
+
+/** 画像をクロマキーして ImageBitmap に。 */
+const keyedBitmap = async (
+	img: HTMLImageElement,
+	w: number,
+	h: number,
+	key: { color: string; tolerance: number },
+): Promise<ImageBitmap> => {
+	const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w, h) : document.createElement("canvas");
+	if (!(c instanceof OffscreenCanvas)) {
+		c.width = w;
+		c.height = h;
+	}
+	const ctx = c.getContext("2d") as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+	if (!ctx) return createImageBitmap(img);
+	ctx.drawImage(img, 0, 0, w, h);
+	try {
+		const data = ctx.getImageData(0, 0, w, h);
+		applyChromaKey(data, key.color, key.tolerance);
+		ctx.putImageData(data, 0, 0);
+	} catch {
+		// CORS 無しで汚染されているときは抜けない
+	}
+	return createImageBitmap(c);
+};
 
 const loadImageElement = (url: string): Promise<HTMLImageElement> =>
 	new Promise((resolve, reject) => {

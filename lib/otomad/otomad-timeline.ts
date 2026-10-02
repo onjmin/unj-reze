@@ -11,6 +11,7 @@ import {
 	type OtomadManifest,
 	type OtomadSource,
 	type OtomadTrack,
+	flipModeOf,
 	playbackRateFor,
 	resolveNoteSource,
 	sourceHasAudio,
@@ -44,6 +45,10 @@ export interface OtomadEvent {
 	/** 使う slot のインデックス。 */
 	slot: number;
 	flip: boolean;
+	/** その窓の音が前と変わったか（音高か素材。最初の音は true）。 */
+	changed: boolean;
+	/** 音の頭の拡大を掛けるか（hitOnlyChanged なら changed のときだけ）。 */
+	hit: boolean;
 	/** 音を鳴らすか（素材に音があり、トラックがミュートでない）。 */
 	hasAudio: boolean;
 	/** 窓を出すか。 */
@@ -94,6 +99,18 @@ const chordOffset = (notes: MvNote[], i: number): number => {
 	let k = 0;
 	for (let j = i - 1; j >= 0 && notes[j].startStep === notes[i].startStep; j--) k++;
 	return k;
+};
+
+/** 同時に鳴る音の中で低い順に何番目か（声部）。 */
+const voiceIndex = (notes: MvNote[], i: number): number => {
+	const start = notes[i].startStep;
+	let j0 = i;
+	while (j0 > 0 && notes[j0 - 1].startStep === start) j0--;
+	let j1 = i;
+	while (j1 + 1 < notes.length && notes[j1 + 1].startStep === start) j1++;
+	const group = notes.slice(j0, j1 + 1).map((n, k) => ({ p: n.pitch, k: j0 + k }));
+	group.sort((a, b) => a.p - b.p || a.k - b.k);
+	return group.findIndex((g) => g.k === i);
 };
 
 export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): OtomadTimeline => {
@@ -147,6 +164,9 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 					case "random":
 						slot = (Math.floor(hashRandom(track.track, i) * slots) + k) % slots;
 						break;
+					case "voice":
+						slot = voiceIndex(notes, i) % slots;
+						break;
 				}
 			}
 			list.push({
@@ -164,11 +184,27 @@ export const buildOtomadTimeline = (manifest: OtomadManifest, song: MvSong): Oto
 				outSec,
 				rate,
 				slot,
-				flip: track.visual.flipAlternate && i % 2 === 1,
+				flip: false,
+				changed: true,
+				hit: true,
 				hasAudio: !track.muted && sourceHasAudio(source),
 				hasVisual: track.visual.kind === "window" && sourceHasVisual(source),
 			});
 		});
+		// 窓ごとに「前と変わったか」を見て、反転と拡大を決める
+		{
+			const mode = flipModeOf(track.visual);
+			const lastBySlot = new Map<number, { pitch: number; sourceId: string; flip: boolean }>();
+			for (const ev of list) {
+				const prev = lastBySlot.get(ev.slot);
+				ev.changed = !prev || prev.pitch !== ev.pitch || prev.sourceId !== ev.source.id;
+				if (mode === "alternate") ev.flip = ev.noteIdx % 2 === 1;
+				else if (mode === "changed") ev.flip = prev ? (ev.changed ? !prev.flip : prev.flip) : false;
+				else ev.flip = false;
+				ev.hit = track.visual.hitOnlyChanged ? ev.changed : true;
+				lastBySlot.set(ev.slot, { pitch: ev.pitch, sourceId: ev.source.id, flip: ev.flip });
+			}
+		}
 		// 表示の終わり
 		for (let i = 0; i < list.length; i++) {
 			const ev = list[i];

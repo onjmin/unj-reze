@@ -32,10 +32,17 @@ import { getStudio } from "@/lib/mml/dtm";
 import { EMPTY_SONG, type MvSong } from "@/lib/mv/mv-engine";
 import { auditionSample, recordMmlBacking } from "@/lib/otomad/otomad-audio";
 import {
+	audibleMmlTracks,
 	createDefaultSlot,
 	createDefaultSource,
 	createDefaultTrack,
+	flipModeOf,
+	generateSlots,
+	type OtomadFlipMode,
+	type OtomadHitStyle,
+	OTOMAD_HIT_STYLES,
 	type OtomadKeymapEntry,
+	type OtomadSlotLayout,
 	type OtomadManifest,
 	type OtomadSlot,
 	type OtomadSource,
@@ -183,6 +190,8 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	const [exportWidth, setExportWidth] = useState(1280);
 	const [exoDir, setExoDir] = useState("");
 	const [exoBacking, setExoBacking] = useState(true);
+	/** 「窓を並べる」の設定（トラック共通）。 */
+	const [layoutGen, setLayoutGen] = useState<{ layout: OtomadSlotLayout; count: number; size: number }>({ layout: "row", count: 4, size: 120 });
 	const [urlDraft, setUrlDraft] = useState("");
 	/** 原曲を MML から録音するときに抜くトラック（@n）。null＝割り当て済みのトラック。 */
 	const [backingExclude, setBackingExclude] = useState<number[] | null>(null);
@@ -274,7 +283,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	/** MML を実時間で録音して原曲（素材 + backing）にする。抜くトラックは backingExclude（既定＝割り当て済み）。 */
 	const handleRecordBacking = async () => {
 		if (recording || !manifest.mml.trim()) return;
-		const exclude = backingExclude ?? [...new Set(manifest.tracks.map((t) => t.track))];
+		const exclude = backingExclude ?? audibleMmlTracks(manifest);
 		const mml = stripMmlTracks(manifest.mml, exclude);
 		playerHandle.current?.stop();
 		auditionStop.current?.();
@@ -321,7 +330,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	/** MML を簡易シンセでオフライン合成して原曲にする（即時・無音。音質は chiptune 寄り）。 */
 	const handleSynthBacking = async () => {
 		if (recording || song.totalSteps <= 0) return;
-		const exclude = backingExclude ?? [...new Set(manifest.tracks.map((t) => t.track))];
+		const exclude = backingExclude ?? audibleMmlTracks(manifest);
 		setRecording({ text: "原曲を合成中…", ratio: 0.3 });
 		try {
 			const buf = await renderSynthBacking(song, exclude);
@@ -829,12 +838,12 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 							<p className={HEADING}>原曲を MML から作る（off vocal）</p>
 							<p className="text-[11px] text-gray-400 leading-relaxed">
 								この MML を楽器音で鳴らしながら録音し、原曲（backing）にします。声に差し替えるトラックは抜いておくのが定石です
-								（既定＝トラックに割り当て済みの @n）。曲の長さぶん時間が掛かり、録音中は音が出ます。
+								（既定＝声や打楽器を鳴らすトラックの @n。絵だけのトラックは抜かない）。
 							</p>
 							{song.tracks.length > 0 && (
 								<div className="flex flex-wrap gap-2">
 									{song.tracks.map((t) => {
-										const exclude = backingExclude ?? [...new Set(manifest.tracks.map((x) => x.track))];
+										const exclude = backingExclude ?? audibleMmlTracks(manifest);
 										const on = exclude.includes(t);
 										return (
 											<Toggle
@@ -987,6 +996,24 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 												<button type="button" onClick={() => void audition(s, playbackRateFor({ audio: { pitch: "follow" } } as OtomadTrack, s, 60))} className={BTN_REF} title="C4 に合わせて試聴">
 													C4 で試聴
 												</button>
+											)}
+										</div>
+									)}
+									{s.kind !== "audio" && (
+										<div className="flex flex-wrap items-end gap-2">
+											<Toggle
+												label="クロマキーで抜く（グリーンバック等）"
+												value={!!s.chromaKey}
+												onChange={(v) => updateSource(s.id, { chromaKey: v ? { color: "#00ff00", tolerance: 30 } : undefined })}
+											/>
+											{s.chromaKey && (
+												<>
+													<label className="flex flex-col gap-0.5">
+														<span className={LABEL}>抜く色</span>
+														<input type="color" value={s.chromaKey.color} onChange={(e) => updateSource(s.id, { chromaKey: { ...s.chromaKey!, color: e.target.value } })} className="h-7 w-10 bg-transparent" />
+													</label>
+													<NumField label="許容（0〜100）" value={s.chromaKey.tolerance} onChange={(v) => updateSource(s.id, { chromaKey: { ...s.chromaKey!, tolerance: Math.max(0, Math.min(100, v ?? 30)) } })} step={1} min={0} max={100} width={55} />
+												</>
 											)}
 										</div>
 									)}
@@ -1179,6 +1206,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 														<option value="pitch">音の高さで</option>
 														<option value="velocity">強さで</option>
 														<option value="random">ランダム</option>
+														<option value="voice">和音の声部ごと（低い順に固定）</option>
 													</select>
 												</label>
 												<label className="flex flex-col gap-0.5">
@@ -1188,8 +1216,38 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 														<option value="contain">全体を収める</option>
 													</select>
 												</label>
-												<Toggle label="奇数番で左右反転" value={t.visual.flipAlternate} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, flipAlternate: v } }))} />
-												<NumField label="音の頭で拡大（1〜1.5）" value={t.visual.hitZoom} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitZoom: Math.max(1, Math.min(1.5, v ?? 1)) } }))} step={0.01} min={1} max={1.5} width={60} />
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>左右反転</span>
+													<select value={flipModeOf(t.visual)} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, flipMode: e.target.value as OtomadFlipMode, flipAlternate: e.target.value === "alternate" } }))} className={INPUT_SM}>
+														<option value="alternate">奇数番の音で（定番）</option>
+														<option value="changed">窓の音が変わったとき</option>
+														<option value="none">しない</option>
+													</select>
+												</label>
+												<Toggle label="強さで薄くする（v→不透明度）" value={!!t.visual.velocityToOpacity} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, velocityToOpacity: v } }))} />
+												<Toggle label="縁取り" value={!!t.visual.frame} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: v ? { color: "#ffffff", width: 4 } : undefined } }))} />
+												{t.visual.frame && (
+													<>
+														<label className="flex flex-col gap-0.5">
+															<span className={LABEL}>縁の色</span>
+															<input type="color" value={t.visual.frame.color} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: { ...x.visual.frame!, color: e.target.value } } }))} className="h-7 w-10 bg-transparent" />
+														</label>
+														<NumField label="縁の太さ" value={t.visual.frame.width} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, frame: { ...x.visual.frame!, width: Math.max(1, v ?? 4) } } }))} step={1} min={1} max={40} width={50} />
+													</>
+												)}
+												<NumField label="窓全体を回す（度/拍）" value={t.visual.orbitDegPerBeat ?? 0} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, orbitDegPerBeat: v || undefined } }))} step={5} min={-360} max={360} width={60} />
+												<Toggle label="演出は変わった窓だけ" value={!!t.visual.hitOnlyChanged} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitOnlyChanged: v } }))} />
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>音の頭の演出</span>
+													<select value={t.visual.hitStyle ?? "zoom"} onChange={(e) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitStyle: e.target.value as OtomadHitStyle } }))} className={INPUT_SM}>
+														{OTOMAD_HIT_STYLES.map((h) => (
+															<option key={h.value} value={h.value}>
+																{h.label}
+															</option>
+														))}
+													</select>
+												</label>
+												<NumField label="演出の強さ（1〜1.5）" value={t.visual.hitZoom} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, hitZoom: Math.max(1, Math.min(1.5, v ?? 1)) } }))} step={0.01} min={1} max={1.5} width={60} />
 												<NumField label="音程で上下（px/半音）" value={t.visual.pitchY} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, pitchY: v ?? 0 } }))} step={1} min={-30} max={30} width={60} />
 												<Toggle label="音符の長さに合わせて早回し" value={t.visual.stretch} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, stretch: v } }))} />
 												<NumField label="重なり順（z）" value={t.visual.z} onChange={(v) => updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, z: v ?? 0 } }))} step={1} min={-10} max={10} width={50} />
@@ -1227,6 +1285,41 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 													</button>
 												</div>
 											))}
+											<div className="flex flex-wrap items-end gap-2 rounded border border-dashed border-gray-700 px-2 py-1.5">
+												<span className="text-[10px] text-gray-400 w-full">窓を並べる（和音の構成音ぶん。選び方は「声部ごと」にすると各構成音が同じ窓に固定される）</span>
+												<label className="flex flex-col gap-0.5">
+													<span className={LABEL}>並べ方</span>
+													<select value={layoutGen.layout} onChange={(e) => setLayoutGen({ ...layoutGen, layout: e.target.value as OtomadSlotLayout })} className={INPUT_SM}>
+														<option value="row">横一列</option>
+														<option value="column">縦一列</option>
+														<option value="grid">正方形（格子）</option>
+														<option value="circle">円</option>
+													</select>
+												</label>
+												<NumField label="数" value={layoutGen.count} onChange={(v) => setLayoutGen({ ...layoutGen, count: Math.max(1, Math.min(32, v ?? 4)) })} step={1} min={1} max={32} width={50} />
+												<NumField label="一辺（px）" value={layoutGen.size} onChange={(v) => setLayoutGen({ ...layoutGen, size: Math.max(8, v ?? 120) })} step={4} min={8} width={60} />
+												<button
+													type="button"
+													onClick={() => {
+														const c = t.visual.slots[0] ? { x: t.visual.slots[0].x, y: t.visual.slots[0].y } : undefined;
+														updateTrack(ti, (x) => ({ ...x, visual: { ...x.visual, slots: generateSlots(layoutGen.layout, layoutGen.count, layoutGen.size, c), pick: x.visual.pick === "cycle" ? "voice" : x.visual.pick } }));
+													}}
+													className={BTN_REF}
+												>
+													並べる（いまの窓を置き換え）
+												</button>
+												<button
+													type="button"
+													onClick={() => {
+														const maxPoly = Math.max(1, ...(song.byTrack.get(t.track) ?? []).reduce((m, n) => { m.set(n.startStep, (m.get(n.startStep) ?? 0) + 1); return m; }, new Map<number, number>()).values());
+														setLayoutGen({ ...layoutGen, count: maxPoly });
+													}}
+													className={BTN_REF}
+													title="この MML トラックで同時に鳴る音の最大数を「数」に入れる"
+												>
+													数＝同時発音数
+												</button>
+											</div>
 											<button
 												type="button"
 												onClick={() =>

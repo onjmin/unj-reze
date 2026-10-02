@@ -91,6 +91,8 @@ export interface OtomadSource {
   gainDb: number;                  // 素材ごとの音量補正
   /** 映像の既定の切り出し矩形（素材画素）。省略＝全体 */
   crop?: [number, number, number, number];
+  /** クロマキー（コマ取り時に色を透明にする）。実写は抜けないので窓が四角になるが、抜ける素材は切り抜きの形で出せる */
+  chromaKey?: { color: string; tolerance: number };
 }
 
 export interface OtomadBacking {
@@ -126,9 +128,16 @@ export interface OtomadTrackAudio {
 export interface OtomadTrackVisual {
   kind: "window" | "none";
   slots: OtomadSlot[];             // 窓の位置。複数なら pick で選ぶ
-  pick: "cycle" | "pitch" | "random" | "velocity";
+  pick: "cycle" | "pitch" | "random" | "velocity" | "voice";  // voice＝和音を低い順の声部として同じ窓に固定
   show: "note" | "untilNext" | "hold";  // 鳴っている間 / 次の音まで / 出しっぱなし
-  flipAlternate: boolean;          // 偶数番目の音で左右反転（定番）
+  flipAlternate: boolean;          // 偶数番目の音で左右反転（定番。flipMode が無い古いデータ用）
+  flipMode?: "alternate" | "changed" | "none";  // changed＝その窓の音が前と変わったとき反転を切り替える
+  hitStyle?: "zoom" | "bounce" | "shake" | "flash" | "spin" | "slide";  // 音の頭の演出（1 拍で戻る）
+  velocityToOpacity?: boolean;     // v → 不透明度
+  frame?: { color: string; width: number };  // 窓の縁取り
+  orbitDegPerBeat?: number;        // 全窓を重心のまわりに回す（円形配置のアルペジオ）
+  hitOnlyChanged?: boolean;        // 音の頭の拡大を「変わった窓」だけに掛ける
+  fit?: "cover" | "contain";       // 窓への収め方（透過のドット絵は contain）
   hitZoom: number;                 // 音の頭で拡大（1.0〜1.5）。1 拍で戻す
   pitchY: number;                  // 音程で縦位置を変える（半音あたり px、0 で無効）
   stretch: boolean;                // 音符の長さに合わせて映像の再生速度を変える
@@ -173,6 +182,11 @@ event = {
 - 同時発音（和音）は全部鳴らす。映像の窓は同時に出るぶんだけ別の slot を使う（`pick: "cycle"`
   は同時発音を順に別 slot へ）。
 - `show: "untilNext"` は同じトラックの次の音の頭まで表示（音MAD五線譜の「表示数 1」相当）。
+- **コードの構成音を並べる**: `pick: "voice"` で同時に鳴る音を低い順に声部とみなし、声部 i を slot i に
+  固定する。エディタの「窓を並べる」（横一列・縦一列・正方形・円、数は同時発音数から取れる）で slot を
+  生成する。各イベントは `changed`（その窓の音高か素材が前と違う）を持ち、`flipMode: "changed"` なら
+  変わった声部だけ反転が切り替わり、`hitOnlyChanged` なら拡大も変わった声部だけ。低音・コードも
+  ふつうに窓を持てる（低音は 1 窓、コードは声部ぶんの窓、というのが典型）。
 
 ---
 
@@ -421,6 +435,43 @@ note など 30 本超の講座から拾った定石。**実装はこれを既定
   グループ回転。→ `flipAlternate` / `hitZoom`（2 乗で戻す）/ 複数 `slots` の巡回が既定。
 - **音程→高さ**は音MAD五線譜系（MIDI を読んで五線譜上に流す）の表現 → `pitchY`。
 - 字幕・口パク（RPPtoEXO-Lyric の「あいうえおん」口形）は余力。
+
+### パートごとの定番（講座・作者ブログの調査、2026-10-02）
+
+出典: ytpmv.info「How to Make YTPMV 6」、youcanjp84「視聴者が音を聴き取りやすくなる映像のコツ」、
+とせ「ドラム素材動かし方研究」、アェテ・パムゴン・メモタルトの note、OtomadHelper v4 docs、RPPtoEXO。
+
+| パート | 定番 | 本機能での設定 |
+|---|---|---|
+| 主旋律 | 最大サイズ・画面中央。「とにかく目立たせる」 | 中央 1 窓、`hitStyle: zoom`、`flipMode: alternate` |
+| ハモリ | 同じ素材を 3 つ並べる（中央と ±450） | 3 窓 `pick: voice` か `cycle` |
+| ベース | 画面下。横移動。オクターブは縦移動・反転で | 下に 1〜2 窓、`hitStyle: slide`、`pitchY` |
+| キック | 拡大率で激しく | `hitStyle: zoom`、強さ大 |
+| スネア | 減衰振動で「プルン」 | `hitStyle: bounce` |
+| ハイハット | 横ブラー、最初だけ光る | `hitStyle: shake` か `flash` |
+| シンバル | 最初だけ光らせて放射ブラー | `hitStyle: flash` |
+| ドラム全体 | まとめて置き、線対称・点対称に整列。1 音色 1 窓 | keymap で音色ごとに `pick: pitch`、「窓を並べる」 |
+| 和音 | 同じ素材が 3〜4 つ横並び。声部ごとに窓を分けるのは「タイミングがずれる時」 | `pick: voice`＋`flipMode: changed`＋`hitOnlyChanged` |
+| アルペジオ | 円形配置を回転させる | `generateSlots("circle")`＋`orbitDegPerBeat` |
+| 効果音 | 拡大と回転を 3 つ並べる | `hitStyle: spin` |
+| 共通 | 強弱→動きの強弱・不透明度、常に少し動かす、窓に縁取りと影 | `velocityToOpacity`、`frame` |
+
+### 参考動画の実測（2026-10-02、0.2 秒刻みのフレームで確認）
+
+- **柴又**（Dot nigou）: 全面の背景（街の実写、ループ）の上に、**中央の大きな窓**（主旋律。音符ごとに
+  左右反転し、看板の文字が鏡像になる）、**左右どちらかに現れる中くらいの窓**（別パート。音符ごとに
+  左右の位置を交互に変える＝2 窓の巡回）、**四隅の小窓**（短く出て消える＝打楽器。`show: "note"`）。
+  場面が変わると配置ごと変わる（150 秒付近は背景を差し替えて中央 1 窓だけ）。
+- **andesite.mp4**（10／2号）: 暗い模様の背景、中央に主旋律の窓（音符ごとに表情違いの絵へ切り替え）、
+  その左右に**鏡像のペア**で出る窓（和音系。鳴っている間だけ出る）、縁に写真の小窓（常駐・ループ）。
+- 窓が**四角いのはクロマキーできない実写素材だから**（所有者の指摘）。透過 PNG やグリーンバックで
+  抜ける素材なら、窓は矩形ではなく切り抜きの形で出す。→ 画像は α をそのまま描き、動画・画像の
+  `chromaKey` でコマ取り時に抜く。
+- 共通する文法: **背景 1 枚＋中央＝主役＋左右対称＝伴奏＋縁・隅＝打楽器**。左右は鏡像で揃える。
+  パートごとに窓の大きさ・位置・出し方（鳴っている間だけ／次の音まで）を変えて役割を見せる。
+- 実装への対応: 中央 1 窓＋反転＝`slots` 1 つ＋`flipMode: "alternate"`、左右交互＝`slots` 2 つ＋
+  `pick: "cycle"`、四隅の打楽器＝`slots` 4 つ＋`pick: "pitch"`＋`show: "note"`、和音の鏡像ペア＝
+  `pick: "voice"`＋対称配置（「左右対称」ボタン）＋`flipMode: "changed"`。
 
 ### 構成
 

@@ -51,6 +51,11 @@ export interface OtomadSource {
 	gainDb: number;
 	/** 映像の切り出し矩形（素材画素）[sx, sy, sw, sh]。省略＝全体。 */
 	crop?: [number, number, number, number];
+	/**
+	 * クロマキー。実写の素材は抜けないので窓が四角になるが、グリーンバック等で撮った素材はこれで抜いて
+	 * 切り抜きの形で出せる。コマ取りのときに色を透明にする（素材画素で判定）。
+	 */
+	chromaKey?: { color: string; tolerance: number };
 }
 
 export interface OtomadStage {
@@ -106,7 +111,29 @@ export interface OtomadTrackAudio {
 	velocityToGain: boolean;
 }
 
-export type OtomadSlotPick = "cycle" | "pitch" | "random" | "velocity";
+/**
+ * 窓の選び方。voice＝同時に鳴る音（和音）を低い順に声部とみなし、声部ごとに同じ窓へ固定する
+ * （コードの構成音を横・縦・正方形に並べる用。「変わった声部だけ反転」は flipMode: changed と組む）。
+ */
+export type OtomadSlotPick = "cycle" | "pitch" | "random" | "velocity" | "voice";
+/** 左右反転の方式。alternate＝奇数番目の音、changed＝その窓の音が前と変わったときに反転を切り替える、none＝しない。 */
+export type OtomadFlipMode = "alternate" | "changed" | "none";
+/** 窓の並べ方（生成用）。 */
+export type OtomadSlotLayout = "row" | "column" | "grid" | "circle";
+/**
+ * 音の頭の演出（1 拍で戻る）。講座の定番に対応: zoom＝拡大（主旋律・キック）、bounce＝下を支点に
+ * 縦に跳ねて減衰（スネアの「プルン」・立ち絵）、shake＝横に震える（ハット）、flash＝一瞬光る
+ * （ハット・シンバル）、spin＝1 回転（アルペジオ・効果音）、slide＝横から滑り込む（ベース）。
+ */
+export type OtomadHitStyle = "zoom" | "bounce" | "shake" | "flash" | "spin" | "slide";
+export const OTOMAD_HIT_STYLES: ReadonlyArray<{ value: OtomadHitStyle; label: string }> = [
+	{ value: "zoom", label: "拡大（主旋律・キック）" },
+	{ value: "bounce", label: "跳ねる（スネア・立ち絵）" },
+	{ value: "shake", label: "横に震える（ハット）" },
+	{ value: "flash", label: "一瞬光る（ハット・シンバル）" },
+	{ value: "spin", label: "1 回転（アルペジオ・効果音）" },
+	{ value: "slide", label: "横から滑り込む（ベース）" },
+];
 /** 窓への収め方。cover＝窓を埋めて端を切る（動画向け）、contain＝全体を収める（透過のドット絵向け）。 */
 export type OtomadFit = "cover" | "contain";
 export type OtomadShow = "note" | "untilNext" | "hold";
@@ -130,10 +157,22 @@ export interface OtomadTrackVisual {
 	show: OtomadShow;
 	/** 窓への収め方。既定 cover。 */
 	fit?: OtomadFit;
-	/** 偶数番目の音で左右反転（定番）。 */
+	/** 偶数番目の音で左右反転（定番）。flipMode が無い古いデータ用。 */
 	flipAlternate: boolean;
-	/** 音の頭で拡大（1.0〜1.5）。1 拍で戻す。 */
+	/** 反転の方式。省略時は flipAlternate ? "alternate" : "none"。 */
+	flipMode?: OtomadFlipMode;
+	/** 音の頭の拡大を「その窓の音が前と変わったとき」だけ掛ける（和音で変わらない声部は動かさない）。 */
+	hitOnlyChanged?: boolean;
+	/** 音の頭で拡大（1.0〜1.5）。1 拍で戻す。hitStyle が zoom 以外でも強さ（hitZoom−1）として使う。 */
 	hitZoom: number;
+	/** 音の頭の演出。既定 zoom。 */
+	hitStyle?: OtomadHitStyle;
+	/** MML の v を不透明度に反映する（弱い音は薄く）。 */
+	velocityToOpacity?: boolean;
+	/** 窓の縁取り（矩形）。実写の四角い窓に縁を付ける定番。 */
+	frame?: { color: string; width: number };
+	/** 全部の窓を重心のまわりに回す（度/拍）。円形配置のアルペジオ用。 */
+	orbitDegPerBeat?: number;
 	/** 音程で縦位置を変える（半音あたり px、0 で無効）。 */
 	pitchY: number;
 	/** 音符の長さに合わせて映像の再生速度を変える。 */
@@ -295,6 +334,51 @@ export const stripMmlTracks = (mml: string, tracks: number[]): string => {
 
 export const dbToGain = (db: number): number => 10 ** (db / 20);
 
+export const flipModeOf = (v: OtomadTrackVisual): OtomadFlipMode =>
+	v.flipMode ?? (v.flipAlternate ? "alternate" : "none");
+
+/**
+ * 窓を並べて生成する。row＝横一列、column＝縦一列、grid＝正方形に近い格子、circle＝円周。
+ * size は 1 窓の一辺（px）。center を中心に等間隔で置く。
+ */
+export const generateSlots = (
+	layout: OtomadSlotLayout,
+	count: number,
+	size: number,
+	center: { x: number; y: number } = { x: OTOMAD_W / 2, y: OTOMAD_H / 2 },
+	gap = 8,
+): OtomadSlot[] => {
+	const n = Math.max(1, Math.min(32, Math.round(count)));
+	const s = Math.max(8, Math.round(size));
+	const step = s + gap;
+	const out: OtomadSlot[] = [];
+	if (layout === "row") {
+		for (let i = 0; i < n; i++) out.push({ x: Math.round(center.x + (i - (n - 1) / 2) * step), y: Math.round(center.y), w: s, h: s });
+	} else if (layout === "column") {
+		for (let i = 0; i < n; i++) out.push({ x: Math.round(center.x), y: Math.round(center.y + (i - (n - 1) / 2) * step), w: s, h: s });
+	} else if (layout === "grid") {
+		const cols = Math.ceil(Math.sqrt(n));
+		const rows = Math.ceil(n / cols);
+		for (let i = 0; i < n; i++) {
+			const c = i % cols;
+			const r = Math.floor(i / cols);
+			out.push({
+				x: Math.round(center.x + (c - (cols - 1) / 2) * step),
+				y: Math.round(center.y + (r - (rows - 1) / 2) * step),
+				w: s,
+				h: s,
+			});
+		}
+	} else {
+		const radius = n <= 1 ? 0 : Math.max(s * 0.75, (step * n) / (2 * Math.PI));
+		for (let i = 0; i < n; i++) {
+			const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+			out.push({ x: Math.round(center.x + Math.cos(a) * radius), y: Math.round(center.y + Math.sin(a) * radius), w: s, h: s });
+		}
+	}
+	return out;
+};
+
 // ── 投稿可否 ─────────────────────────────────────────────────
 
 export interface OtomadPostability {
@@ -323,6 +407,23 @@ export const otomadPostability = (manifest: OtomadManifest): OtomadPostability =
 	if (tooLarge) reasons.push(`データが大きすぎます（${Math.round(bytes / 1024)} KB）`);
 	if (noMml) reasons.push("曲（MML）がありません");
 	return { ok: reasons.length === 0, localSources, bytes, tooLarge, noMml, reasons };
+};
+
+/** 音を出す（ミュートでなく素材を持つ）トラックの MML 番号。原曲から抜く既定。 */
+export const audibleMmlTracks = (manifest: OtomadManifest): number[] => [
+	...new Set(
+		manifest.tracks
+			.filter((t) => !t.muted && (t.audio.sourceId || (t.audio.keymap && t.audio.keymap.length > 0)))
+			.map((t) => t.track),
+	),
+];
+
+/** #rrggbb → [r,g,b]。読めなければ null。 */
+export const parseHexColor = (hex: string): [number, number, number] | null => {
+	const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+	if (!m) return null;
+	const n = Number.parseInt(m[1], 16);
+	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 };
 
 /** 投稿カードのサムネに使える URL（背景画像か最初の画像素材）。無ければ null。 */

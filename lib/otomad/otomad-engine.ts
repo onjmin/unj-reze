@@ -130,24 +130,83 @@ const drawWindow = (
 	if (sw <= 0 || sh <= 0) return;
 	const orig = media.sizeOf(ev.source.id) ?? { w: sw, h: sh };
 
-	// 音の頭で拡大して 1 拍で戻す
+	// 音の頭の演出。1 拍で戻す（hit は 1→0）
 	const beatSec = timeline.secPerStep * 48;
 	const age = Math.max(0, t - ev.startSec);
-	const hit = Math.max(0, 1 - age / beatSec);
-	const zoom = 1 + (Math.max(1, v.hitZoom) - 1) * hit * hit;
+	const hit = ev.hit ? Math.max(0, 1 - age / beatSec) : 0;
+	const strength = Math.max(0, Math.min(0.5, (v.hitZoom || 1) - 1)); // 0〜0.5
+	const style = v.hitStyle ?? "zoom";
+	let sx = 1;
+	let sy = 1;
+	let ox = 0;
+	let oy = 0;
+	let rot = 0;
+	let flash = 0;
+	switch (style) {
+		case "zoom":
+			sx = sy = 1 + strength * hit * hit;
+			break;
+		case "bounce": {
+			// 減衰振動（スネアの「プルン」）。下端を支点に縦へ伸び縮み、横は逆に動く
+			const osc = Math.sin(age * 28) * Math.exp(-age * 9) * strength * 2;
+			sy = 1 + osc;
+			sx = 1 - osc * 0.5;
+			oy = (slot.h / 2) * (1 - sy);
+			break;
+		}
+		case "shake":
+			ox = Math.sin(age * 90) * slot.w * 0.08 * hit * (strength * 2 + 0.5);
+			break;
+		case "flash":
+			flash = hit;
+			sx = sy = 1 + strength * 0.3 * hit;
+			break;
+		case "spin":
+			rot = (1 - (1 - hit) ** 3) * 360;
+			break;
+		case "slide":
+			ox = (ev.flip ? 1 : -1) * slot.w * 0.25 * hit * hit * (strength * 2 + 0.5);
+			break;
+	}
+	// 円形配置の回転（重心のまわり）
+	let cx = slot.x;
+	let cy = slot.y;
+	if (v.orbitDegPerBeat && v.slots.length > 1) {
+		const gx = v.slots.reduce((a, s) => a + s.x, 0) / v.slots.length;
+		const gy = v.slots.reduce((a, s) => a + s.y, 0) / v.slots.length;
+		const a = ((t / beatSec) * v.orbitDegPerBeat * Math.PI) / 180;
+		const dx = slot.x - gx;
+		const dyy = slot.y - gy;
+		cx = gx + dx * Math.cos(a) - dyy * Math.sin(a);
+		cy = gy + dx * Math.sin(a) + dyy * Math.cos(a);
+	}
 	const dy = v.pitchY ? -(ev.pitch - (timeline.trackCenterPitch[ev.trackIdx] ?? 60)) * v.pitchY : 0;
 
 	ctx.save();
-	ctx.globalAlpha *= Math.max(0, Math.min(1, v.opacity));
-	ctx.translate(slot.x, slot.y + dy);
+	let alpha = Math.max(0, Math.min(1, v.opacity));
+	if (v.velocityToOpacity) alpha *= Math.max(0.15, Math.min(1, ev.velocity / 100));
+	ctx.globalAlpha *= alpha;
+	ctx.translate(cx + ox, cy + dy + oy);
 	if (slot.rotate) ctx.rotate((slot.rotate * Math.PI) / 180);
-	ctx.scale(zoom * (ev.flip ? -1 : 1), zoom);
+	if (rot) ctx.rotate((rot * Math.PI) / 180);
+	ctx.scale(sx * (ev.flip ? -1 : 1), sy);
+	if (v.frame && v.frame.width > 0) {
+		ctx.strokeStyle = v.frame.color;
+		ctx.lineWidth = v.frame.width;
+		ctx.strokeRect(-slot.w / 2, -slot.h / 2, slot.w, slot.h);
+	}
 	ctx.beginPath();
 	ctx.rect(-slot.w / 2, -slot.h / 2, slot.w, slot.h);
 	ctx.clip();
 	// ドット絵のような透過画像は contain のほうが自然（cover は端が切れる）
 	ctx.imageSmoothingEnabled = !(ev.source.kind === "image" && (orig.w <= 128 || orig.h <= 128));
 	drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, v.fit ?? "cover");
+	if (flash > 0) {
+		// 描いた画素だけ明るくする（透過部分は光らない）
+		ctx.globalCompositeOperation = "lighter";
+		ctx.globalAlpha *= flash * 0.8;
+		drawCover(ctx, img, sw, sh, ev.source.crop, orig.w, orig.h, slot.w, slot.h, v.fit ?? "cover");
+	}
 	ctx.restore();
 };
 
