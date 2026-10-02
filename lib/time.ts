@@ -33,12 +33,25 @@ export interface ThreadActivityTime {
 export function getThreadDisplayTime(post: {
 	createdAt: string;
 	time: string;
+	latestResAt?: string;
 	replies?: { createdAt: string; time: string }[];
 }): ThreadActivityTime {
 	let latestMs = post.createdAt ? new Date(post.createdAt).getTime() : 0;
 	let latestIso = post.createdAt;
 	let latestTime = post.time;
 	let isReplyUpdate = false;
+
+	// サーバーの最終レス日時を優先する。手元の replies は新しい側の窓だけなので、
+	// 返信なしで取得したスレでもこれで正しく出る。
+	if (post.latestResAt) {
+		const ms = new Date(post.latestResAt).getTime();
+		if (!isNaN(ms) && ms > latestMs) {
+			latestMs = ms;
+			latestIso = post.latestResAt;
+			latestTime = formatRelativeTime(post.latestResAt);
+			isReplyUpdate = true;
+		}
+	}
 
 	if (post.replies && post.replies.length > 0) {
 		for (const r of post.replies) {

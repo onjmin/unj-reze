@@ -1641,12 +1641,12 @@ export default function DotDrawingEditor({
 		const upperCanvas = oekaki.upperLayer.value?.canvas;
 		if (!upperCanvas) return;
 		const onPointerMove = (e: PointerEvent) => {
-			if (
-				toolRef.current !== "select" ||
-				selectDragModeRef.current !== null ||
-				e.buttons !== 0
-			)
+			// 範囲選択で付けた move / nwse-resize を、他の道具へ持ち越さない
+			if (toolRef.current !== "select") {
+				if (upperCanvas.style.cursor) upperCanvas.style.cursor = "";
 				return;
+			}
+			if (selectDragModeRef.current !== null || e.buttons !== 0) return;
 			const active =
 				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 			const sel = active?.selection;

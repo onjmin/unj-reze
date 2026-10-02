@@ -511,11 +511,11 @@ export default function PostContainer({
 								className="text-gray-500 text-xs font-medium"
 								title={
 									threadTime.isReplyUpdate
-										? `投稿日時: ${post.time} (最新返信: ${threadTime.time})`
+										? `最新返信: ${threadTime.time} (投稿日時: ${post.time})`
 										: undefined
 								}
 							>
-								{post.time}
+								{threadTime.time}
 								{post.isEdited && (
 									<span className="ml-1 text-[9px] text-gray-500/70">
 										(編集済み)

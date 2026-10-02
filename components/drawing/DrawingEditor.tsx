@@ -1004,13 +1004,18 @@ export default function DrawingEditor({
 						.getContext("2d", { willReadFrequently: true });
 					if (merged) reference = merged.getImageData(0, 0, w, h).data;
 				}
-				const mask = oekaki.floodFillMask(reference, w, h, x, y, {
+				// 膨らませる前の範囲も取っておく。塗りを広げて見せる波はこの中だけを伝わらせる
+				// （膨らませた縁は細い線の中でつながるので、そこを通すと波が線をすり抜けて見える）
+				const core = oekaki.floodFillMask(reference, w, h, x, y, {
 					tolerance: fillToleranceRef.current,
-					grow: fillGrowRef.current,
 				});
+				const mask = core
+					? oekaki.growMask(core.slice(), w, h, fillGrowRef.current)
+					: null;
+				const before = active.data;
 				if (mask) {
 					active.data = oekaki.paintMask(
-						active.data,
+						before.slice(),
 						mask,
 						[rgb[0], rgb[1], rgb[2], 255],
 						Math.min(100, Math.max(0, oekaki.opacity.value)) / 100,
@@ -1018,6 +1023,9 @@ export default function DrawingEditor({
 					);
 				}
 				active.trace();
+				// 履歴には塗り終えた絵を1回だけ残し、見た目だけ塗った点から広げる。
+				// 線の隙間から漏れた時に、どこから漏れたかが目で追える
+				if (mask && core) active.revealFill(before, mask, x, y, { core });
 			}
 			updateOnionSkin();
 			forceRender((n) => n + 1);
@@ -1077,6 +1085,10 @@ export default function DrawingEditor({
 			for (const ce of e.getCoalescedEvents()) correctCoords(ce);
 		};
 		const onPointer = (e: PointerEvent) => {
+			// バケツの塗りを広げて見せている途中なら、次の操作の前に塗り終えた見た目にする
+			if (e.type === "pointerdown") {
+				for (const entry of layerEntriesRef.current) entry.instance.finishReveal();
+			}
 			correctCoords(e);
 			patchCoalesced(e);
 		};
@@ -1124,12 +1136,12 @@ export default function DrawingEditor({
 		const upperCanvas = oekaki.upperLayer.value?.canvas;
 		if (!upperCanvas) return;
 		const onPointerMove = (e: PointerEvent) => {
-			if (
-				toolRef.current !== "select" ||
-				selectDragModeRef.current !== null ||
-				e.buttons !== 0
-			)
+			// 範囲選択で付けた move / nwse-resize を、他の道具へ持ち越さない
+			if (toolRef.current !== "select") {
+				if (upperCanvas.style.cursor) upperCanvas.style.cursor = "";
 				return;
+			}
+			if (selectDragModeRef.current !== null || e.buttons !== 0) return;
 			const active =
 				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 			const sel = active?.selection;

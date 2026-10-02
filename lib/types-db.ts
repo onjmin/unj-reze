@@ -56,6 +56,8 @@ export interface DbPost {
 	title?: string;
 	createdAt: string;
 	time: string;
+	/** スレの最終レス日時(threads.latest_res_at)。スレのみ。タイムラインの日時表示に使う */
+	latestResAt?: string;
 	content: string;
 	likes: number;
 	dislikes: number;

@@ -517,6 +517,8 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		title: row.title || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
+		latestResAt:
+			row.latest_res_at != null ? toIso(row.latest_res_at) : undefined,
 		content: disp.content,
 		likes: row.good_count ?? 0,
 		dislikes: row.bad_count ?? 0,
