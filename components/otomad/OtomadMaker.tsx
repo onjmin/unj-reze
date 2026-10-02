@@ -73,6 +73,7 @@ import {
 } from "@/lib/otomad/otomad-media";
 import { buildOtomadMidi, downloadBlob } from "@/lib/otomad/otomad-midi";
 import { MV_STEPS_PER_BAR } from "@/lib/mv/mv-config";
+import { applyOtomadStyle, guessRole, OTOMAD_ROLES, OTOMAD_STYLES, type OtomadRole, otomadStyleById } from "@/lib/otomad/otomad-styles";
 import { sceneIndexAtSec } from "@/lib/otomad/otomad-timeline";
 import { audioBufferToWav, renderSynthBacking } from "@/lib/otomad/otomad-synth";
 import { BUILTIN_SOURCES, createDefaultOtomadManifest, OTOMAD_PRESETS } from "@/lib/otomad/otomad-presets";
@@ -127,6 +128,8 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 	const [exoBacking, setExoBacking] = useState(true);
 	/** 場面タブで開いている場面の id。 */
 	const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+	/** 「型を当てる」で選んでいる型。 */
+	const [styleId, setStyleId] = useState<string>(OTOMAD_STYLES[0].id);
 	const [sceneBgPicker, setSceneBgPicker] = useState<string | null>(null);
 	const [urlDraft, setUrlDraft] = useState("");
 	/** 原曲を MML から録音するときに抜くトラック（@n）。null＝割り当て済みのトラック。 */
@@ -1025,6 +1028,60 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 
 				{tab === "tracks" && (
 					<div className="space-y-2">
+						<div className={SECTION}>
+							<p className={HEADING}>型を当てる（画面構成のテンプレート）</p>
+							<p className="text-[11px] text-gray-400 leading-relaxed">
+								各トラックの「役割」を見て、窓の配置と演出をまとめて差し替えます（素材の割り当てと場面は残ります）。
+								型はカタログ（docs/otomad-visual-catalog.md）から組めるものを入れてあり、当てたあとは自由に直せます。
+							</p>
+							<div className="flex flex-wrap items-end gap-2">
+								<label className="flex flex-col gap-0.5">
+									<span className={LABEL}>型</span>
+									<select value={styleId} onChange={(e) => setStyleId(e.target.value)} className={INPUT_SM}>
+										{OTOMAD_STYLES.map((st) => (
+											<option key={st.id} value={st.id}>
+												{st.name}
+											</option>
+										))}
+									</select>
+								</label>
+								<button
+									type="button"
+									onClick={() => {
+										const used = new Set<OtomadRole>();
+										setManifest((m) => ({
+											...m,
+											tracks: m.tracks.map((t) => {
+												let role = guessRole(t, song, m);
+												if (role === "lead" && used.has("lead")) role = "harmony";
+												used.add(role);
+												return { ...t, role };
+											}),
+										}));
+									}}
+									className={BTN_REF}
+									disabled={song.totalSteps <= 0}
+									title="音域・同時発音数・音符の長さから役割の初期値を入れる"
+								>
+									役割を推定
+								</button>
+								<button
+									type="button"
+									onClick={() => {
+										const st = otomadStyleById(styleId);
+										if (!st) return;
+										if (!window.confirm(`「${st.name}」を当てます。各トラックの窓の設定は置き換わります（素材・場面はそのまま）。`)) return;
+										setManifest((m) => applyOtomadStyle(m, st, song));
+										setSelected(null);
+									}}
+									className={BTN_REF}
+									disabled={song.totalSteps <= 0 || manifest.tracks.every((t) => !t.role)}
+								>
+									この型を当てる
+								</button>
+							</div>
+							<p className="text-[10px] text-gray-500">{otomadStyleById(styleId)?.description}</p>
+						</div>
 						{manifest.tracks.map((t, ti) => {
 							const warn = pitchWarningFor(t);
 							const isSel = selected?.trackIdx === ti;
@@ -1040,6 +1097,14 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 											))}
 										</select>
 										<input value={t.label ?? ""} onChange={(e) => updateTrack(ti, (x) => ({ ...x, label: e.target.value }))} placeholder="名前（任意）" className={`${INPUT} flex-1`} />
+										<select value={t.role ?? ""} onChange={(e) => updateTrack(ti, (x) => ({ ...x, role: (e.target.value || undefined) as OtomadRole | undefined }))} className={INPUT_SM} title="役割（型を当てるときに見る）">
+											<option value="">役割なし</option>
+											{OTOMAD_ROLES.map((r) => (
+												<option key={r.value} value={r.value}>
+													{r.label}
+												</option>
+											))}
+										</select>
 										<Toggle label="ミュート" value={!!t.muted} onChange={(v) => updateTrack(ti, (x) => ({ ...x, muted: v }))} />
 										<button type="button" onClick={() => removeTrack(ti)} className={BTN_DEL} title="削除">
 											<Trash2 size={14} />

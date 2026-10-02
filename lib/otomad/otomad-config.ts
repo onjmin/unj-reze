@@ -211,6 +211,8 @@ export interface OtomadTrack {
 	track: number;
 	label?: string;
 	muted?: boolean;
+	/** 役割（主旋律・低音・和音…）。型（lib/otomad/otomad-styles.ts）が窓を割り当てるときに見る。 */
+	role?: "lead" | "harmony" | "bass" | "chord" | "arpeggio" | "kick" | "snare" | "hat" | "sfx" | "other";
 	audio: OtomadTrackAudio;
 	visual: OtomadTrackVisual;
 }

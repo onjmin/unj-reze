@@ -194,5 +194,6 @@ then run `pnpm typecheck` and `pnpm lint`.
 - [docs/mmo3d-feature-design.md](docs/mmo3d-feature-design.md) — 3D MMO preset (`mmo3d`): why it's separate from `yume25d`, realtime hub extension plan, phased rollout.
 - [docs/talk-video-feature-design.md](docs/talk-video-feature-design.md) — かけあい動画（`talk`）: 台本ベース時間軸の YMM 風解説動画、MV とは別種別、koe UtauTTS で読み上げ。
 - [docs/otomad-feature-design.md](docs/otomad-feature-design.md) — 音MAD（`otomad`）: MML 時間軸で素材の声を音程合わせし映像の窓を切り替える。素材はローカル限定・投稿は URL 素材のみ、WebCodecs 書き出し、MIDI/exo で AviUtl へ。
+- [docs/otomad-visual-catalog.md](docs/otomad-visual-catalog.md) — 音MAD の画面構成の型 27 種の棚卸し（RED ZONE・柴又・BoxVisual・六角形クラスタ…）。`lib/otomad/otomad-styles.ts` の型はここから組めるものを実装。
 - [README.md](README.md) — deploy and local-setup instructions.
 - `.agents/skills/rpgen-search.md` — rpgen-search API and auth (local-only, gitignored).
