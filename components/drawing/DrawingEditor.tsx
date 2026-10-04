@@ -30,6 +30,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import HistoryModal from "@/components/ui/HistoryModal";
 import { api } from "@/lib/api";
+import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import {
 	exportFramesZip,
 	exportGif,
@@ -38,7 +39,6 @@ import {
 	generateSpriteSheetCanvas,
 } from "@/lib/drawing/export-drawing";
 import { copyToClipboard, readPasteImage } from "@/lib/drawing/oekaki-clipboard";
-import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 import {
 	clearAutosave,
@@ -52,10 +52,10 @@ import {
 	serializeFrames,
 	serializeLayers,
 } from "@/lib/ui/history";
-import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
+import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
 import LayerPanel from "./LayerPanel";

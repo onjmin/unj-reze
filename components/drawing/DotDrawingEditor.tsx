@@ -36,6 +36,7 @@ import {
 	toI as walkToI,
 	toXY as walkToXY,
 } from "@/lib/assets/walk-cycle";
+import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import {
 	exportFramesZip,
 	exportGif,
@@ -55,7 +56,6 @@ import {
 	copyToClipboard,
 	readPasteImage,
 } from "@/lib/drawing/oekaki-clipboard";
-import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import {
 	flushSelectionSync,
 	hasPendingSelectionMove,
@@ -83,10 +83,10 @@ import {
 	serializeLayers,
 	serializeWalkLayers,
 } from "@/lib/ui/history";
-import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import type { AnimationBarFrame, FrameData } from "./AnimationBar";
 import AnimationBar, { computeFrameColor } from "./AnimationBar";
 import DrawingExportDialog from "./DrawingExportDialog";
+import DrawingMacroBar, { type MacroScope } from "./DrawingMacroBar";
 import ImportDialog from "./ImportDialog";
 import type { LayerEntry } from "./LayerPanel";
 import LayerPanel from "./LayerPanel";
