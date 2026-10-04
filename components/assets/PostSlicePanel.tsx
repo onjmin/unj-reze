@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseWalkRef } from "@/lib/assets/asset-ref";
 import { tryCapturePointer } from "@/lib/ui/pointer-capture";
-import type { Post } from "@/lib/types";
+import type { MediaSearchPost } from "@/lib/types";
 import { walkPresetToStdId } from "@/lib/assets/walk-cycle";
 import {
 	animatedCellInRect,
@@ -61,7 +61,7 @@ export default function PostSlicePanel({
 	confirmLabel,
 	hint,
 }: PostSlicePanelProps) {
-	const [posts, setPosts] = useState<Post[]>([]);
+	const [posts, setPosts] = useState<MediaSearchPost[]>([]);
 	const [failedPostIds, setFailedPostIds] = useState<Set<string>>(new Set());
 	const [loading, setLoading] = useState(true);
 	const [query, setQuery] = useState("");
@@ -81,13 +81,12 @@ export default function PostSlicePanel({
 		Promise.resolve().then(() => {
 			if (alive) setLoading(true);
 		});
-		const trimmedQ = query.trim();
-		const req = trimmedQ
-			? api.search.posts(trimmedQ, userId)
-			: api.posts.list(userId, { hasImage: true, limit: 50 });
-		req
+		// スレ一覧（hasImage）はスレ立ての画像しか見ず、画像の無いスレへの返信が漏れる。
+		// 素材ピッカーと同じ media-search はスレ立てと返信を両方引く。
+		api.search
+			.media("image", query, userId, 50, 0)
 			.then((data) => {
-				if (alive) setPosts(Array.isArray(data) ? data : []);
+				if (alive) setPosts(data.posts);
 			})
 			.catch(() => {
 				if (alive) setPosts([]);
@@ -129,35 +128,7 @@ export default function PostSlicePanel({
 		reader.readAsDataURL(file);
 	};
 
-	const q = query.trim().toLowerCase();
-	const allPostsAndReplies = useMemo(() => {
-		const list: Post[] = [];
-		const seen = new Set<string>();
-		for (const p of posts) {
-			if (!seen.has(p.id)) {
-				seen.add(p.id);
-				list.push(p);
-			}
-			if (p.replies) {
-				for (const r of p.replies) {
-					if (!seen.has(r.id)) {
-						seen.add(r.id);
-						list.push(r);
-					}
-				}
-			}
-		}
-		return list;
-	}, [posts]);
-
-	const imagePosts = allPostsAndReplies.filter(
-		(p) =>
-			p.hasImage &&
-			p.imageSrc &&
-			(!q ||
-				p.content.toLowerCase().includes(q) ||
-				p.displayName.toLowerCase().includes(q)),
-	);
+	const imagePosts = posts.filter((p) => p.imageSrc);
 
 	if (selected) {
 		return (

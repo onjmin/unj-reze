@@ -32,6 +32,7 @@ import {
 	ORIGIN_TYPE_OPTIONS,
 } from "@/lib/types";
 import { fetchSize, fetchText } from "@/lib/uploader";
+import { walkRefForPost } from "@/lib/assets/walk-cycle";
 import { loadImage } from "@/lib/assets/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import EngineSfxPanel from "./EngineSfxPanel";
@@ -513,6 +514,34 @@ export default function ContentPicker({
 			alive = false;
 		};
 	}, [mode, bgmTab, imageTab, userId, query]);
+
+	// 歩行グラ投稿は walk: 参照で渡す（素のURLだとシート全体が1枚絵になり、MV/ゲームで歩かない）。
+	// 規格外の歩行グラはセルの大きさを実寸から割り出すので、先に画像を読む。
+	const pickImagePost = async (p: MediaSearchPost) => {
+		const url = p.imageSrc!;
+		if (p.walkPreset) {
+			try {
+				const img = await loadImage(url);
+				const ref = walkRefForPost(url, p.walkPreset, {
+					frames: p.animFrames,
+					fps: p.animFps,
+					imgW: img.naturalWidth,
+					imgH: img.naturalHeight,
+				});
+				if (ref) {
+					onPick({ ref, url, label: `歩行グラ #${p.id}` });
+					return;
+				}
+			} catch {
+				// 読めなければ1枚絵として渡す
+			}
+		}
+		onPick({
+			ref: url,
+			url,
+			label: `投稿 #${p.id} (${p.displayName || "名無し"})`,
+		});
+	};
 
 	const loadMorePosts = () => {
 		const isMmlPost = mode === "bgm" && bgmTab === "mmlPost";
@@ -1067,13 +1096,7 @@ export default function ContentPicker({
 										.map((p) => (
 											<button
 												key={p.id}
-												onClick={() =>
-													onPick({
-														ref: p.imageSrc!,
-														url: p.imageSrc!,
-														label: `投稿 #${p.id} (${p.displayName || "名無し"})`,
-													})
-												}
+												onClick={() => void pickImagePost(p)}
 												className="group relative aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 gimp-checkered-background-white text-left transition"
 											>
 												<SpriteImage

@@ -152,3 +152,30 @@ export function detectPreset(imgW: number, imgH: number): WalkPreset | null {
 	}
 	return null;
 }
+
+/**
+ * 歩行グラ投稿（walk_preset 付き）から、素材ピッカーが返す `walk:` 参照を作る。
+ * 既知の規格はその規格のまま（ゲームでは向きも変わる）。規格外（"custom:…"）は規格の型に
+ * 当てはまらないので、正面の行だけを横並びアニメ（row_anim）として切り出す（正面が無ければ1行目）。
+ * セルの大きさはシートの画素数から割り出すので、画像の実寸（imgW/imgH）が要る。
+ * 歩行グラでなければ null。
+ */
+export function walkRefForPost(
+	url: string,
+	walkPreset: string | undefined,
+	opts: { frames?: number; fps?: number; imgW: number; imgH: number },
+): string | null {
+	const ways = walkPresetWays(walkPreset);
+	if (!ways) return null;
+	const stdId = walkPresetToStdId(walkPreset);
+	if (stdId) return `walk:${stdId}:u:${url}`;
+	const frames = Math.max(1, Math.round(opts.frames ?? 1));
+	const cellH = Math.floor(opts.imgH / ways.length);
+	if (cellH <= 0 || opts.imgW <= 0) return null;
+	const row = Math.max(
+		0,
+		ways.findIndex((w) => w.key === "s"),
+	);
+	const fps = opts.fps && opts.fps > 0 ? opts.fps : 6;
+	return `walk:row_anim:u:${url}#0,0,${opts.imgW},${cellH},${frames},0,0,${row},loop,${fps}`;
+}

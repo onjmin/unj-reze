@@ -15,14 +15,13 @@ import {
 } from "lucide-react";
 import {
 	useEffect,
-	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
 } from "react";
 import { api } from "@/lib/api";
 import { buildWalkRef } from "@/lib/assets/asset-ref";
-import type { Post } from "@/lib/types";
+import type { MediaSearchPost } from "@/lib/types";
 import {
 	addUserSheet,
 	exportUserSheet,
@@ -36,6 +35,7 @@ import {
 	userSheetsServerSnapshot,
 	userSheetsSnapshot,
 } from "@/lib/assets/user-sheets";
+import { walkPresetWays, walkRefForPost } from "@/lib/assets/walk-cycle";
 import { loadImage, WALK_STANDARDS } from "@/lib/assets/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import type { PickResult } from "./ContentPicker";
@@ -390,6 +390,14 @@ function AddSheetForm({
 	const [error, setError] = useState<string | null>(null);
 	/** 画像の取り込み元。'upload'=ファイル選択 / 'post'=SNS投稿画像 / 'url'=直リンクURL。 */
 	const [source, setSource] = useState<"upload" | "post" | "url">("upload");
+	/** 「投稿から選ぶ」で歩行グラ投稿を選んだときの規格とコマ数。URLを書き換えたら効かなくなる。 */
+	const [walkPost, setWalkPost] = useState<{
+		url: string;
+		walkPreset: string;
+		frames?: number;
+		fps?: number;
+	} | null>(null);
+	const walkSel = walkPost && walkPost.url === url.trim() ? walkPost : null;
 	const fileRef = useRef<HTMLInputElement>(null);
 
 	const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -429,7 +437,19 @@ function AddSheetForm({
 		if (!onPick) return;
 		setBusy(true);
 		try {
-			await loadImage(url.trim()); // 読めない画像はここで弾く
+			const img = await loadImage(url.trim()); // 読めない画像はここで弾く
+			const walkRef = walkSel
+				? walkRefForPost(walkSel.url, walkSel.walkPreset, {
+						frames: walkSel.frames,
+						fps: walkSel.fps,
+						imgW: img.naturalWidth,
+						imgH: img.naturalHeight,
+					})
+				: null;
+			if (walkRef) {
+				onPick({ ref: walkRef, url: url.trim(), label: name.trim() || "歩行グラ" });
+				return;
+			}
 			onPick({
 				ref: `url:${url.trim()}`,
 				url: url.trim(),
@@ -547,9 +567,30 @@ function AddSheetForm({
 					<PostImageGrid
 						userId={userId}
 						selectedUrl={url.trim()}
-						onSelect={(u, id) => {
+						onSelect={(p) => {
+							const u = p.imageSrc!;
 							setUrl(u);
-							if (!name.trim()) setName(`投稿#${id}`);
+							if (!name.trim()) setName(`投稿#${p.id}`);
+							setWalkPost(
+								p.walkPreset
+									? {
+											url: u,
+											walkPreset: p.walkPreset,
+											frames: p.animFrames,
+											fps: p.animFps,
+										}
+									: null,
+							);
+							// 歩行グラならシート登録のマス目も1コマの大きさに合わせる
+							const ways = walkPresetWays(p.walkPreset);
+							const frames = p.animFrames;
+							if (ways && frames)
+								loadImage(u)
+									.then((img) => {
+										setCellW(Math.floor(img.naturalWidth / frames));
+										setCellH(Math.floor(img.naturalHeight / ways.length));
+									})
+									.catch(() => {});
 						}}
 					/>
 				) : (
@@ -574,7 +615,7 @@ function AddSheetForm({
 					className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-[11px] text-white font-bold transition"
 				>
 					{busy ? <Loader2 size={13} className="animate-spin" /> : null}
-					この画像を1枚絵として使う
+					{walkSel ? "歩行グラとして使う" : "この画像を1枚絵として使う"}
 				</button>
 			)}
 
@@ -650,9 +691,9 @@ function PostImageGrid({
 }: {
 	userId: string;
 	selectedUrl: string;
-	onSelect: (url: string, id: string) => void;
+	onSelect: (post: MediaSearchPost) => void;
 }) {
-	const [posts, setPosts] = useState<Post[]>([]);
+	const [posts, setPosts] = useState<MediaSearchPost[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [query, setQuery] = useState("");
 
@@ -661,13 +702,12 @@ function PostImageGrid({
 		Promise.resolve().then(() => {
 			if (alive) setLoading(true);
 		});
-		const trimmedQ = query.trim();
-		const req = trimmedQ
-			? api.search.posts(trimmedQ, userId)
-			: api.posts.list(userId, { hasImage: true, limit: 50 });
-		req
+		// スレ一覧（hasImage）はスレ立ての画像しか見ず、画像の無いスレへの返信（歩行グラ等）が漏れる。
+		// 素材ピッカーと同じ media-search はスレ立てと返信を両方引く。
+		api.search
+			.media("image", query, userId, 50, 0)
 			.then((data) => {
-				if (alive) setPosts(Array.isArray(data) ? data : []);
+				if (alive) setPosts(data.posts);
 			})
 			.catch(() => {
 				if (alive) setPosts([]);
@@ -680,35 +720,7 @@ function PostImageGrid({
 		};
 	}, [userId, query]);
 
-	const q = query.trim().toLowerCase();
-	const allPostsAndReplies = useMemo(() => {
-		const list: Post[] = [];
-		const seen = new Set<string>();
-		for (const p of posts) {
-			if (!seen.has(p.id)) {
-				seen.add(p.id);
-				list.push(p);
-			}
-			if (p.replies) {
-				for (const r of p.replies) {
-					if (!seen.has(r.id)) {
-						seen.add(r.id);
-						list.push(r);
-					}
-				}
-			}
-		}
-		return list;
-	}, [posts]);
-
-	const imagePosts = allPostsAndReplies.filter(
-		(p) =>
-			p.hasImage &&
-			p.imageSrc &&
-			(!q ||
-				p.content.toLowerCase().includes(q) ||
-				p.displayName.toLowerCase().includes(q)),
-	);
+	const imagePosts = posts.filter((p) => p.imageSrc);
 
 	return (
 		<div className="space-y-1.5">
@@ -736,7 +748,7 @@ function PostImageGrid({
 							<button
 								key={p.id}
 								type="button"
-								onClick={() => onSelect(p.imageSrc!, p.id)}
+								onClick={() => onSelect(p)}
 								title={`#${p.id}`}
 								className={`aspect-square rounded-lg overflow-hidden border bg-gray-900 relative gimp-checkered-background ${active ? "border-blue-500 ring-1 ring-blue-500" : "border-gray-700 hover:border-blue-500"}`}
 							>
@@ -1166,7 +1178,7 @@ function SheetGrid({
 							<PostImageGrid
 								userId={userId}
 								selectedUrl={editUrl.trim()}
-								onSelect={(u) => setEditUrl(u)}
+								onSelect={(p) => setEditUrl(p.imageSrc!)}
 							/>
 						) : (
 							<p className="text-[10px] text-gray-500 px-0.5">
