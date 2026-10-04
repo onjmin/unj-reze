@@ -47,6 +47,7 @@ import {
 } from "@/lib/assets/asset-ref";
 import {
 	emptySheetRows,
+	loadImage,
 	peekImage,
 	standardById,
 	WAY,
@@ -1167,46 +1168,101 @@ function walkSettingFromRef(ref: string): MvWalkSetting | undefined {
 }
 
 /**
- * 歩行グラのレイヤーで選べる向き。規格どおりのシートは規格の向き（`dir`）、規格外の歩行グラ投稿から
- * 起こした row_anim は行の並び（`ways`）から選ぶ。向きの無い MV 素材（row_anim で ways 無し）は null。
+ * 歩行グラのレイヤーで選べる向き（値は row_anim なら行番号、それ以外は WayKey）。
+ * - 規格どおりのシート: 規格の向き（`dir`）。auto は規格が実寸次第なので前左右後の4つ。
+ * - row_anim で行の並び（`ways`）が分かる: その並びの向き（何方向でも。ドット絵エディタの custom は8まで）。
+ * - row_anim で並びが分からない（`ways` を持つ前に取り込んだレイヤー・内蔵素材など）: 画像の行数ぶん「n行目」。
+ * 1行しか無ければ null（選ぶものが無い）。画像が未読込なら行数が分からないので null。
  */
 function walkDirOptions(
 	walk: MvWalkSetting,
-	url: string | undefined,
-): { value: WayKey; label: string }[] | null {
+	img: HTMLImageElement | undefined,
+): { value: string; label: string }[] | null {
+	if (walk.stdId === "row_anim") {
+		const csy = walk.crop?.[1] ?? 0;
+		const csh = walk.crop?.[3] ?? 0;
+		const rows = walk.ways
+			? walk.ways.length
+			: img && csh > 0
+				? Math.floor((img.naturalHeight - csy) / csh)
+				: 0;
+		if (rows <= 1) return null;
+		// 描きかけのシートは空の行がある。選んでも透明で何も出ないので、そうと分かるようにする
+		const empty =
+			img && csy === 0 && csh > 0 && img.naturalHeight >= rows * csh
+				? emptySheetRows(img, Math.floor(img.naturalHeight / csh))
+				: new Set<number>();
+		return Array.from({ length: rows }, (_, i) => {
+			const k = walk.ways?.[i] as WayKey | undefined;
+			const name = k ? WAY[k].label : `${i + 1}行目`;
+			return {
+				value: String(i),
+				label: empty.has(i) ? `${name}（絵なし）` : name,
+			};
+		});
+	}
 	const keys =
-		walk.stdId === "row_anim"
-			? walk.ways
-			: walk.stdId === "auto"
-				? "sadw"
-				: standardById(walk.stdId)
-						.ways.map((w) => w.key)
-						.join("");
-	if (!keys) return null;
-	// 描きかけのシートは空の行がある。選んでも透明で何も出ないので、そうと分かるようにする
-	// （画像の行の並び＝keys の並びが分かる row_anim と規格指定のときだけ。auto は規格が実寸次第）。
-	const img = url && walk.stdId !== "auto" ? peekImage(url) : undefined;
-	const empty = img ? emptySheetRows(img, keys.length) : new Set<number>();
+		walk.stdId === "auto"
+			? "sadw"
+			: standardById(walk.stdId)
+					.ways.map((w) => w.key)
+					.join("");
+	const empty =
+		img && walk.stdId !== "auto"
+			? emptySheetRows(img, keys.length)
+			: new Set<number>();
 	return (keys.split("") as WayKey[]).map((k, i) => ({
 		value: k,
 		label: empty.has(i) ? `${WAY[k].label}（絵なし）` : WAY[k].label,
 	}));
 }
 
-/** いま選ばれている向き。row_anim は行番号から引き戻す。 */
-function walkDirValue(walk: MvWalkSetting): WayKey {
-	if (walk.stdId === "row_anim")
-		return (walk.ways?.[walk.row ?? 0] as WayKey | undefined) ?? "s";
-	return walk.dir ?? "s";
+/** 歩行グラの向き（行）を選ぶ欄。行数と空の行を知るために画像を自分で読む。 */
+function WalkDirField({
+	walk,
+	url,
+	onChange,
+}: {
+	walk: MvWalkSetting;
+	url: string | undefined;
+	onChange: (walk: MvWalkSetting) => void;
+}) {
+	const [loaded, setLoaded] = useState<HTMLImageElement | undefined>();
+	useEffect(() => {
+		if (!url || peekImage(url)) return;
+		let alive = true;
+		loadImage(url)
+			.then((img) => {
+				if (alive) setLoaded(img);
+			})
+			.catch(() => {});
+		return () => {
+			alive = false;
+		};
+	}, [url]);
+	const img = url ? (peekImage(url) ?? loaded) : undefined;
+	const options = walkDirOptions(walk, img);
+	if (!options) return null;
+	const rowAnim = walk.stdId === "row_anim";
+	return (
+		<SelectField
+			label="向き"
+			value={rowAnim ? String(walk.row ?? 0) : (walk.dir ?? "s")}
+			options={options}
+			onChange={(v) =>
+				onChange(
+					rowAnim ? { ...walk, row: Number(v) } : { ...walk, dir: v as WayKey },
+				)
+			}
+		/>
+	);
 }
 
-/** 向きを書き換えた walk 設定。row_anim は行を、規格どおりのシートは dir を変える。 */
-function withWalkDir(walk: MvWalkSetting, dir: WayKey): MvWalkSetting {
-	if (walk.stdId === "row_anim") {
-		const row = walk.ways?.indexOf(dir) ?? -1;
-		return row >= 0 ? { ...walk, row } : walk;
-	}
-	return { ...walk, dir };
+/** 画像レイヤーの表示URL。walk: 参照で url を持たない内蔵素材などは参照から引く。 */
+function imageLayerUrl(layer: MvImageLayer): string | undefined {
+	if (layer.url) return layer.url;
+	const wr = parseWalkRef(layer.ref);
+	return wr?.source.kind === "url" ? wr.source.url : undefined;
 }
 
 /**
@@ -4044,34 +4100,22 @@ export default function MvMaker({
 							}
 						/>
 					)}
-					{layer.walk &&
-						(() => {
-							const dirOptions = walkDirOptions(
-								layer.walk,
-								layer.url,
-							);
-							if (!dirOptions) return null;
-							return (
-								<SelectField
-									label="向き"
-									value={walkDirValue(layer.walk)}
-									options={dirOptions}
-									onChange={(dir) =>
-										updateLayer(
-											layer.id,
-											(l) =>
-												({
-													...l,
-													walk:
-														l.kind === "image" && l.walk
-															? withWalkDir(l.walk, dir)
-															: undefined,
-												}) as MvLayer,
-										)
-									}
-								/>
-							);
-						})()}
+					{layer.walk && (
+						<WalkDirField
+							walk={layer.walk}
+							url={imageLayerUrl(layer)}
+							onChange={(walk) =>
+								updateLayer(
+									layer.id,
+									(l) =>
+										({
+											...l,
+											walk: l.kind === "image" && l.walk ? walk : undefined,
+										}) as MvLayer,
+								)
+							}
+						/>
+					)}
 					<CheckField
 						label="同じ画像を並べる"
 						checked={!!layer.repeat}
