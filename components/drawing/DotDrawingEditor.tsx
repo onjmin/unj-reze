@@ -35,6 +35,7 @@ import {
 	presets as walkPresets,
 	toI as walkToI,
 	toXY as walkToXY,
+	walkPresetName,
 } from "@/lib/assets/walk-cycle";
 import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
 import {
@@ -487,7 +488,7 @@ export default function DotDrawingEditor({
 				cellHeight: walkPreset.h,
 				frames: cells,
 			},
-			`walk_${walkPreset.label}_${walkPreset.w * walkPreset.frames}x${walkPreset.h * walkPreset.ways.length}.png`,
+			`walk_${walkPresetName(walkPreset.label)}_${walkPreset.w * walkPreset.frames}x${walkPreset.h * walkPreset.ways.length}.png`,
 		);
 	};
 
@@ -522,7 +523,7 @@ export default function DotDrawingEditor({
 			fps: fpsRef.current,
 			transparent,
 			backgroundColor,
-			fileName: `walk_${walkPreset.label}.gif`,
+			fileName: `walk_${walkPresetName(walkPreset.label)}.gif`,
 		});
 	};
 
@@ -545,7 +546,7 @@ export default function DotDrawingEditor({
 			frames,
 			width: walkPreset.w,
 			height: walkPreset.h,
-			fileName: `walk_${walkPreset.label}_frames.zip`,
+			fileName: `walk_${walkPresetName(walkPreset.label)}_frames.zip`,
 		});
 	};
 
@@ -557,7 +558,7 @@ export default function DotDrawingEditor({
 			height: walkPreset.h,
 			fps: fpsRef.current,
 			getFrameCanvas: (y, x) => getWalkCellCanvas(y, x),
-			fileName: `walk_${walkPreset.label}_cursors.zip`,
+			fileName: `walk_${walkPresetName(walkPreset.label)}_cursors.zip`,
 		});
 	};
 

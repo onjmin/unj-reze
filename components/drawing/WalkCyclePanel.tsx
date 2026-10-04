@@ -12,7 +12,13 @@ import {
 	Rows3,
 } from "lucide-react";
 import { useState } from "react";
-import { presets, toXY, type WalkPreset, way } from "@/lib/assets/walk-cycle";
+import {
+	presets,
+	toXY,
+	type WalkPreset,
+	walkPresetName,
+	way,
+} from "@/lib/assets/walk-cycle";
 
 interface WalkCyclePanelProps {
 	preset: WalkPreset;
@@ -120,7 +126,7 @@ export default function WalkCyclePanel({
 					))}
 					{/* プロジェクトファイルから開いた、規格に無い大きさ・コマ数 */}
 					{!presets.some((p) => p.label === preset.label) && (
-						<option value={preset.label}>{preset.label}</option>
+						<option value={preset.label}>{walkPresetName(preset.label)}</option>
 					)}
 				</select>
 				<span className="text-[10px] text-gray-600 ml-auto">

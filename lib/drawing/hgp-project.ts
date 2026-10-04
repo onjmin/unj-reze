@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import {
+	customWalkPresetLabel,
 	presets as walkPresets,
 	type Way,
 	type WalkPreset,
@@ -99,7 +100,7 @@ const waysToPresetWays = (str: string): Way[] =>
 			v in way ? way[v as keyof typeof way] : { key: v, label: "" },
 		);
 
-/** 規格に一致すれば既存の規格、しなければ「カスタム」の規格を返す */
+/** 規格に一致すれば既存の規格、しなければカスタムの規格（ラベルに方向の並びを入れる）を返す */
 const findPreset = (
 	w: number,
 	h: number,
@@ -109,7 +110,13 @@ const findPreset = (
 	walkPresets.find(
 		(p) =>
 			p.w === w && p.h === h && p.frames === frames && presetToWays(p) === ways,
-	) ?? { label: "カスタム", w, h, frames, ways: waysToPresetWays(ways) };
+	) ?? {
+		label: customWalkPresetLabel(waysToPresetWays(ways)),
+		w,
+		h,
+		frames,
+		ways: waysToPresetWays(ways),
+	};
 
 /**
  * 今の状態を .hgp にする

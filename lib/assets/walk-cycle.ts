@@ -66,16 +66,44 @@ export const toXY = (i: number, frames: number): [number, number] => [
 	Math.floor(i / frames),
 ];
 
+/**
+ * 規格に無い歩行グラ（プロジェクトファイル等で開いた任意の大きさ・コマ数）のラベル。
+ * "custom:" + 方向の並び（例: "custom:wdsa"）。
+ * 再生側に要るのは方向の並びだけ（コマ数は anim_frames、セルの大きさはシートの画素数から割り出す）なので、
+ * それだけをラベルに入れて投稿に残せるようにする
+ */
+const CUSTOM_PREFIX = "custom:";
+
+export function customWalkPresetLabel(ways: Way[]): string {
+	return CUSTOM_PREFIX + ways.map((v) => v.key).join("");
+}
+
+/** "custom:wdsa" の方向の並び。正しくなければ null（既知の方向だけ・重複なし・8方向まで） */
+function customWalkPresetWays(label: string): Way[] | null {
+	if (!label.startsWith(CUSTOM_PREFIX)) return null;
+	const keys = label.slice(CUSTOM_PREFIX.length);
+	if (!/^[wasdqezc]{1,8}$/.test(keys) || new Set(keys).size !== keys.length)
+		return null;
+	return keys.split("").map((k) => way[k as keyof typeof way]);
+}
+
+/** 画面やファイル名に出す規格名（"custom:…" は「カスタム」） */
+export function walkPresetName(label: string): string {
+	return label.startsWith(CUSTOM_PREFIX) ? "カスタム" : label;
+}
+
 /** ラベル(WalkPreset.label)から方向数(行数)を引く。表示側のSpriteImageが使う。 */
 export function walkPresetRows(label: string | undefined): number {
-	if (!label) return 1;
-	return presets.find((p) => p.label === label)?.ways.length ?? 1;
+	return walkPresetWays(label)?.length ?? 1;
 }
 
 /** ラベル(WalkPreset.label)から方向配列(行順)を引く。方向転換ボタンの表示側が使う。 */
 export function walkPresetWays(label: string | undefined): Way[] | null {
 	if (!label) return null;
-	return presets.find((p) => p.label === label)?.ways ?? null;
+	return (
+		presets.find((p) => p.label === label)?.ways ??
+		customWalkPresetWays(label)
+	);
 }
 
 /**
@@ -103,9 +131,14 @@ export function walkPresetToStdId(
 	return PRESET_LABEL_TO_STD_ID[label];
 }
 
-/** 既知の規格ラベルか（サーバー側でクライアント由来の生文字列をそのまま保存しないための検証） */
+/** 既知の規格ラベルか（サーバー側でクライアント由来の生文字列をそのまま保存しないための検証）。
+ *  形式どおりの "custom:…" も通す */
 export function isValidWalkPreset(label: unknown): label is string {
-	return typeof label === "string" && presets.some((p) => p.label === label);
+	return (
+		typeof label === "string" &&
+		(presets.some((p) => p.label === label) ||
+			customWalkPresetWays(label) !== null)
+	);
 }
 
 /** 未知のラベルを混入させない（クライアント由来の生文字列をそのままDBへ入れない） */
