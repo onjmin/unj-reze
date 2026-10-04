@@ -46,6 +46,7 @@ import {
 	walkRefFrameCrop,
 } from "@/lib/assets/asset-ref";
 import {
+	detectStandard,
 	emptySheetRows,
 	loadImage,
 	peekImage,
@@ -1217,8 +1218,8 @@ function walkDirOptions(
 	}));
 }
 
-/** 歩行グラの向き（行）を選ぶ欄。行数と空の行を知るために画像を自分で読む。 */
-function WalkDirField({
+/** 歩行グラの向き（行）と、止めるコマを選ぶ欄。行数・コマ数・空の行を知るために画像を自分で読む。 */
+function WalkPoseFields({
 	walk,
 	url,
 	onChange,
@@ -1242,20 +1243,62 @@ function WalkDirField({
 	}, [url]);
 	const img = url ? (peekImage(url) ?? loaded) : undefined;
 	const options = walkDirOptions(walk, img);
-	if (!options) return null;
+	const frames = walkFrameCount(walk, img);
 	const rowAnim = walk.stdId === "row_anim";
 	return (
-		<SelectField
-			label="向き"
-			value={rowAnim ? String(walk.row ?? 0) : (walk.dir ?? "s")}
-			options={options}
-			onChange={(v) =>
-				onChange(
-					rowAnim ? { ...walk, row: Number(v) } : { ...walk, dir: v as WayKey },
-				)
-			}
-		/>
+		<>
+			{options && (
+				<SelectField
+					label="向き"
+					value={rowAnim ? String(walk.row ?? 0) : (walk.dir ?? "s")}
+					options={options}
+					onChange={(v) =>
+						onChange(
+							rowAnim
+								? { ...walk, row: Number(v) }
+								: { ...walk, dir: v as WayKey },
+						)
+					}
+				/>
+			)}
+			{frames > 1 && (
+				<SelectField
+					label="コマ送り"
+					value={walk.stillFrame === undefined ? "" : String(walk.stillFrame)}
+					options={[
+						{ value: "", label: "アニメさせる" },
+						...Array.from({ length: frames }, (_, i) => ({
+							value: String(i),
+							label: `${i + 1}コマ目で止める`,
+						})),
+					]}
+					onChange={(v) =>
+						onChange({
+							...walk,
+							stillFrame: v === "" ? undefined : Number(v),
+						})
+					}
+				/>
+			)}
+		</>
 	);
+}
+
+/**
+ * 1つの向きの行が何コマか。row_anim は設定のコマ数、規格どおりは規格のコマ数、
+ * auto は実寸から推定した規格（コマ数の上書きがあればそれ）。分からなければ 1。
+ */
+function walkFrameCount(
+	walk: MvWalkSetting,
+	img: HTMLImageElement | undefined,
+): number {
+	if (walk.stdId === "row_anim") return Math.max(1, walk.frames ?? 1);
+	if (walk.stdId !== "auto") return standardById(walk.stdId).frames;
+	if (walk.frames && walk.frames > 0) return walk.frames;
+	if (!img) return 1;
+	const w = walk.crop?.[2] ?? img.naturalWidth;
+	const h = walk.crop?.[3] ?? img.naturalHeight;
+	return detectStandard(w, h).frames;
 }
 
 /** 画像レイヤーの表示URL。walk: 参照で url を持たない内蔵素材などは参照から引く。 */
@@ -4101,7 +4144,7 @@ export default function MvMaker({
 						/>
 					)}
 					{layer.walk && (
-						<WalkDirField
+						<WalkPoseFields
 							walk={layer.walk}
 							url={imageLayerUrl(layer)}
 							onChange={(walk) =>
@@ -4246,7 +4289,7 @@ export default function MvMaker({
 						}
 					/>
 					<Hint>
-						[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。\[ \] でエスケープ可能。
+						[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。[単語#ffffff] で好きな色にもできます（例: [犬#00ff00]が転んだ）。\[ \] でエスケープ可能。
 					</Hint>
 					<CheckField
 						label="縦書き"
@@ -7374,7 +7417,7 @@ export default function MvMaker({
 									}
 								/>
 								<Hint>
-									[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。\[ \] でエスケープ可能。
+									[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。[単語#ffffff] で好きな色にもできます（例: [犬#00ff00]が転んだ）。\[ \] でエスケープ可能。
 								</Hint>
 								<CheckField
 									label="縦書き"

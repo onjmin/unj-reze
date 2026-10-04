@@ -2940,6 +2940,7 @@ function spriteFrameRect(
 			playMode: walk.playMode ?? "loop",
 			fps,
 			timeSec,
+			frame: walk.stillFrame,
 		});
 	}
 	const std = walkStandardFor(walk, safeCrop[2], safeCrop[3]);
@@ -2949,6 +2950,7 @@ function spriteFrameRect(
 		timeSec,
 		fps,
 		row: walk.row,
+		frame: walk.stillFrame,
 	});
 }
 
@@ -3326,7 +3328,7 @@ function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
 			const x = layer.x + ax + motion.dx - li * size * 1.6;
 			let y = layer.y + ay + motion.dy;
 			for (const seg of segments) {
-				ctx.fillStyle = seg.isHighlight ? highlightColor : mainColor;
+				ctx.fillStyle = seg.color ?? (seg.isHighlight ? highlightColor : mainColor);
 				for (const ch of seg.text) {
 					ctx.fillText(toVerticalFormChar(ch), x, y);
 					y += size * 1.05;
@@ -3346,7 +3348,7 @@ function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
 			let curX = layer.x + ax + motion.dx;
 			const ly = layer.y + ay + motion.dy + li * size * 1.25;
 			for (const seg of segments) {
-				ctx.fillStyle = seg.isHighlight ? highlightColor : mainColor;
+				ctx.fillStyle = seg.color ?? (seg.isHighlight ? highlightColor : mainColor);
 				ctx.fillText(seg.text, curX, ly);
 				curX += ctx.measureText(seg.text).width;
 			}
@@ -3566,7 +3568,8 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 			const x = layer.x + ax + (stack === "left" ? -order : order) * step;
 			let y = layer.y + ay;
 			for (const seg of activeSegments) {
-				ctx.fillStyle = seg.isHighlight ? lyricHighlightColor : lyricMainColor;
+				ctx.fillStyle =
+					seg.color ?? (seg.isHighlight ? lyricHighlightColor : lyricMainColor);
 				for (const ch of seg.text) {
 					ctx.fillText(toVerticalFormChar(ch), x, y);
 					y += size * 1.08;
@@ -3590,7 +3593,8 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 			drawLyricMarks(d, line, fullText, lx, ly, size, alpha);
 			let curX = lx;
 			for (const seg of activeSegments) {
-				ctx.fillStyle = seg.isHighlight ? lyricHighlightColor : lyricMainColor;
+				ctx.fillStyle =
+					seg.color ?? (seg.isHighlight ? lyricHighlightColor : lyricMainColor);
 				ctx.fillText(seg.text, curX, ly);
 				curX += ctx.measureText(seg.text).width;
 			}

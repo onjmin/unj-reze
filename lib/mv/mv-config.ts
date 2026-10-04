@@ -811,6 +811,8 @@ export interface MvWalkSetting {
 	 * 起こしたときだけ入る。向きの選択は `row` をこの並びの位置へ書き換えるだけ。
 	 */
 	ways?: string;
+	/** 指定するとコマ送りせずこのコマ（0始まり）で止める。向き（行）はそのまま効く。 */
+	stillFrame?: number;
 }
 
 export interface MvImageLayer extends MvLayerBase {
@@ -1042,13 +1044,22 @@ export interface MvLyricLine {
 export interface TextSegment {
 	text: string;
 	isHighlight: boolean;
+	/** `[単語#rrggbb]` で個別に指定した文字色。無ければレイヤーの強調色。 */
+	color?: string;
 }
+
+/** `[単語#fff]` の末尾の色指定（#rgb / #rgba / #rrggbb / #rrggbbaa）。 */
+const SEGMENT_COLOR_RE =
+	/#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 /**
  * [単語] のように括弧で囲まれた部分を強調セグメント(isHighlight: true)に分割し、
  * \[ や \] のエスケープ文字を処理する。
+ * 括弧の中の末尾に `#ffffff` のような色を書くと、その部分だけ任意の文字色になる
+ * （`\#` と書いた # は色指定とみなさない）。
  *
  * 例: "[犬]が転んだ" -> [{ text: "犬", isHighlight: true }, { text: "が転んだ", isHighlight: false }]
+ * 例: "[犬#00ff00]が転んだ" -> [{ text: "犬", isHighlight: true, color: "#00ff00" }, ...]
  * 例: "\[犬\]が転んだ" -> [{ text: "[犬]が転んだ", isHighlight: false }]
  */
 export function parseHighlightedText(input: string): TextSegment[] {
@@ -1057,11 +1068,14 @@ export function parseHighlightedText(input: string): TextSegment[] {
 	let currentText = "";
 	let isHighlight = false;
 	let inEscape = false;
+	/** currentText の中でエスケープ（\#）で入った # の位置。色指定の # と区別する。 */
+	let escapedAt = new Set<number>();
 
 	for (let i = 0; i < input.length; i++) {
 		const char = input[i];
 
 		if (inEscape) {
+			if (char === "#") escapedAt.add(currentText.length);
 			currentText += char;
 			inEscape = false;
 			continue;
@@ -1077,15 +1091,29 @@ export function parseHighlightedText(input: string): TextSegment[] {
 				segments.push({ text: currentText, isHighlight: false });
 				currentText = "";
 			}
+			escapedAt = new Set();
 			isHighlight = true;
 			continue;
 		}
 
 		if (char === "]" && isHighlight) {
-			if (currentText.length > 0) {
-				segments.push({ text: currentText, isHighlight: true });
-				currentText = "";
+			const m = currentText.match(SEGMENT_COLOR_RE);
+			const color =
+				m && m.index !== undefined && !escapedAt.has(m.index)
+					? m[0]
+					: undefined;
+			const text = color
+				? currentText.slice(0, currentText.length - color.length)
+				: currentText;
+			if (text.length > 0) {
+				segments.push(
+					color
+						? { text, isHighlight: true, color }
+						: { text, isHighlight: true },
+				);
 			}
+			currentText = "";
+			escapedAt = new Set();
 			isHighlight = false;
 			continue;
 		}
@@ -1120,10 +1148,7 @@ export function sliceSegments(
 			result.push(seg);
 			remaining -= seg.text.length;
 		} else {
-			result.push({
-				text: seg.text.slice(0, remaining),
-				isHighlight: seg.isHighlight,
-			});
+			result.push({ ...seg, text: seg.text.slice(0, remaining) });
 			remaining = 0;
 		}
 	}

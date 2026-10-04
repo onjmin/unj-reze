@@ -215,8 +215,12 @@ export function animatedCell(
 		timeSec: number;
 		fps?: number;
 		row?: number;
+		/** 指定するとこのコマ（列, 0始まり）で止める。時間と移動状態は見ない。 */
+		frame?: number;
 	},
 ): SpriteRect {
+	if (opts.frame !== undefined)
+		return cellRect(std, imgW, imgH, opts.dir, opts.frame, opts.row ?? 0);
 	const fps = opts.fps ?? 6;
 	const step = opts.moving
 		? Math.floor(opts.timeSec * fps)
@@ -243,6 +247,8 @@ export function animatedCellInRect(
 		timeSec: number;
 		fps?: number;
 		row?: number;
+		/** 指定するとこのコマ（列, 0始まり）で止める。 */
+		frame?: number;
 	},
 ): SpriteRect {
 	const [csx, csy, csw, csh] = crop;
@@ -299,17 +305,22 @@ export function rowAnimCellInRect(
 		playMode?: AnimPlayMode;
 		fps?: number;
 		timeSec: number;
+		/** 指定するとこのコマ（0始まり）で止める。 */
+		frame?: number;
 	},
 ): SpriteRect {
 	const [csx, csy, csw, csh] = crop;
 	const numFrames = opts.frames && opts.frames > 0 ? opts.frames : 1;
 	const rowIndex = opts.row ?? 0;
-	const frameIdx = rowAnimFrameIndex(
-		numFrames,
-		opts.playMode ?? "loop",
-		opts.timeSec,
-		opts.fps ?? 6,
-	);
+	const frameIdx =
+		opts.frame !== undefined
+			? Math.min(numFrames - 1, Math.max(0, Math.round(opts.frame)))
+			: rowAnimFrameIndex(
+					numFrames,
+					opts.playMode ?? "loop",
+					opts.timeSec,
+					opts.fps ?? 6,
+				);
 
 	const cw = csw / numFrames;
 	const ch = csh;
