@@ -525,8 +525,7 @@ export default function ContentPicker({
 				const ref = walkRefForPost(url, p.walkPreset, {
 					frames: p.animFrames,
 					fps: p.animFps,
-					imgW: img.naturalWidth,
-					imgH: img.naturalHeight,
+					img,
 				});
 				if (ref) {
 					onPick({ ref, url, label: `歩行グラ #${p.id}` });

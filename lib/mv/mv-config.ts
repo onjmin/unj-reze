@@ -806,6 +806,11 @@ export interface MvWalkSetting {
 	loopBeats?: number;
 	/** 素材ごとのコマ送り速度倍率（既定 1.0）。 */
 	speed?: number;
+	/**
+	 * stdId==='row_anim' のとき、シートの各行が表す向き（例 "wdsa"）。規格外の歩行グラ投稿から
+	 * 起こしたときだけ入る。向きの選択は `row` をこの並びの位置へ書き換えるだけ。
+	 */
+	ways?: string;
 }
 
 export interface MvImageLayer extends MvLayerBase {

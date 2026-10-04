@@ -45,6 +45,13 @@ import {
 	refLabel,
 	walkRefFrameCrop,
 } from "@/lib/assets/asset-ref";
+import {
+	emptySheetRows,
+	peekImage,
+	standardById,
+	WAY,
+	type WayKey,
+} from "@/lib/assets/walk-sprite";
 import { handleImgError } from "@/lib/cors-proxy";
 import {
 	clearAutosave,
@@ -1153,9 +1160,53 @@ function walkSettingFromRef(ref: string): MvWalkSetting | undefined {
 	if (wr.row !== undefined) setting.row = wr.row;
 	if (wr.playMode) setting.playMode = wr.playMode;
 	if (wr.fps) setting.fps = wr.fps;
+	if (wr.ways) setting.ways = wr.ways;
 	// MV素材は「1周＝1小節」を既定にする。秒で送ると曲のテンポを変えた瞬間にずれる。
 	if (wr.stdId === "row_anim") setting.loopBeats = 4;
 	return setting;
+}
+
+/**
+ * 歩行グラのレイヤーで選べる向き。規格どおりのシートは規格の向き（`dir`）、規格外の歩行グラ投稿から
+ * 起こした row_anim は行の並び（`ways`）から選ぶ。向きの無い MV 素材（row_anim で ways 無し）は null。
+ */
+function walkDirOptions(
+	walk: MvWalkSetting,
+	url: string | undefined,
+): { value: WayKey; label: string }[] | null {
+	const keys =
+		walk.stdId === "row_anim"
+			? walk.ways
+			: walk.stdId === "auto"
+				? "sadw"
+				: standardById(walk.stdId)
+						.ways.map((w) => w.key)
+						.join("");
+	if (!keys) return null;
+	// 描きかけのシートは空の行がある。選んでも透明で何も出ないので、そうと分かるようにする
+	// （画像の行の並び＝keys の並びが分かる row_anim と規格指定のときだけ。auto は規格が実寸次第）。
+	const img = url && walk.stdId !== "auto" ? peekImage(url) : undefined;
+	const empty = img ? emptySheetRows(img, keys.length) : new Set<number>();
+	return (keys.split("") as WayKey[]).map((k, i) => ({
+		value: k,
+		label: empty.has(i) ? `${WAY[k].label}（絵なし）` : WAY[k].label,
+	}));
+}
+
+/** いま選ばれている向き。row_anim は行番号から引き戻す。 */
+function walkDirValue(walk: MvWalkSetting): WayKey {
+	if (walk.stdId === "row_anim")
+		return (walk.ways?.[walk.row ?? 0] as WayKey | undefined) ?? "s";
+	return walk.dir ?? "s";
+}
+
+/** 向きを書き換えた walk 設定。row_anim は行を、規格どおりのシートは dir を変える。 */
+function withWalkDir(walk: MvWalkSetting, dir: WayKey): MvWalkSetting {
+	if (walk.stdId === "row_anim") {
+		const row = walk.ways?.indexOf(dir) ?? -1;
+		return row >= 0 ? { ...walk, row } : walk;
+	}
+	return { ...walk, dir };
 }
 
 /**
@@ -3993,6 +4044,34 @@ export default function MvMaker({
 							}
 						/>
 					)}
+					{layer.walk &&
+						(() => {
+							const dirOptions = walkDirOptions(
+								layer.walk,
+								layer.url,
+							);
+							if (!dirOptions) return null;
+							return (
+								<SelectField
+									label="向き"
+									value={walkDirValue(layer.walk)}
+									options={dirOptions}
+									onChange={(dir) =>
+										updateLayer(
+											layer.id,
+											(l) =>
+												({
+													...l,
+													walk:
+														l.kind === "image" && l.walk
+															? withWalkDir(l.walk, dir)
+															: undefined,
+												}) as MvLayer,
+										)
+									}
+								/>
+							);
+						})()}
 					<CheckField
 						label="同じ画像を並べる"
 						checked={!!layer.repeat}

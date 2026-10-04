@@ -1,3 +1,5 @@
+import { emptySheetRows } from "@/lib/assets/walk-sprite";
+
 export type Way = {
 	key: string;
 	label: string;
@@ -156,26 +158,34 @@ export function detectPreset(imgW: number, imgH: number): WalkPreset | null {
 /**
  * 歩行グラ投稿（walk_preset 付き）から、素材ピッカーが返す `walk:` 参照を作る。
  * 既知の規格はその規格のまま（ゲームでは向きも変わる）。規格外（"custom:…"）は規格の型に
- * 当てはまらないので、正面の行だけを横並びアニメ（row_anim）として切り出す（正面が無ければ1行目）。
- * セルの大きさはシートの画素数から割り出すので、画像の実寸（imgW/imgH）が要る。
- * 歩行グラでなければ null。
+ * 当てはまらないので、1つの向きの行だけを横並びアニメ（row_anim）として切り出し、行の並び（ways）も
+ * 参照に持たせて後から向きを選べるようにする。
+ * 既定の向きは正面。ただし描きかけで正面の行が空なら、絵のある最初の行にする（空の行だと何も出ない）。
+ * セルの大きさはシートの画素数から割り出すので、読み込み済みの画像が要る。歩行グラでなければ null。
  */
 export function walkRefForPost(
 	url: string,
 	walkPreset: string | undefined,
-	opts: { frames?: number; fps?: number; imgW: number; imgH: number },
+	opts: { frames?: number; fps?: number; img: HTMLImageElement },
 ): string | null {
 	const ways = walkPresetWays(walkPreset);
 	if (!ways) return null;
 	const stdId = walkPresetToStdId(walkPreset);
 	if (stdId) return `walk:${stdId}:u:${url}`;
+	const imgW = opts.img.naturalWidth;
 	const frames = Math.max(1, Math.round(opts.frames ?? 1));
-	const cellH = Math.floor(opts.imgH / ways.length);
-	if (cellH <= 0 || opts.imgW <= 0) return null;
-	const row = Math.max(
-		0,
-		ways.findIndex((w) => w.key === "s"),
-	);
+	const cellH = Math.floor(opts.img.naturalHeight / ways.length);
+	if (cellH <= 0 || imgW <= 0) return null;
+	const empty = emptySheetRows(opts.img, ways.length);
+	const front = ways.findIndex((w) => w.key === "s");
+	const firstFilled = ways.findIndex((_, i) => !empty.has(i));
+	const row =
+		front >= 0 && !empty.has(front)
+			? front
+			: firstFilled >= 0
+				? firstFilled
+				: Math.max(0, front);
 	const fps = opts.fps && opts.fps > 0 ? opts.fps : 6;
-	return `walk:row_anim:u:${url}#0,0,${opts.imgW},${cellH},${frames},0,0,${row},loop,${fps}`;
+	const wayKeys = ways.map((w) => w.key).join("");
+	return `walk:row_anim:u:${url}#0,0,${imgW},${cellH},${frames},0,0,${row},loop,${fps},${wayKeys}`;
 }

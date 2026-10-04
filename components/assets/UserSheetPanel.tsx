@@ -442,8 +442,7 @@ function AddSheetForm({
 				? walkRefForPost(walkSel.url, walkSel.walkPreset, {
 						frames: walkSel.frames,
 						fps: walkSel.fps,
-						imgW: img.naturalWidth,
-						imgH: img.naturalHeight,
+						img,
 					})
 				: null;
 			if (walkRef) {

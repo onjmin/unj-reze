@@ -367,41 +367,94 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
 	if (cached) return Promise.resolve(cached);
 	const inflight = imgPromises.get(url);
 	if (inflight) return inflight;
-	const p = new Promise<HTMLImageElement>((resolve, reject) => {
+	const p = (async () => {
+		try {
+			// 同じURLを先に <img>（CORS なし）で表示していると、ブラウザのキャッシュに CORS ヘッダー無しの
+			// 応答が残り、crossOrigin 付きの読み込みが失敗する（ピッカーのサムネを見てから選ぶと必ず踏む）。
+			// クエリを足した別URLなら CORS 付きで取り直せるので、プロキシより先にそれを試す。
+			const img =
+				(await tryLoadCorsImage(url)) ??
+				(/^https?:\/\//i.test(url)
+					? await tryLoadCorsImage(
+							`${url}${url.includes("?") ? "&" : "?"}_cors=1`,
+						)
+					: null) ??
+				(await (async () => {
+					const proxied = wrapCorsProxyUrl(url);
+					if (proxied === url) return null;
+					notifyCorsProxyUsed();
+					return tryLoadCorsImage(proxied);
+				})());
+			if (!img) throw new Error(`failed to load ${url}`);
+			imgCache.set(url, img);
+			return img;
+		} finally {
+			imgPromises.delete(url);
+		}
+	})();
+	imgPromises.set(url, p);
+	return p;
+}
+
+/**
+ * シートを行に等分したとき、不透明な画素が1つも無い行の番号。描きかけの歩行グラ（正面だけ未着手など）で
+ * 空の行を既定の向きにすると、レイヤーが透明のまま「何も出ない」ように見えるので、それを避けるのに使う。
+ * 読めなければ（CORS 等）空集合。
+ */
+export function emptySheetRows(img: HTMLImageElement, rows: number): Set<number> {
+	let byRows = emptyRowsCache.get(img);
+	if (!byRows) {
+		byRows = new Map();
+		emptyRowsCache.set(img, byRows);
+	}
+	let empty = byRows.get(rows);
+	if (!empty) {
+		empty = scanEmptySheetRows(img, rows);
+		byRows.set(rows, empty);
+	}
+	return empty;
+}
+
+const emptyRowsCache = new WeakMap<HTMLImageElement, Map<number, Set<number>>>();
+
+function scanEmptySheetRows(img: HTMLImageElement, rows: number): Set<number> {
+	const empty = new Set<number>();
+	const w = img.naturalWidth;
+	const rowH = Math.floor(img.naturalHeight / rows);
+	if (w <= 0 || rowH <= 0) return empty;
+	try {
+		const c = document.createElement("canvas");
+		c.width = w;
+		c.height = rowH * rows;
+		const ctx = c.getContext("2d", { willReadFrequently: true });
+		if (!ctx) return empty;
+		ctx.drawImage(img, 0, 0);
+		for (let r = 0; r < rows; r++) {
+			const d = ctx.getImageData(0, r * rowH, w, rowH).data;
+			let filled = false;
+			for (let i = 3; i < d.length; i += 4) {
+				if (d[i] > 0) {
+					filled = true;
+					break;
+				}
+			}
+			if (!filled) empty.add(r);
+		}
+	} catch {
+		return new Set();
+	}
+	return empty;
+}
+
+function tryLoadCorsImage(src: string): Promise<HTMLImageElement | null> {
+	return new Promise((resolve) => {
 		const img = new Image();
 		img.crossOrigin = "anonymous";
 		img.decoding = "async";
-		img.onload = () => {
-			imgCache.set(url, img);
-			imgPromises.delete(url);
-			resolve(img);
-		};
-		img.onerror = () => {
-			const proxied = wrapCorsProxyUrl(url);
-			if (proxied !== url) {
-				notifyCorsProxyUsed();
-				const proxyImg = new Image();
-				proxyImg.crossOrigin = "anonymous";
-				proxyImg.decoding = "async";
-				proxyImg.onload = () => {
-					imgCache.set(url, proxyImg);
-					imgPromises.delete(url);
-					resolve(proxyImg);
-				};
-				proxyImg.onerror = () => {
-					imgPromises.delete(url);
-					reject(new Error(`failed to load ${url}`));
-				};
-				proxyImg.src = proxied;
-			} else {
-				imgPromises.delete(url);
-				reject(new Error(`failed to load ${url}`));
-			}
-		};
-		img.src = url;
+		img.onload = () => resolve(img);
+		img.onerror = () => resolve(null);
+		img.src = src;
 	});
-	imgPromises.set(url, p);
-	return p;
 }
 
 export function peekImage(url: string): HTMLImageElement | undefined {

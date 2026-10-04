@@ -442,6 +442,11 @@ export interface WalkRef {
 	playMode?: "loop" | "pingpong" | "once";
 	/** 簡易アニメ用: フレームレート FPS (既定 6)。#…,playMode,fps の10番目。 */
 	fps?: number;
+	/**
+	 * 簡易アニメ用: シートの行が表す向きの並び（例 "wdsa"）。#…,fps,ways の11番目。
+	 * 規格外の歩行グラを row_anim で使うとき、どの行がどの向きかを持っておき、向きを選べるようにする。
+	 */
+	ways?: string;
 }
 
 const WALK_STD_IDS = new Set([
@@ -488,6 +493,7 @@ export function parseWalkRef(raw: string): WalkRef | null {
 				let row: number | undefined;
 				let playMode: "loop" | "pingpong" | "once" | undefined;
 				let fps: number | undefined;
+				let ways: string | undefined;
 				if (hashIdx !== -1) {
 					url = rawUrl.slice(0, hashIdx);
 					const rawParts = rawUrl.slice(hashIdx + 1).split(",");
@@ -508,6 +514,11 @@ export function parseWalkRef(raw: string): WalkRef | null {
 							playMode = rawParts[8] as "loop" | "pingpong" | "once";
 						if (parts.length >= 10 && !isNaN(parts[9]) && parts[9] > 0)
 							fps = parts[9];
+						if (
+							rawParts.length >= 11 &&
+							/^[wasdqezc]{1,8}$/.test(rawParts[10])
+						)
+							ways = rawParts[10];
 					}
 				}
 				return {
@@ -520,6 +531,7 @@ export function parseWalkRef(raw: string): WalkRef | null {
 					row,
 					playMode,
 					fps,
+					ways,
 				};
 			}
 			if (srcStr.startsWith("p:")) {
