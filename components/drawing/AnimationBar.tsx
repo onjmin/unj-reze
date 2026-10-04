@@ -11,6 +11,7 @@ import {
 	Pause,
 	Play,
 	Plus,
+	Rows3,
 	Trash2,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -99,6 +100,9 @@ interface AnimationBarProps {
 	onFpsChange: (fps: number) => void;
 	onToggleOnionSkin: () => void;
 	onOnionSkinOpacityChange: (opacity: number) => void;
+	/** 全フレームへの一括適用 */
+	syncAll?: boolean;
+	onToggleSyncAll?: () => void;
 	onExit: () => void;
 }
 
@@ -118,6 +122,8 @@ export default function AnimationBar({
 	onTogglePlay,
 	onFpsChange,
 	onToggleOnionSkin,
+	syncAll = false,
+	onToggleSyncAll,
 	onOnionSkinOpacityChange,
 	onExit,
 }: AnimationBarProps) {
@@ -313,6 +319,19 @@ export default function AnimationBar({
 				/>
 			</div>
 			<div className="h-5 w-px bg-gray-800 shrink-0" />
+			{onToggleSyncAll && (
+				<button
+					onClick={onToggleSyncAll}
+					className={`w-7 h-7 rounded flex items-center justify-center shrink-0 ${
+						syncAll
+							? "bg-blue-600/30 text-blue-400"
+							: "bg-gray-100/10 text-gray-500 hover:bg-gray-100/20"
+					}`}
+					title="全フレームに一括適用（描画・選択範囲・移動・レイヤー操作・Undo）"
+				>
+					<Rows3 size={12} />
+				</button>
+			)}
 			<button
 				onClick={onToggleOnionSkin}
 				className={`w-7 h-7 rounded flex items-center justify-center shrink-0 ${

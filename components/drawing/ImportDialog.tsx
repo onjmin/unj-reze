@@ -11,6 +11,8 @@ interface ImportDialogProps {
 		image: HTMLImageElement,
 		opts: { opacity: number; simple: boolean },
 	) => void;
+	/** プロジェクトファイル（.hgp）が選ばれたとき。画像とは別に全体を読み込む */
+	onImportProject?: (file: File) => void;
 	walkMode: boolean;
 	walkPresets: WalkPreset[];
 }
@@ -19,6 +21,7 @@ export default function ImportDialog({
 	open,
 	onClose,
 	onImport,
+	onImportProject,
 	walkMode,
 	walkPresets,
 }: ImportDialogProps) {
@@ -93,12 +96,27 @@ export default function ImportDialog({
 						<label className="flex items-center gap-2 mt-1 px-2 py-1.5 bg-gray-800 rounded border border-gray-700 cursor-pointer hover:bg-gray-700 transition-colors">
 							<FileImage size={14} className="text-gray-400" />
 							<span className="text-xs text-gray-300">ファイルを選択</span>
+							{onImportProject && (
+								<span className="text-[10px] text-gray-500 ml-auto">
+									.hgp（プロジェクト）も可
+								</span>
+							)}
 							<input
 								type="file"
-								accept="image/*,.cur,.ani"
+								accept={
+									onImportProject
+										? "image/*,.cur,.ani,.hgp"
+										: "image/*,.cur,.ani"
+								}
 								onChange={(e) => {
 									const f = e.target.files?.[0];
-									if (f) handleFile(f);
+									e.target.value = "";
+									if (!f) return;
+									if (onImportProject && /\.hgp$/i.test(f.name)) {
+										onImportProject(f);
+										return;
+									}
+									handleFile(f);
 								}}
 								className="hidden"
 							/>

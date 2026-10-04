@@ -30,6 +30,8 @@ export interface DrawingExportDialogProps {
 	}) => void | Promise<void>;
 	onExportWalkZip?: () => void | Promise<void>;
 	onExportWalkAni?: () => void | Promise<void>;
+	/** プロジェクトファイル（.hgp）。渡したときだけボタンを出す */
+	onExportProject?: () => void | Promise<void>;
 }
 
 const BG_PRESET_COLORS = [
@@ -61,6 +63,7 @@ export default function DrawingExportDialog({
 	onExportWalkGif,
 	onExportWalkZip,
 	onExportWalkAni,
+	onExportProject,
 }: DrawingExportDialogProps) {
 	const [scale, setScale] = useState<number>(isDotEditor ? 1 : 1);
 	const [useSolidBg, setUseSolidBg] = useState(false);
@@ -392,6 +395,22 @@ export default function DrawingExportDialog({
 								</span>
 							</button>
 						</>
+					)}
+
+					{onExportProject && (
+						<button
+							type="button"
+							disabled={exporting}
+							onClick={() => handleAction(() => onExportProject())}
+							className="w-full flex items-center justify-between py-2.5 px-4 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium text-xs border border-gray-700 transition active:scale-[0.98] disabled:opacity-50"
+							title="大きさ・コマ数・方向・fps と全コマのレイヤーをまとめて保存（HGペイントと共通）"
+						>
+							<div className="flex items-center gap-2">
+								<FileArchive size={15} />
+								<span>プロジェクトファイル (.hgp)</span>
+							</div>
+							<span className="text-[10px] text-gray-400">project.hgp</span>
+						</button>
 					)}
 				</div>
 

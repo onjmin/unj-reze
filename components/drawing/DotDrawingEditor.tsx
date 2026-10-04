@@ -33,6 +33,8 @@ import {
 	detectPreset,
 	type WalkPreset,
 	presets as walkPresets,
+	toI as walkToI,
+	toXY as walkToXY,
 } from "@/lib/assets/walk-cycle";
 import {
 	exportFramesZip,
@@ -43,8 +45,29 @@ import {
 	generateSpriteSheetCanvas,
 	resizeCanvas,
 } from "@/lib/drawing/export-drawing";
-import { copyToClipboard, readPasteImage } from "@/lib/drawing/oekaki-clipboard";
+import {
+	exportHgp,
+	HGP_EXTENSION,
+	importHgp,
+} from "@/lib/drawing/hgp-project";
+import {
+	copyMergedSelection,
+	copyToClipboard,
+	readPasteImage,
+} from "@/lib/drawing/oekaki-clipboard";
 import { type FlipAxis, flipLayers } from "@/lib/drawing/drawing-macros";
+import {
+	flushSelectionSync,
+	hasPendingSelectionMove,
+	markDragStart,
+	resetSyncBase,
+	setSyncHost,
+	syncAddLayer,
+	syncApply,
+	syncEdit,
+	syncLayerProps,
+	syncReorderLayer,
+} from "@/lib/drawing/sync-edit";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
 import {
 	clearAutosave,
@@ -85,6 +108,24 @@ function getEditorFrames(
 			color: computeFrameColor(l, id),
 		};
 	});
+}
+
+/** 歩行グラの一括適用先のコマ（同じ方向・同じ番目。編集中のコマは含まない） */
+function walkSyncTargets(
+	current: number,
+	preset: WalkPreset,
+	sameWay: boolean,
+	sameFrame: boolean,
+): number[] {
+	const { frames, ways } = preset;
+	const [x, y] = walkToXY(current, frames);
+	const targets = new Set<number>();
+	if (sameWay)
+		for (let xx = 0; xx < frames; xx++) targets.add(walkToI(xx, y, frames));
+	if (sameFrame)
+		for (let yy = 0; yy < ways.length; yy++) targets.add(walkToI(x, yy, frames));
+	targets.delete(current);
+	return [...targets];
 }
 
 export interface DotDrawingAnimMeta {
@@ -226,6 +267,13 @@ export default function DotDrawingEditor({
 	const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
 	const [onionSkin, setOnionSkin] = useState(false);
 	const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
+	// 一括適用（歩行グラ：同じ方向・同じ番目、アニメ：全フレーム）
+	const [syncWay, setSyncWay] = useState(false);
+	const [syncFrame, setSyncFrame] = useState(false);
+	const [syncAll, setSyncAll] = useState(false);
+	const syncWayRef = useRef(false);
+	const syncFrameRef = useRef(false);
+	const syncAllRef = useRef(false);
 	const [isDragover, setIsDragover] = useState(false);
 	const [showImport, setShowImport] = useState(false);
 
@@ -729,7 +777,7 @@ export default function DotDrawingEditor({
 	};
 
 	/**
-	 * 選択範囲をクリップボードにコピーする。選択が無ければ何もしない
+	 * 選択範囲を全レイヤー重ね合わせた見た目でクリップボードにコピーする。選択が無ければ何もしない
 	 *
 	 * @returns コピーしたか
 	 */
@@ -737,7 +785,7 @@ export default function DotDrawingEditor({
 		const target = layerEntriesRef.current
 			.map((l) => l.instance)
 			.find((l) => l.selection);
-		const copyCanvas = target?.copySelection();
+		const copyCanvas = target && copyMergedSelection(target);
 		if (!copyCanvas) return false;
 		copyToClipboard(copyCanvas);
 		return true;
@@ -751,7 +799,9 @@ export default function DotDrawingEditor({
 				.map((l) => l.instance)
 				.find((l) => l.selection) || active;
 		if (!target?.selection) return;
-		handleCopy();
+		// 切り取りは消すレイヤーと同じく、そのレイヤーの分だけ複製する
+		const copyCanvas = target.copySelection();
+		if (copyCanvas) copyToClipboard(copyCanvas);
 		target.deleteSelection();
 		if (target.modified()) target.trace();
 		forceRender((n) => n + 1);
@@ -950,14 +1000,12 @@ export default function DotDrawingEditor({
 		ctx.restore();
 	};
 
-	const nudge = (dx: number, dy: number) => {
-		const active =
-			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
-		if (!active) return;
+	/** レイヤー全体をドット単位でずらす（はみ出した分は消える） */
+	const shiftLayer = (layer: oekaki.LayeredCanvas, dx: number, dy: number) => {
 		const dotSize = oekaki.getDotSize();
-		const w = active.canvas.width;
-		const h = active.canvas.height;
-		const src = new Uint8ClampedArray(active.data);
+		const w = layer.canvas.width;
+		const h = layer.canvas.height;
+		const src = new Uint8ClampedArray(layer.data);
 		const dst = new Uint8ClampedArray(src.length);
 		const px = dx * dotSize;
 		const py = dy * dotSize;
@@ -974,8 +1022,16 @@ export default function DotDrawingEditor({
 				dst[di + 3] = src[si + 3];
 			}
 		}
-		active.data = dst;
+		layer.data = dst;
+	};
+
+	const nudge = (dx: number, dy: number) => {
+		const active =
+			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+		if (!active) return;
+		shiftLayer(active, dx, dy);
 		active.trace();
+		syncApply(active, (target) => shiftLayer(target, dx, dy));
 		if (walkModeRef.current) {
 			walkDataRef.current.set(
 				walkActiveIndexRef.current,
@@ -1017,6 +1073,59 @@ export default function DotDrawingEditor({
 		setInitKey((k) => k + 1);
 	};
 
+	/** プロジェクトファイル（.hgp、HGペイントと共通）に書き出す */
+	const handleExportHgp = async () => {
+		handleDeselect();
+		const state = getCurrentState();
+		if (!state) return;
+		const blob = await exportHgp(state, oekaki.getDotSize(), fpsRef.current);
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `project${HGP_EXTENSION}`;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+	};
+
+	/**
+	 * プロジェクトファイル（.hgp）を開く
+	 *
+	 * 大きさ・コマ数・方向・fps と全コマのレイヤーを、履歴の復元と同じ流れで読み込む
+	 */
+	const handleImportHgp = async (file: File) => {
+		let loaded: Awaited<ReturnType<typeof importHgp>>;
+		try {
+			loaded = await importHgp(file, CANVAS_SIZE);
+		} catch (err) {
+			alert(
+				`読み込めませんでした: ${err instanceof Error ? err.message : err}`,
+			);
+			return;
+		}
+		if (!confirm("プロジェクトを開きますか？（今の絵は失われます）")) return;
+		const { state, fps } = loaded;
+		stopPlayback();
+		handleDeselect();
+		if (fps !== undefined) fpsRef.current = fps;
+		// 復元処理は今のモードを抜けないので、ここで抜けておく
+		if (state.mode !== "walk" && walkModeRef.current) {
+			walkLayersRef.current.clear();
+			walkDataRef.current.clear();
+			walkModeRef.current = false;
+			setWalkMode(false);
+		}
+		if (state.mode !== "anim") {
+			frameInstancesRef.current = [];
+			frameIdsRef.current = [1];
+			nextFrameIdRef.current = 2;
+			currentFrameRef.current = 0;
+			setAnimMode(false);
+		}
+		setShowImport(false);
+		setRestoredState(state);
+		setInitKey((k) => k + 1);
+	};
+
 	const syncLayerEntries = () => {
 		const entries = oekaki
 			.getLayers()
@@ -1027,6 +1136,11 @@ export default function DotDrawingEditor({
 			.reverse();
 		setLayerEntries(entries);
 		layerEntriesRef.current = entries;
+		// 選択中の行が無くなっていたら（レイヤーの少ないコマに切り替えた等）、一番上を選ぶ
+		if (activeLayerIndexRef.current >= entries.length) {
+			activeLayerIndexRef.current = 0;
+			setActiveLayerIndex(0);
+		}
 	};
 
 	const captureLiveFrames = (): FrameData[] => {
@@ -1173,6 +1287,17 @@ export default function DotDrawingEditor({
 		);
 		oekaki.upperLayer.value?.canvas.classList.add("upper-canvas");
 		oekaki.color.value = colorRef.current;
+		// 一括適用：ひと筆の差分の基準を取り、ライブラリが移動・回転の累積値を戻すタイミングも記録する
+		oekaki.upperLayer.value?.canvas.addEventListener(
+			"pointerdown",
+			() => {
+				markDragStart();
+				resetSyncBase(
+					layerEntriesRef.current[activeLayerIndexRef.current]?.instance,
+				);
+			},
+			{ passive: true },
+		);
 
 		const loadCanvasContent = async () => {
 			if (restoredState) {
@@ -1545,6 +1670,15 @@ export default function DotDrawingEditor({
 				if (result) active.data = result;
 				active.trace();
 			}
+			// 一括適用。選択範囲の操作は記録して、選択が終わった時に再生する
+			const syncActive =
+				layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+			if (toolRef.current === "select" || toolRef.current === "lasso") {
+				resetSyncBase(syncActive);
+			} else {
+				if (hasPendingSelectionMove()) flushSelectionSync();
+				syncEdit(syncActive);
+			}
 			updateOnionSkin();
 			if (walkModeRef.current) {
 				walkDataRef.current.set(
@@ -1707,39 +1841,195 @@ export default function DotDrawingEditor({
 		}
 	};
 
+	/** oekaki のレイヤー（下から順）を、歩行グラのコマの保存形式にする */
+	const toWalkCell = (layers: oekaki.LayeredCanvas[]) => ({
+		layers: layers.map((l) => ({
+			name: l.name,
+			visible: l.visible,
+			locked: l.locked,
+			opacity: l.opacity,
+			data: new Uint8ClampedArray(l.data),
+		})),
+	});
+
+	/** 保存形式のコマから oekaki のレイヤーを作る（今載っているレイヤーの上に積まれる） */
+	const fromWalkCell = (index: number): oekaki.LayeredCanvas[] => {
+		const cellData = walkLayersRef.current.get(index);
+		if (!cellData || cellData.layers.length === 0)
+			return [new oekaki.LayeredCanvas("レイヤー #1")];
+		return cellData.layers.map(({ name, visible, locked, opacity, data }) => {
+			const l = new oekaki.LayeredCanvas(name);
+			l.visible = visible;
+			l.locked = locked;
+			l.opacity = opacity;
+			l.data = new Uint8ClampedArray(data);
+			l.trace();
+			return l;
+		});
+	};
+
+	/** 編集中のコマを保存形式から読み直す */
+	const reloadWalkCell = (index: number) => {
+		for (const l of oekaki.getLayers()) l.delete();
+		oekaki.refresh();
+		fromWalkCell(index);
+		syncLayerEntries();
+		updateOnionSkin();
+	};
+
 	useEffect(() => {
 		if (!walkMode) return;
 		if (walkActiveIndex === walkActiveIndexRef.current) return;
 		const prev = walkActiveIndexRef.current;
-		const prevLayers = oekaki.getLayers();
-		walkLayersRef.current.set(prev, {
-			layers: prevLayers.map((l) => ({
-				name: l.name,
-				visible: l.visible,
-				locked: l.locked,
-				opacity: l.opacity,
-				data: new Uint8ClampedArray(l.data),
-			})),
-		});
+		walkLayersRef.current.set(prev, toWalkCell(oekaki.getLayers()));
 		walkActiveIndexRef.current = walkActiveIndex;
-		for (const l of oekaki.getLayers()) l.delete();
-		oekaki.refresh();
-		const cellData = walkLayersRef.current.get(walkActiveIndex);
-		if (cellData && cellData.layers.length > 0) {
-			for (const { name, visible, locked, opacity, data } of cellData.layers) {
-				const l = new oekaki.LayeredCanvas(name);
-				l.visible = visible;
-				l.locked = locked;
-				l.opacity = opacity;
-				l.data = new Uint8ClampedArray(data);
-				l.trace();
-			}
-		} else {
-			new oekaki.LayeredCanvas("レイヤー #1");
-		}
-		syncLayerEntries();
-		updateOnionSkin();
+		reloadWalkCell(walkActiveIndex);
 	}, [walkActiveIndex, walkMode]);
+
+	// ── 一括適用（歩行グラ：同じ方向・同じ番目、アニメ：全フレーム） ──
+
+	/** 一括適用先のコマ（編集中のコマは含まない） */
+	const syncTargets = (): number[] => {
+		const targets = new Set<number>();
+		if (walkModeRef.current) {
+			return walkSyncTargets(
+				walkActiveIndexRef.current,
+				walkPresetRef.current,
+				syncWayRef.current,
+				syncFrameRef.current,
+			);
+		} else if (animMode && syncAllRef.current) {
+			frameInstancesRef.current.forEach((_, i) => targets.add(i));
+			targets.delete(currentFrameRef.current);
+		}
+		return [...targets];
+	};
+
+	useEffect(() => {
+		setSyncHost({
+			targets: syncTargets,
+			withCell: (cell, fn, create) => {
+				const current = oekaki.getLayers();
+				if (walkModeRef.current) {
+					const exists = !!walkLayersRef.current.get(cell)?.layers.length;
+					if (!exists && !create) return;
+					oekaki.setLayers([]);
+					fn(fromWalkCell(cell));
+					walkLayersRef.current.set(cell, toWalkCell(oekaki.getLayers()));
+					walkDataRef.current.set(cell, oekaki.render().toDataURL("image/png"));
+				} else {
+					const layers = frameInstancesRef.current[cell];
+					if (!layers) return;
+					oekaki.setLayers([...layers]);
+					fn(oekaki.getLayers());
+					frameInstancesRef.current[cell] = oekaki.getLayers();
+				}
+				oekaki.setLayers(current);
+			},
+		});
+		return () => setSyncHost(null);
+	});
+
+	const toggleSync = (kind: "way" | "frame" | "all") => {
+		const ref =
+			kind === "way"
+				? syncWayRef
+				: kind === "frame"
+					? syncFrameRef
+					: syncAllRef;
+		const set =
+			kind === "way"
+				? setSyncWay
+				: kind === "frame"
+					? setSyncFrame
+					: setSyncAll;
+		ref.current = !ref.current;
+		set(ref.current);
+	};
+
+	/**
+	 * 選択中のコマの方向の全コマを、方向 srcWay のコマ（全レイヤーを重ねた見た目）で上書きする
+	 *
+	 * 貼り先は1枚のレイヤーになる。コマ単位の操作なのでUndoは効かない
+	 */
+	const handlePasteWay = (srcWay: number, pasteFlipped: boolean) => {
+		const preset = walkPresetRef.current;
+		const { frames } = preset;
+		const current = walkActiveIndexRef.current;
+		const dstWay = walkToXY(current, frames)[1];
+		if (srcWay < 0 || srcWay === dstWay) return;
+		const label = (y: number) =>
+			preset.ways[y]?.label || preset.ways[y]?.key || "";
+		if (
+			!confirm(
+				`${label(dstWay)}の全コマを${label(srcWay)}のコマで上書きしますか？（元に戻せません）`,
+			)
+		)
+			return;
+		handleDeselect();
+		walkLayersRef.current.set(current, toWalkCell(oekaki.getLayers()));
+		const { w, h } = canvasSizeRef.current;
+		const dotSize = oekaki.getDotSize();
+		const pw = preset.w * dotSize;
+		const ph = preset.h * dotSize;
+		const merged = document.createElement("canvas");
+		merged.width = w;
+		merged.height = h;
+		const mctx = merged.getContext("2d");
+		const part = document.createElement("canvas");
+		part.width = w;
+		part.height = h;
+		const pctx = part.getContext("2d");
+		if (!mctx || !pctx) return;
+		for (let x = 0; x < frames; x++) {
+			const from = walkToI(x, srcWay, frames);
+			const to = walkToI(x, dstWay, frames);
+			const src = walkLayersRef.current.get(from)?.layers ?? [];
+			if (!src.length) {
+				walkLayersRef.current.delete(to);
+				walkDataRef.current.delete(to);
+				continue;
+			}
+			// 全レイヤーを重ねた見た目にする
+			mctx.clearRect(0, 0, w, h);
+			for (const l of src) {
+				if (!l.visible) continue;
+				const id = pctx.createImageData(w, h);
+				id.data.set(l.data);
+				pctx.putImageData(id, 0, 0);
+				mctx.globalAlpha = l.opacity / 100;
+				mctx.drawImage(part, 0, 0);
+			}
+			mctx.globalAlpha = 1;
+			pctx.clearRect(0, 0, w, h);
+			pctx.save();
+			pctx.imageSmoothingEnabled = false;
+			if (pasteFlipped) {
+				// 絵は左上から 規格の幅 × 高さ ドット分なので、その幅で反転する
+				pctx.translate(pw, 0);
+				pctx.scale(-1, 1);
+			}
+			pctx.drawImage(merged, 0, 0, pw, ph, 0, 0, pw, ph);
+			pctx.restore();
+			const data = new Uint8ClampedArray(pctx.getImageData(0, 0, w, h).data);
+			walkLayersRef.current.set(to, {
+				layers: [
+					{
+						name: "レイヤー #1",
+						visible: true,
+						locked: false,
+						opacity: 100,
+						data,
+					},
+				],
+			});
+			walkDataRef.current.set(to, part.toDataURL("image/png"));
+		}
+		reloadWalkCell(current);
+		setActiveLayerIndex(0);
+		activeLayerIndexRef.current = 0;
+		forceRender((n) => n + 1);
+	};
 
 	const enterWalkMode = () => {
 		if (animMode) exitAnimMode();
@@ -1784,8 +2074,10 @@ export default function DotDrawingEditor({
 		const active =
 			layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
 		if (!active) return;
+		resetSyncBase(active);
 		active.clear();
 		active.trace();
+		syncEdit(active);
 		forceRender((n) => n + 1);
 	};
 
@@ -1811,13 +2103,24 @@ export default function DotDrawingEditor({
 		forceRender((n) => n + 1);
 	};
 
+	/** 歩行グラの編集中のコマのサムネイルを描き直す */
+	const refreshWalkThumbnail = () => {
+		if (!walkModeRef.current) return;
+		walkDataRef.current.set(
+			walkActiveIndexRef.current,
+			oekaki.render().toDataURL("image/png"),
+		);
+	};
+
 	const handleUndo = () => {
 		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.undo();
+		refreshWalkThumbnail();
 		forceRender((n) => n + 1);
 	};
 
 	const handleRedo = () => {
 		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.redo();
+		refreshWalkThumbnail();
 		forceRender((n) => n + 1);
 	};
 
@@ -1830,6 +2133,7 @@ export default function DotDrawingEditor({
 	const addLayer = () => {
 		const name = `Layer ${layerCounterRef.current++}`;
 		const newLayer = new oekaki.LayeredCanvas(name);
+		syncAddLayer(name);
 		const newEntry: LayerEntry = { instance: newLayer, name };
 		const entries = [newEntry, ...layerEntriesRef.current];
 		setLayerEntries(entries);
@@ -1864,6 +2168,9 @@ export default function DotDrawingEditor({
 		layerEntriesRef.current = entries;
 		const gLayers = [...entries].reverse().map((e) => e.instance);
 		oekaki.setLayers(gLayers);
+		// 一括適用先は下から数えた位置で動かす
+		const n = entries.length;
+		syncReorderLayer(n - 1 - from, n - 1 - to);
 		let newIdx = activeLayerIndexRef.current;
 		if (from === newIdx) {
 			newIdx = to;
@@ -1880,6 +2187,7 @@ export default function DotDrawingEditor({
 		const entry = layerEntriesRef.current[i];
 		if (!entry) return;
 		entry.instance.visible = !entry.instance.visible;
+		syncLayerProps(entry.instance, { visible: entry.instance.visible });
 		forceRender((n) => n + 1);
 	};
 
@@ -1901,6 +2209,7 @@ export default function DotDrawingEditor({
 		const entry = layerEntriesRef.current[i];
 		if (!entry) return;
 		entry.instance.opacity = opacity;
+		syncLayerProps(entry.instance, { opacity });
 		forceRender((n) => n + 1);
 	};
 
@@ -2728,6 +3037,8 @@ export default function DotDrawingEditor({
 					onionSkinOpacity={onionSkinOpacity}
 					onToggleOnionSkin={toggleOnionSkin}
 					onOnionSkinOpacityChange={handleOnionSkinOpacityChange}
+					syncAll={syncAll}
+					onToggleSyncAll={() => toggleSync("all")}
 					onExit={exitAnimMode}
 				/>
 			)}
@@ -2747,6 +3058,16 @@ export default function DotDrawingEditor({
 					onToggleOnionSkin={toggleOnionSkin}
 					onOnionSkinOpacityChange={handleOnionSkinOpacityChange}
 					onNudge={nudge}
+					syncWay={syncWay}
+					onToggleSyncWay={() => toggleSync("way")}
+					syncFrame={syncFrame}
+					onToggleSyncFrame={() => toggleSync("frame")}
+					linkedCells={
+						new Set(
+							walkSyncTargets(walkActiveIndex, walkPreset, syncWay, syncFrame),
+						)
+					}
+					onPasteWay={handlePasteWay}
 				/>
 			)}
 
@@ -3010,6 +3331,7 @@ export default function DotDrawingEditor({
 				open={showImport}
 				onClose={() => setShowImport(false)}
 				onImport={handleImport}
+				onImportProject={handleImportHgp}
 				walkMode={walkMode}
 				walkPresets={walkPresets}
 			/>
@@ -3040,6 +3362,7 @@ export default function DotDrawingEditor({
 				onExportWalkGif={handleExportWalkGif}
 				onExportWalkZip={handleExportWalkZip}
 				onExportWalkAni={handleExportWalkAni}
+				onExportProject={handleExportHgp}
 			/>
 			{/* eslint-enable react-hooks/refs */}
 		</div>
