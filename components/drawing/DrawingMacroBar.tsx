@@ -1,6 +1,6 @@
 "use client";
 
-import { FlipHorizontal, FlipVertical } from "lucide-react";
+import { FlipHorizontal, FlipVertical, Layers } from "lucide-react";
 import { useState } from "react";
 import type { FlipAxis } from "@/lib/drawing/drawing-macros";
 
@@ -9,10 +9,15 @@ export type MacroScope = "canvas" | "layer";
 interface DrawingMacroBarProps {
 	/** scope=canvas は全レイヤー（ロック中も含む）、layer は選択中のレイヤーだけ */
 	onFlip: (axis: FlipAxis, scope: MacroScope) => void;
+	/** 表示中のレイヤーを1枚に統合する。渡したときだけボタンを出す */
+	onFlatten?: () => void;
 }
 
 /** 描画内容を書き換える自動操作（キャンバスのツールバー下に出す） */
-export default function DrawingMacroBar({ onFlip }: DrawingMacroBarProps) {
+export default function DrawingMacroBar({
+	onFlip,
+	onFlatten,
+}: DrawingMacroBarProps) {
 	const [scope, setScope] = useState<MacroScope>("canvas");
 	const scopeBtn = (s: MacroScope, label: string, title: string) => (
 		<button
@@ -52,6 +57,19 @@ export default function DrawingMacroBar({ onFlip }: DrawingMacroBarProps) {
 			<div className="w-px h-5 bg-gray-800 mx-1 shrink-0" />
 			{actionBtn("horizontal", <FlipHorizontal size={11} />, "左右反転")}
 			{actionBtn("vertical", <FlipVertical size={11} />, "上下反転")}
+			{onFlatten && (
+				<>
+					<div className="w-px h-5 bg-gray-800 mx-1 shrink-0" />
+					<button
+						onClick={onFlatten}
+						className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20 shrink-0"
+						title="表示中のレイヤーを見た目どおり1枚にまとめる（非表示のレイヤーは消える）。一括適用が有効なら連動先も統合する"
+					>
+						<Layers size={11} />
+						<span>1枚に統合</span>
+					</button>
+				</>
+			)}
 		</div>
 	);
 }

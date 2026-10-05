@@ -409,3 +409,32 @@ export const flushSelectionSync = () => {
 		replaying = false;
 	}
 };
+
+// ───────────────────────────────────────────────────────
+// レイヤーの統合
+// ───────────────────────────────────────────────────────
+
+/**
+ * oekaki に載っているレイヤーを見た目どおり（表示中のものを不透明度込みで）1枚に統合する
+ *
+ * 呼んだ後は oekaki に統合したレイヤー1枚だけが載った状態になる
+ */
+export const flattenLayers = (): oekaki.LayeredCanvas => {
+	const merged = oekaki.render();
+	oekaki.setLayers([]);
+	const layer = new oekaki.LayeredCanvas("レイヤー #1");
+	layer.ctx.drawImage(merged, 0, 0);
+	layer.trace();
+	layer.used = true;
+	return layer;
+};
+
+/** 一括適用先のコマのレイヤーも1枚に統合する */
+export const syncFlatten = () => {
+	if (!host) return;
+	// 選択範囲の記録が残っていれば先に再生して終える（消えるレイヤーに紐づいているため）
+	flushSelectionSync();
+	for (const cell of host.targets()) {
+		host.withCell(cell, () => flattenLayers(), false);
+	}
+};

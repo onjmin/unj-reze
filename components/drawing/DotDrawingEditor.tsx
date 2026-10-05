@@ -58,6 +58,7 @@ import {
 	readPasteImage,
 } from "@/lib/drawing/oekaki-clipboard";
 import {
+	flattenLayers,
 	flushSelectionSync,
 	hasPendingSelectionMove,
 	markDragStart,
@@ -66,6 +67,7 @@ import {
 	syncAddLayer,
 	syncApply,
 	syncEdit,
+	syncFlatten,
 	syncLayerProps,
 	syncReorderLayer,
 } from "@/lib/drawing/sync-edit";
@@ -2113,6 +2115,37 @@ export default function DotDrawingEditor({
 		);
 	};
 
+	/**
+	 * 表示中のレイヤーを見た目どおり1枚に統合する（非表示のレイヤーは消える）
+	 *
+	 * 一括適用のトグルが有効なら連動先のコマも統合する。レイヤーの構成が変わるのでUndoは効かない
+	 */
+	const handleFlatten = () => {
+		const synced = walkModeRef.current
+			? syncWayRef.current || syncFrameRef.current
+			: syncAllRef.current;
+		if (
+			!confirm(
+				synced
+					? "このコマと一括適用先のコマのレイヤーを1枚に統合しますか？（元に戻せません）"
+					: "レイヤーを1枚に統合しますか？（元に戻せません）",
+			)
+		)
+			return;
+		handleDeselect();
+		syncFlatten();
+		const layer = flattenLayers();
+		if (animMode && frameInstancesRef.current.length > 0)
+			frameInstancesRef.current[currentFrameRef.current] = [layer];
+		syncLayerEntries();
+		setActiveLayerIndex(0);
+		activeLayerIndexRef.current = 0;
+		resetSyncBase(layer);
+		refreshWalkThumbnail();
+		updateOnionSkin();
+		forceRender((n) => n + 1);
+	};
+
 	const handleUndo = () => {
 		layerEntriesRef.current[activeLayerIndexRef.current]?.instance.undo();
 		refreshWalkThumbnail();
@@ -3139,7 +3172,9 @@ export default function DotDrawingEditor({
 					</button>
 				</div>
 
-				{showMacros && <DrawingMacroBar onFlip={handleMacroFlip} />}
+				{showMacros && (
+					<DrawingMacroBar onFlip={handleMacroFlip} onFlatten={handleFlatten} />
+				)}
 
 				{(tool === "select" || tool === "lasso") && (
 					<div className="flex items-center space-x-1">
