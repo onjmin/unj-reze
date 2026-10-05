@@ -2339,15 +2339,44 @@ export function fitManifestToBars(
 	// 場面の頭へぴったり移る（比で一律に写すと、場面の頭で光らせる演出が半小節ずれる）。
 	const oldEdges = [...sorted.map((s) => s.startBar), span];
 	const newEdges = [...sorted.map((s) => newStart.get(s.id)!), totalBars];
-	const mapBar = (b: number) => {
+	const segmentOf = (b: number) => {
 		let i = 0;
 		while (i < oldEdges.length - 2 && b >= oldEdges[i + 1]) i++;
+		return i;
+	};
+	/** その位置での伸び縮みの倍率（区間の長さの比）。 */
+	const scaleAt = (b: number) => {
+		const i = segmentOf(b);
+		const o = oldEdges[i + 1] - oldEdges[i];
+		return o > 0 ? (newEdges[i + 1] - newEdges[i]) / o : k;
+	};
+	// 1/16小節（1拍の1/4）刻み。0.5小節刻みだと、場面の途中に置いた値が場面の頭と食い違う
+	const snap = (v: number) => Math.round(v * 16) / 16;
+	const mapBar = (b: number) => {
+		const i = segmentOf(b);
 		const o0 = oldEdges[i];
 		const o1 = oldEdges[i + 1];
 		const n0 = newEdges[i];
 		const n1 = newEdges[i + 1];
 		const t = o1 > o0 ? (b - o0) / (o1 - o0) : 0;
-		return Math.round((n0 + t * (n1 - n0)) * 2) / 2; // 0.5小節刻み
+		return snap(n0 + t * (n1 - n0));
+	};
+	/**
+	 * phrase のモジュレータのうち `phaseOffset`（曲頭からの絶対小節）を持つもの——自動図形グループの
+	 * 「区間の頭でフェードイン／終わりでフェードアウト」の一発もの、特殊アレンジの割り込みに
+	 * 山を合わせたもの——は、レイヤーの小節指定と一緒に動かさないと、写した後に区間とずれる。
+	 * 一発もの（once）は始点と終点の両方を写す。1/16小節より短いフェードは丸めると潰れるので、
+	 * 長さは倍率だけ掛ける。
+	 */
+	const mapModulator = (mod: MvModulator): MvModulator => {
+		if (mod.source !== "phrase" || mod.phaseOffset === undefined) return mod;
+		const s = mod.phaseOffset;
+		const len = mod.bars ?? 8;
+		if (!mod.once) return { ...mod, phaseOffset: mapBar(s) };
+		const ns = mapBar(s);
+		const ne = mapBar(s + len);
+		const bars = len * scaleAt(s) < 1 / 16 ? len * scaleAt(s) : ne - ns;
+		return { ...mod, phaseOffset: ns, bars: Math.max(0.01, bars) };
 	};
 	return {
 		...m,
@@ -2364,8 +2393,22 @@ export function fitManifestToBars(
 				};
 			if (next.kind === "effect" && next.bars)
 				next = { ...next, bars: next.bars.map(mapBar) };
+			if (next.kind === "shape" && next.modulators?.length)
+				next = { ...next, modulators: next.modulators.map(mapModulator) };
 			return next;
 		}),
+		groups: m.groups?.map((g) =>
+			g.arrangement
+				? {
+						...g,
+						arrangement: {
+							...g.arrangement,
+							triggerBar: mapBar(g.arrangement.triggerBar),
+							endBar: mapBar(g.arrangement.endBar),
+						},
+					}
+				: g,
+		),
 	};
 }
 

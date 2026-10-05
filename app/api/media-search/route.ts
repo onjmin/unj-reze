@@ -25,9 +25,11 @@ export async function GET(request: NextRequest) {
 		: 50;
 	const offsetParam = url.searchParams.get("offset");
 	const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : 0;
+	// タイムラインのメディア欄が過去へ遡るためのカーソル（ISO）。offset より優先。
+	const before = url.searchParams.get("before") || undefined;
 
 	// hasMore 判定のため limit+1 件引いて、末尾の1件を切り落とす。
-	const rows = await db.searchMedia(kind, q, userId, limit + 1, offset);
+	const rows = await db.searchMedia(kind, q, userId, limit + 1, offset, before);
 	const hasMore = rows.length > limit;
 	const posts: MediaSearchPost[] = rows.slice(0, limit).map((r) => ({
 		id: encodeId(r.id),
@@ -43,6 +45,10 @@ export async function GET(request: NextRequest) {
 		walkPreset: r.walkPreset,
 		originType: r.originType,
 		isOwner: r.isOwner,
+		createdAt: r.createdAt,
+		likes: r.likes,
+		dislikes: r.dislikes,
+		repliesCount: r.repliesCount,
 	}));
 	return NextResponse.json({ posts, hasMore });
 }

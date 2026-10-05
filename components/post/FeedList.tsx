@@ -184,10 +184,7 @@ export default function FeedList({
 	}
 
 	if (activeTab === "everyone" && feedSubMode === "media") {
-		const mediaItems = posts
-			.flatMap((p) => [p, ...p.replies])
-			.filter((p) => p.hasImage && p.imageSrc);
-		return <MediaGrid items={mediaItems} />;
+		return <MediaGrid userId={userId} />;
 	}
 
 	if (activeTab === "everyone" && feedSubMode === "replies") {

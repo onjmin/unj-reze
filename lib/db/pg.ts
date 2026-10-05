@@ -1742,11 +1742,16 @@ export const pgStore: DataStore = {
 		userId?: string,
 		limit = 50,
 		offset = 0,
+		before?: string,
 	) {
 		const safeLimit = Math.max(1, Math.min(limit, 50));
-		const safeOffset = Math.max(0, offset);
+		const beforeDate = before ? new Date(before) : null;
+		const cursor =
+			beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : null;
+		const safeOffset = cursor ? 0 : Math.max(0, offset);
 		// threads/res をマージしてから offset+limit 件目で切るため、各テーブルからは
-		// 「id降順で offset+limit 件」だけ引けば十分（全件取得は egress を壊す）。
+		// 「新しい順で offset+limit 件」だけ引けば十分（全件取得は egress を壊す）。
+		// offset は 200 件で頭打ちなので、深く遡るのは before カーソルで行う。
 		const fetchEach = Math.min(safeOffset + safeLimit, 200);
 		const contentType = kind === "image" ? CT.Image : CT.Dtm;
 		const trimmed = query.trim();
@@ -1756,27 +1761,31 @@ export const pgStore: DataStore = {
 			params.push(`%${trimmed}%`);
 			where += ` AND (content_text ILIKE $${params.length} OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length})`;
 		}
+		if (cursor) {
+			params.push(cursor.toISOString());
+			where += ` AND created_at < $${params.length}`;
+		}
 		params.push(fetchEach);
+		const scoped = (alias: string) =>
+			where.replace(
+				/\b(content_type|content_text|cc_user_name|created_at)\b/g,
+				`${alias}.$1`,
+			);
 
+		// thread と res は id 空間が別なので、両者を混ぜて並べるのは created_at で行う。
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(
-				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, t.dot_w, t.dot_h, t.anim_frames, t.anim_fps, t.walk_preset, ${AUTHOR_SELECT}
+				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, t.dot_w, t.dot_h, t.anim_frames, t.anim_fps, t.walk_preset, t.created_at, t.good_count, t.bad_count, t.res_count, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
-          WHERE t.deleted_at IS NULL AND ${where
-						.replace(/content_type/g, "t.content_type")
-						.replace(/content_text/g, "t.content_text")
-						.replace(/cc_user_name/g, "t.cc_user_name")}
-          ORDER BY t.id DESC LIMIT $${params.length}`,
+          WHERE t.deleted_at IS NULL AND ${scoped("t")}
+          ORDER BY t.created_at DESC LIMIT $${params.length}`,
 				params,
 			),
 			q(
-				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, r.dot_w, r.dot_h, r.anim_frames, r.anim_fps, r.walk_preset, ${AUTHOR_SELECT}
+				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, r.dot_w, r.dot_h, r.anim_frames, r.anim_fps, r.walk_preset, r.created_at, r.good_count, r.bad_count, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
-          WHERE ${where
-						.replace(/content_type/g, "r.content_type")
-						.replace(/content_text/g, "r.content_text")
-						.replace(/cc_user_name/g, "r.cc_user_name")}
-          ORDER BY r.id DESC LIMIT $${params.length}`,
+          WHERE ${scoped("r")}
+          ORDER BY r.created_at DESC LIMIT $${params.length}`,
 				params,
 			),
 		]);
@@ -1795,6 +1804,10 @@ export const pgStore: DataStore = {
 					walkPreset: r.walk_preset ?? undefined,
 					originType: r.origin_type || undefined,
 					isOwner: userId ? r.user_id === userId : false,
+					createdAt: toIso(r.created_at),
+					likes: Number(r.good_count ?? 0),
+					dislikes: Number(r.bad_count ?? 0),
+					repliesCount: Math.max(Number(r.res_count ?? 1) - 1, 0),
 				}),
 			),
 			...rRows.map(
@@ -1811,12 +1824,18 @@ export const pgStore: DataStore = {
 					walkPreset: r.walk_preset ?? undefined,
 					originType: r.origin_type || undefined,
 					isOwner: userId ? r.user_id === userId : false,
+					createdAt: toIso(r.created_at),
+					likes: Number(r.good_count ?? 0),
+					dislikes: Number(r.bad_count ?? 0),
+					repliesCount: 0,
 				}),
 			),
 		];
-		// thread と res の id 空間は別なので、ここではソート順は投稿順に近似する程度でよい
-		// （新しい順の目安として大きいID優先）。
-		out.sort((a, b) => Number(b.id) - Number(a.id));
+		out.sort(
+			(a, b) =>
+				new Date(b.createdAt ?? 0).getTime() -
+				new Date(a.createdAt ?? 0).getTime(),
+		);
 		return out.slice(safeOffset, safeOffset + safeLimit);
 	},
 

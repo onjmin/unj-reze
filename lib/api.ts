@@ -376,6 +376,7 @@ const staticApi = {
 			userId?: string,
 			limit?: number,
 			offset?: number,
+			before?: string,
 		) => {
 			const safeLimit = limit ?? 50;
 			const rows = await mockDbInstance.searchMedia(
@@ -384,6 +385,7 @@ const staticApi = {
 				userId,
 				safeLimit + 1,
 				offset,
+				before,
 			);
 			const hasMore = rows.length > safeLimit;
 			return {
@@ -965,12 +967,14 @@ const liveApi = {
 			userId?: string,
 			limit?: number,
 			offset?: number,
+			before?: string,
 		) => {
 			const params = new URLSearchParams({ kind });
 			if (query.trim()) params.set("q", query.trim());
 			if (userId) params.set("userId", userId);
 			if (limit) params.set("limit", String(limit));
 			if (offset) params.set("offset", String(offset));
+			if (before) params.set("before", before);
 			return fetcher<{ posts: MediaSearchPost[]; hasMore: boolean }>(
 				`/media-search?${params.toString()}`,
 			);

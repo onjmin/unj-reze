@@ -2,10 +2,13 @@
 
 import { Image as ImageIcon, MessageCircle, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { cachePost } from "@/lib/post/post-cache";
-import { Post } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { api } from "@/lib/api";
+import type { MediaSearchPost } from "@/lib/types";
 import SpriteImage from "@/components/assets/SpriteImage";
+
+const PAGE_SIZE = 48;
 
 type MediaSort = "new" | "likes" | "dislikes";
 
@@ -16,26 +19,114 @@ const SORT_TABS: { id: MediaSort; label: string }[] = [
 ];
 
 interface MediaGridProps {
-	items: Post[];
+	userId?: string;
 }
 
-export default function MediaGrid({ items }: MediaGridProps) {
+/**
+ * タイムラインの「メディア」欄。フィードに読み込み済みの投稿（最新ページ＋返信の窓）から
+ * 拾うと過去の画像が出ないので、軽量な /api/media-search を created_at の
+ * カーソル（before）で遡って引く。いいね順・だめね順は読み込んだぶんの中での並べ替え。
+ */
+export default function MediaGrid({ userId }: MediaGridProps) {
 	const router = useRouter();
 	const [sort, setSort] = useState<MediaSort>("new");
+	const [items, setItems] = useState<MediaSearchPost[]>([]);
+	const [hasMore, setHasMore] = useState(true);
+	const [loading, setLoading] = useState(false);
+	const [failed, setFailed] = useState(false);
+	const loadingRef = useRef(false);
+	const sentinelRef = useRef<HTMLDivElement>(null);
+
+	const loadMore = useCallback(async () => {
+		if (loadingRef.current) return;
+		loadingRef.current = true;
+		setLoading(true);
+		setFailed(false);
+		try {
+			const before = items.at(-1)?.createdAt;
+			const res = await api.search.media(
+				"image",
+				"",
+				userId,
+				PAGE_SIZE,
+				0,
+				before,
+			);
+			setItems((prev) => {
+				const seen = new Set(prev.map((p) => p.id));
+				return [
+					...prev,
+					...res.posts.filter((p) => p.imageSrc && !seen.has(p.id)),
+				];
+			});
+			// 1件も進まないなら打ち切る（同時刻の投稿でカーソルが止まるのを防ぐ）。
+			setHasMore(res.hasMore && res.posts.length > 0);
+		} catch (err) {
+			console.error("メディアの読み込みに失敗", err);
+			setFailed(true);
+		} finally {
+			loadingRef.current = false;
+			setLoading(false);
+		}
+	}, [items, userId]);
+
+	const loadMoreRef = useRef(loadMore);
+	useEffect(() => {
+		loadMoreRef.current = loadMore;
+	});
+
+	// 初回
+	useEffect(() => {
+		void loadMoreRef.current();
+	}, []);
+
+	// 末尾が見えたら続き。iframe 内では IntersectionObserver の rootMargin が効かないので
+	// スクロールの監視も併用する（FeedList と同じ）。
+	useEffect(() => {
+		if (!hasMore || failed) return;
+		const sentinel = sentinelRef.current;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0].isIntersecting) void loadMoreRef.current();
+			},
+			{ rootMargin: "400px 0px 400px 0px", threshold: 0 },
+		);
+		if (sentinel) observer.observe(sentinel);
+		const scrollContainer =
+			document.getElementById("scrollable-content") || window;
+		const handleScroll = () => {
+			const target =
+				scrollContainer === window
+					? document.documentElement
+					: (scrollContainer as HTMLElement);
+			if (target.scrollHeight - target.scrollTop - target.clientHeight < 500)
+				void loadMoreRef.current();
+		};
+		scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+		return () => {
+			observer.disconnect();
+			scrollContainer.removeEventListener("scroll", handleScroll);
+		};
+	}, [hasMore, failed, items.length]);
 
 	const sorted = useMemo(() => {
 		const next = [...items];
-		if (sort === "likes") next.sort((a, b) => b.likes - a.likes);
-		else if (sort === "dislikes") next.sort((a, b) => b.dislikes - a.dislikes);
-		else
-			next.sort(
-				(a, b) =>
-					new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-			);
+		if (sort === "likes")
+			next.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
+		else if (sort === "dislikes")
+			next.sort((a, b) => (b.dislikes ?? 0) - (a.dislikes ?? 0));
 		return next;
 	}, [items, sort]);
 
-	if (items.length === 0) {
+	if (items.length === 0 && loading) {
+		return (
+			<div className="flex justify-center py-12">
+				<Loader2 className="text-gray-500 animate-spin" size={20} />
+			</div>
+		);
+	}
+
+	if (items.length === 0 && !failed) {
 		return (
 			<div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
 				<div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
@@ -65,10 +156,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
 				{sorted.map((post) => (
 					<button
 						key={post.id}
-						onClick={() => {
-							cachePost(post);
-							router.push(`/post/${post.id}`);
-						}}
+						onClick={() => router.push(`/post/${post.id}`)}
 						className="relative aspect-square bg-[#1a1b26] overflow-hidden group gimp-checkered-background-white"
 					>
 						<SpriteImage
@@ -99,20 +187,44 @@ export default function MediaGrid({ items }: MediaGridProps) {
 						<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-1 flex items-center gap-2 text-[10px] text-white font-bold opacity-0 group-hover:opacity-100 transition-opacity">
 							<span className="flex items-center gap-0.5">
 								<ThumbsUp size={10} />
-								{post.likes}
+								{post.likes ?? 0}
 							</span>
 							<span className="flex items-center gap-0.5">
 								<ThumbsDown size={10} />
-								{post.dislikes}
+								{post.dislikes ?? 0}
 							</span>
 							<span className="flex items-center gap-0.5">
 								<MessageCircle size={10} />
-								{post.repliesCount}
+								{post.repliesCount ?? 0}
 							</span>
 						</div>
 					</button>
 				))}
 			</div>
+			{failed ? (
+				<div className="p-6 text-center">
+					<button
+						onClick={() => void loadMore()}
+						className="text-xs font-bold text-blue-400 hover:text-blue-300"
+					>
+						読み込みに失敗しました。再試行
+					</button>
+				</div>
+			) : hasMore ? (
+				<div
+					ref={sentinelRef}
+					className="p-6 text-center bg-gray-900/10 flex items-center justify-center space-x-2"
+				>
+					<Loader2 className="animate-spin text-blue-500" size={16} />
+					<span className="text-xs text-gray-400 font-bold">
+						自動読み込み中…
+					</span>
+				</div>
+			) : (
+				<div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
+					すべて表示されました 🌱
+				</div>
+			)}
 		</div>
 	);
 }

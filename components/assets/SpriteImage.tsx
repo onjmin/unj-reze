@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
 	CSSProperties,
 	MouseEvent as ReactMouseEvent,
@@ -152,6 +152,28 @@ export default function SpriteImage({
 	// "play"(既定)=クロップして選択中のコマ/向きを再生。"sheet"=元のスプライトシート
 	// 画像をそのまま(全コマ並び)静止表示する。fit="natural"のときだけ切替ボタンを出す。
 	const [viewMode, setViewMode] = useState<"play" | "sheet">("play");
+	// fit="cover" のアニメ: 呼び出し側の箱（aspect-square 等）が aspectRatio を上書きするので、
+	// 背景をそのまま箱に貼るとコマが箱の比に引き伸ばされる。箱の実寸を測り、コマの比を
+	// 保ったまま収まる内側の箱に描く（切り抜くと歩行グラの頭や足が欠けるので contain）。
+	const coverBoxRef = useRef<HTMLDivElement>(null);
+	const [coverBox, setCoverBox] = useState<{ w: number; h: number } | null>(
+		null,
+	);
+	const measureCover = fit === "cover" && frames > 1 && !!src;
+	useEffect(() => {
+		const el = coverBoxRef.current;
+		if (!measureCover || !el) return;
+		const update = () =>
+			setCoverBox((prev) =>
+				prev && prev.w === el.clientWidth && prev.h === el.clientHeight
+					? prev
+					: { w: el.clientWidth, h: el.clientHeight },
+			);
+		update();
+		const ro = new ResizeObserver(update);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [measureCover]);
 
 	useEffect(() => {
 		if (frames <= 1 || !src) return;
@@ -291,6 +313,66 @@ export default function SpriteImage({
 	const keyframesName = `sprite-anim-steps-${frames}-r${rowIndex}of${rows}`;
 	const playing = animate && !isSheet;
 
+	const spriteStyle: CSSProperties = {
+		backgroundImage: `url(${src})`,
+		backgroundSize: isSheet ? "100% 100%" : `${frames * 100}% ${rows * 100}%`,
+		backgroundPosition: isSheet ? "0% 0%" : `0% ${yPos}%`,
+		backgroundRepeat: "no-repeat",
+		imageRendering: "pixelated",
+		...(playing
+			? {
+					animationName: keyframesName,
+					animationDuration: `${duration}s`,
+					animationTimingFunction: `steps(${frames})`,
+					animationIterationCount: "infinite",
+				}
+			: {}),
+	};
+	const keyframesEl = playing && (
+		<style
+			dangerouslySetInnerHTML={{
+				__html: `@keyframes ${keyframesName} { from { background-position: 0% ${yPos}%; } to { background-position: ${xTarget}% ${yPos}%; } }`,
+			}}
+		/>
+	);
+
+	if (fit === "cover") {
+		let inner: CSSProperties | null = null;
+		if (coverBox && cell && coverBox.w > 0 && coverBox.h > 0) {
+			const wide = coverBox.w / coverBox.h > ratio;
+			const width = wide ? coverBox.h * ratio : coverBox.w;
+			const height = wide ? coverBox.h : coverBox.w / ratio;
+			inner = {
+				left: (coverBox.w - width) / 2,
+				top: (coverBox.h - height) / 2,
+				width,
+				height,
+			};
+		}
+		return (
+			<div
+				ref={coverBoxRef}
+				role="img"
+				aria-label={alt || ""}
+				className={className}
+				onClick={onClick}
+				style={{ ...style, ...sizingStyle, position: "relative" }}
+			>
+				{inner && (
+					<div
+						style={{
+							...spriteStyle,
+							...inner,
+							position: "absolute",
+						}}
+					>
+						{keyframesEl}
+					</div>
+				)}
+			</div>
+		);
+	}
+
 	return (
 		<div
 			role="img"
@@ -301,30 +383,10 @@ export default function SpriteImage({
 				...style,
 				...sizingStyle,
 				...(isWalkPreview || showSheetToggle ? { position: "relative" } : {}),
-				backgroundImage: `url(${src})`,
-				backgroundSize: isSheet
-					? "100% 100%"
-					: `${frames * 100}% ${rows * 100}%`,
-				backgroundPosition: isSheet ? "0% 0%" : `0% ${yPos}%`,
-				backgroundRepeat: "no-repeat",
-				imageRendering: "pixelated",
-				...(playing
-					? {
-							animationName: keyframesName,
-							animationDuration: `${duration}s`,
-							animationTimingFunction: `steps(${frames})`,
-							animationIterationCount: "infinite",
-						}
-					: {}),
+				...spriteStyle,
 			}}
 		>
-			{playing && (
-				<style
-					dangerouslySetInnerHTML={{
-						__html: `@keyframes ${keyframesName} { from { background-position: 0% ${yPos}%; } to { background-position: ${xTarget}% ${yPos}%; } }`,
-					}}
-				/>
-			)}
+			{keyframesEl}
 			{!isSheet && isWalkPreview && ways && ways.length > 1 && (
 				<div className="absolute inset-0 pointer-events-none">
 					{(["w", "a", "s", "d"] as const)

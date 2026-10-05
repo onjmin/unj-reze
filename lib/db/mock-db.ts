@@ -1185,6 +1185,7 @@ class MockDB {
 		userId?: string,
 		limit?: number,
 		offset?: number,
+		before?: string,
 	): {
 		id: number;
 		displayName: string;
@@ -1199,6 +1200,10 @@ class MockDB {
 		walkPreset?: string;
 		originType?: OriginType;
 		isOwner?: boolean;
+		createdAt?: string;
+		likes?: number;
+		dislikes?: number;
+		repliesCount?: number;
 	}[] {
 		const q = query.trim().toLowerCase();
 		const hidden = this.getHiddenSlugs(userId);
@@ -1214,7 +1219,15 @@ class MockDB {
 					p.content.toLowerCase().includes(q) ||
 					p.displayName.toLowerCase().includes(q),
 			)
-			.sort((a, b) => Number(b.id) - Number(a.id))
+			.filter(
+				(p) =>
+					!before ||
+					new Date(p.createdAt).getTime() < new Date(before).getTime(),
+			)
+			.sort(
+				(a, b) =>
+					new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+			)
 			.map((p) => ({
 				id: p.id,
 				displayName: p.displayName,
@@ -1229,8 +1242,12 @@ class MockDB {
 				walkPreset: p.walkPreset,
 				originType: p.originType,
 				isOwner: mySlug !== undefined && p.slug === mySlug,
+				createdAt: p.createdAt,
+				likes: p.likes,
+				dislikes: p.dislikes,
+				repliesCount: p.repliesCount,
 			}));
-		const start = offset && offset > 0 ? offset : 0;
+		const start = !before && offset && offset > 0 ? offset : 0;
 		const safeLimit = limit && limit > 0 ? limit : 50;
 		return res.slice(start, start + safeLimit);
 	}

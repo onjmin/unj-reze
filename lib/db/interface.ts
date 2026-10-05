@@ -379,7 +379,9 @@ export interface DataStore {
 	): Promise<DbPost[]>;
 	/**
 	 * ゲーム/MVエディタの素材ピッカー専用の軽量検索。`kind` で `has_image` / `has_mml` を絞り込み、
-	 * スレッド構造・投票数・返信は一切引かない（docs/NEON_EGRESS.md）。
+	 * スレッド構造・返信は一切引かない（docs/NEON_EGRESS.md）。新しい順（created_at）。
+	 * `before`（ISO）を渡すとそれより古いものを limit 件返し、offset は無視する
+	 * （タイムラインのメディア欄が過去へ遡るためのカーソル。offset は浅い所しか引けない）。
 	 */
 	searchMedia(
 		kind: "image" | "mml",
@@ -387,6 +389,7 @@ export interface DataStore {
 		userId?: string,
 		limit?: number,
 		offset?: number,
+		before?: string,
 	): Promise<DbMediaSearchPost[]>;
 	getPostsByHashtag(
 		tag: string,

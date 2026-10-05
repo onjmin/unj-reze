@@ -7585,10 +7585,25 @@ export default function MvMaker({
 		const source = manifest.sections[sourceIndex];
 		if (!source) return;
 		const newSecId = mvUid("sec");
+		// 複製は元の場面を途中で区切る位置に置く。+8 固定だと、8小節ごとに切った見本では
+		// 次の場面と同じ小節になり、どちらかが永久に隠れる（チェックしても何も出ない）。
+		const nextStart = manifest.sections
+			.map((x) => x.startBar)
+			.filter((b) => b > source.startBar)
+			.sort((a, b) => a - b)[0];
+		const end =
+			nextStart ??
+			(song.totalBars > source.startBar + 1
+				? song.totalBars
+				: source.startBar + 16);
+		const startBar =
+			end - source.startBar >= 2
+				? source.startBar + Math.floor((end - source.startBar) / 2)
+				: Math.max(0, ...manifest.sections.map((x) => x.startBar)) + 8;
 		const newSec: MvSection = {
 			id: newSecId,
 			label: `${source.label} (コピー)`,
-			startBar: source.startBar + 8,
+			startBar,
 			stage: source.stage ? JSON.parse(JSON.stringify(source.stage)) : undefined,
 			transition: source.transition
 				? JSON.parse(JSON.stringify(source.transition))
@@ -7778,6 +7793,25 @@ export default function MvMaker({
 										)}
 									</div>
 								</div>
+
+								{/*
+									出番の無い場面。ここで何を設定しても画面に出ないので、そうと分かるようにする
+									（同じ小節から始まる場面が2つあると片方は永久に隠れる。曲の後ろに置いた場面も出ない）。
+								*/}
+								{(() => {
+									const owner = sectionAtBar(manifest.sections, s.startBar);
+									const msg =
+										owner && owner.id !== s.id
+											? `同じ ${s.startBar} 小節から始まる「${owner.label || "場面"}」に隠れて、この場面は画面に出ません。開始小節をずらしてください。`
+											: song.totalBars > 0 && s.startBar >= song.totalBars
+												? `曲は ${song.totalBars} 小節で終わるので、この場面は画面に出ません。`
+												: null;
+									return msg ? (
+										<p className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[10px] text-amber-100">
+											{msg}
+										</p>
+									) : null;
+								})()}
 
 								{/* 場面設定本体 */}
 								<div className="p-3 space-y-3">
@@ -8013,8 +8047,14 @@ export default function MvMaker({
 
 				<button
 					onClick={() => {
+						// 最後の場面の8小節後。それが曲の後ろになる（＝出番の無い場面になる）ときは、
+						// 最後の場面を曲の終わりまでの真ん中で区切る。
+						const last = Math.max(0, ...manifest.sections.map((s) => s.startBar));
+						const total = song.totalBars;
 						const startBar =
-							Math.max(0, ...manifest.sections.map((s) => s.startBar)) + 8;
+							total > 0 && last + 8 >= total && total - last >= 2
+								? last + Math.floor((total - last) / 2)
+								: last + 8;
 						const next: MvSection = {
 							id: mvUid("sec"),
 							label: `場面${manifest.sections.length + 1}`,

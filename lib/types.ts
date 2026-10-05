@@ -190,6 +190,11 @@ export interface MediaSearchPost {
 	originType?: OriginType;
 	/** 検索を呼んだuserId本人の投稿か。本人の投稿は権利表記に関わらず使える。 */
 	isOwner?: boolean;
+	/** ISO 文字列。タイムラインのメディア欄の並びと、続きを引く `before` カーソルに使う。 */
+	createdAt?: string;
+	likes?: number;
+	dislikes?: number;
+	repliesCount?: number;
 }
 
 export interface GameRecord {
