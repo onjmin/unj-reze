@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useLoadMoreSentinel } from "@/lib/hooks/useLoadMoreSentinel";
 import { getUserIdLabel } from "@/lib/social/avatar";
 import { extractChordsFromContent } from "@/lib/mml/chord";
 import { extractFirstEmbed, getEmbedThumbnail } from "@/lib/post/embed";
@@ -82,61 +83,14 @@ export default function BbsBoardView({
 	const [sortOpen, setSortOpen] = useState(false);
 	const sortRef = useRef<HTMLDivElement>(null);
 	const sentinelRef = useRef<HTMLDivElement>(null);
-	const onLoadMoreRef = useRef(onLoadMore);
-	const hasMoreRef = useRef(hasMore);
-	const loadingMoreRef = useRef(loadingMore);
-
-	useEffect(() => {
-		onLoadMoreRef.current = onLoadMore;
-		hasMoreRef.current = hasMore;
-		loadingMoreRef.current = loadingMore;
-	});
-
 	// ページ送りではなく無限ページネーション（下端に来たら続きを読み込む）。
-	// FeedList の通常フィードと同じ二段構え: IntersectionObserver 主体 + スクロール監視を保険に。
-	useEffect(() => {
-		if (!sentinelRef.current) return;
-		const sentinel = sentinelRef.current;
-
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (
-					entries[0].isIntersecting &&
-					hasMoreRef.current &&
-					!loadingMoreRef.current &&
-					onLoadMoreRef.current
-				) {
-					onLoadMoreRef.current();
-				}
-			},
-			{ rootMargin: "400px 0px 400px 0px", threshold: 0 },
-		);
-		observer.observe(sentinel);
-
-		const scrollContainer =
-			document.getElementById("scrollable-content") || window;
-		const handleScroll = () => {
-			if (
-				!hasMoreRef.current ||
-				loadingMoreRef.current ||
-				!onLoadMoreRef.current
-			)
-				return;
-			const target =
-				scrollContainer === window
-					? document.documentElement
-					: (scrollContainer as HTMLElement);
-			if (target.scrollHeight - target.scrollTop - target.clientHeight < 500) {
-				onLoadMoreRef.current();
-			}
-		};
-		scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-
-		return () => {
-			observer.disconnect();
-			scrollContainer.removeEventListener("scroll", handleScroll);
-		};
-	}, [posts.length]);
+	useLoadMoreSentinel({
+		sentinelRef,
+		onLoadMore,
+		hasMore,
+		loading: loadingMore,
+		rearmKey: posts.length,
+	});
 
 	useEffect(() => {
 		if (!sortOpen) return;

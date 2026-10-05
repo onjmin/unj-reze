@@ -490,8 +490,11 @@ export default function App() {
 			if (older.length < FEED_PAGE_SIZE) {
 				setHasMorePosts(false);
 			}
-		} catch {
-			// 失敗しても次のタップで再試行できるようにするだけ
+		} catch (err) {
+			// 読み込み終わり（loadingMore=false）で sentinel が張り直され、見えていれば
+			// すぐ引き直す。失敗が続くと連打になるので、少し待ってから終わりにする。
+			console.error("続きの読み込みに失敗", err);
+			await new Promise((r) => setTimeout(r, 3000));
 		} finally {
 			loadingMoreRef.current = false;
 			setLoadingMore(false);

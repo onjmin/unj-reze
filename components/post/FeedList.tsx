@@ -1,7 +1,8 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useLoadMoreSentinel } from "@/lib/hooks/useLoadMoreSentinel";
 import { encodeId } from "@/lib/sqids";
 import { Post } from "@/lib/types";
 import BbsBoardView from "@/components/bbs/BbsBoardView";
@@ -79,61 +80,14 @@ export default function FeedList({
 	onPostUpdated,
 }: FeedListProps) {
 	const sentinelRef = useRef<HTMLDivElement>(null);
-	const onLoadMoreRef = useRef(onLoadMore);
-	const hasMoreRef = useRef(hasMore);
-	const loadingMoreRef = useRef(loadingMore);
-
-	useEffect(() => {
-		onLoadMoreRef.current = onLoadMore;
-		hasMoreRef.current = hasMore;
-		loadingMoreRef.current = loadingMore;
+	useLoadMoreSentinel({
+		sentinelRef,
+		onLoadMore,
+		hasMore,
+		loading: loadingMore,
+		// サブモード（返信/メディア）から戻ると sentinel が付け直されるので張り直す。
+		rearmKey: `${posts.length}:${feedSubMode}`,
 	});
-
-	useEffect(() => {
-		if (!sentinelRef.current) return;
-		const sentinel = sentinelRef.current;
-
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (
-					entries[0].isIntersecting &&
-					hasMoreRef.current &&
-					!loadingMoreRef.current &&
-					onLoadMoreRef.current
-				) {
-					onLoadMoreRef.current();
-				}
-			},
-			{ rootMargin: "400px 0px 400px 0px", threshold: 0 },
-		);
-
-		observer.observe(sentinel);
-
-		const scrollContainer =
-			document.getElementById("scrollable-content") || window;
-		const handleScroll = () => {
-			if (
-				!hasMoreRef.current ||
-				loadingMoreRef.current ||
-				!onLoadMoreRef.current
-			)
-				return;
-			const target =
-				scrollContainer === window
-					? document.documentElement
-					: (scrollContainer as HTMLElement);
-			if (target.scrollHeight - target.scrollTop - target.clientHeight < 500) {
-				onLoadMoreRef.current();
-			}
-		};
-
-		scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-
-		return () => {
-			observer.disconnect();
-			scrollContainer.removeEventListener("scroll", handleScroll);
-		};
-	}, [posts.length]);
 
 	let displayPosts = [...posts];
 

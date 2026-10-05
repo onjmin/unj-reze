@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useLoadMoreSentinel } from "@/lib/hooks/useLoadMoreSentinel";
 import type { MediaSearchPost } from "@/lib/types";
 import SpriteImage from "@/components/assets/SpriteImage";
 
@@ -70,44 +71,23 @@ export default function MediaGrid({ userId }: MediaGridProps) {
 		}
 	}, [items, userId]);
 
+	// 初回
 	const loadMoreRef = useRef(loadMore);
 	useEffect(() => {
 		loadMoreRef.current = loadMore;
 	});
-
-	// 初回
 	useEffect(() => {
 		void loadMoreRef.current();
 	}, []);
 
-	// 末尾が見えたら続き。iframe 内では IntersectionObserver の rootMargin が効かないので
-	// スクロールの監視も併用する（FeedList と同じ）。
-	useEffect(() => {
-		if (!hasMore || failed) return;
-		const sentinel = sentinelRef.current;
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0].isIntersecting) void loadMoreRef.current();
-			},
-			{ rootMargin: "400px 0px 400px 0px", threshold: 0 },
-		);
-		if (sentinel) observer.observe(sentinel);
-		const scrollContainer =
-			document.getElementById("scrollable-content") || window;
-		const handleScroll = () => {
-			const target =
-				scrollContainer === window
-					? document.documentElement
-					: (scrollContainer as HTMLElement);
-			if (target.scrollHeight - target.scrollTop - target.clientHeight < 500)
-				void loadMoreRef.current();
-		};
-		scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-		return () => {
-			observer.disconnect();
-			scrollContainer.removeEventListener("scroll", handleScroll);
-		};
-	}, [hasMore, failed, items.length]);
+	// 失敗したら自動では引き直さない（下の「再試行」から）。張り直しで連打になるため。
+	useLoadMoreSentinel({
+		sentinelRef,
+		onLoadMore: () => void loadMore(),
+		hasMore: hasMore && !failed,
+		loading,
+		rearmKey: items.length,
+	});
 
 	const sorted = useMemo(() => {
 		const next = [...items];
