@@ -2298,6 +2298,77 @@ export const MV_LAYER_KIND_LABELS: Record<MvLayer["kind"], string> = {
 // ───────────────── ヘルパ ─────────────────
 
 /** セクションIDの一覧から、指定小節に該当するセクションを返す（先頭より前なら最初のセクション）。 */
+/**
+ * 場面の割り振りが何小節の曲を想定しているか。最後の場面の長さは分からないので、
+ * その直前の場面と同じ長さとみなす（見本は 0/8/…/56 ＝ 64小節）。場面が無ければ 0。
+ */
+export function sectionsSpanBars(sections: MvSection[]): number {
+	if (sections.length === 0) return 0;
+	const starts = sections.map((s) => s.startBar).sort((a, b) => a - b);
+	const last = starts[starts.length - 1];
+	const prev = starts.length >= 2 ? starts[starts.length - 2] : 0;
+	return last + Math.max(1, last - prev || 8);
+}
+
+/**
+ * 場面の割り振りを曲の長さ（totalBars）に合わせて伸び縮みさせる。
+ * 見本は64小節の曲を前提に場面を切ってあるので、長い曲に使うと最後の場面（アウトロ）が
+ * 曲の後半を丸ごと受け持ち、そこから先で場面ごとの出し分けができなくなる。
+ *
+ * 場面の頭を比で写し、小節で持っている他の値（レイヤーの小節指定、演出の発火小節）も
+ * 同じ写し方で動かす——場面の頭で光らせる演出が、写した後も場面の頭で光るように。
+ * 場面が無い・すでに合っている（差が1小節未満）ときは null。
+ */
+export function fitManifestToBars(
+	m: MvManifest,
+	totalBars: number,
+): MvManifest | null {
+	const span = sectionsSpanBars(m.sections);
+	if (span <= 0 || totalBars <= 0 || Math.abs(span - totalBars) < 1) return null;
+	const k = totalBars / span;
+	// 場面の頭は整数小節に丸め、詰まって重ならないよう前の場面より1小節は後ろにする
+	const sorted = [...m.sections].sort((a, b) => a.startBar - b.startBar);
+	const newStart = new Map<string, number>();
+	let prev = -1;
+	for (const s of sorted) {
+		const b = Math.max(prev + 1, Math.round(s.startBar * k));
+		newStart.set(s.id, s.startBar === 0 ? 0 : b);
+		prev = newStart.get(s.id)!;
+	}
+	// 他の小節は「どの場面の何割の位置か」を保って写す。場面の頭ちょうどの値は、丸めた後の
+	// 場面の頭へぴったり移る（比で一律に写すと、場面の頭で光らせる演出が半小節ずれる）。
+	const oldEdges = [...sorted.map((s) => s.startBar), span];
+	const newEdges = [...sorted.map((s) => newStart.get(s.id)!), totalBars];
+	const mapBar = (b: number) => {
+		let i = 0;
+		while (i < oldEdges.length - 2 && b >= oldEdges[i + 1]) i++;
+		const o0 = oldEdges[i];
+		const o1 = oldEdges[i + 1];
+		const n0 = newEdges[i];
+		const n1 = newEdges[i + 1];
+		const t = o1 > o0 ? (b - o0) / (o1 - o0) : 0;
+		return Math.round((n0 + t * (n1 - n0)) * 2) / 2; // 0.5小節刻み
+	};
+	return {
+		...m,
+		sections: m.sections.map((s) => ({
+			...s,
+			startBar: newStart.get(s.id) ?? s.startBar,
+		})),
+		layers: m.layers.map((l) => {
+			let next: MvLayer = l;
+			if (l.barRange)
+				next = {
+					...next,
+					barRange: [mapBar(l.barRange[0]), mapBar(l.barRange[1])],
+				};
+			if (next.kind === "effect" && next.bars)
+				next = { ...next, bars: next.bars.map(mapBar) };
+			return next;
+		}),
+	};
+}
+
 export function sectionAtBar(
 	sections: MvSection[],
 	bar: number,

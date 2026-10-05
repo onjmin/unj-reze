@@ -154,6 +154,9 @@ import {
 	type MvWidgetLayer,
 	mvAudioMode,
 	mvUid,
+	fitManifestToBars,
+	sectionAtBar,
+	sectionsSpanBars,
 	mvWalkSpeed,
 	parseLyricsBulkGroups,
 	resolveEntranceStyle,
@@ -2614,15 +2617,25 @@ export default function MvMaker({
 	);
 
 	// ── 楽曲情報（表示用） ─────────────────────────────────
+	/**
+	 * 曲を選び直した直後だけ立てる。見本の場面は64小節の曲を前提に切ってあるので、
+	 * 曲の長さが分かった時点で場面を合わせ直す（自動保存の復元や編集中のMML書き換えでは動かさない）。
+	 */
+	const fitSectionsOnSongRef = useRef(false);
 	useEffect(() => {
 		let disposed = false;
 		parseMvSong(manifest.mml).then((s) => {
-			if (!disposed) setSong(s);
+			if (disposed) return;
+			setSong(s);
+			if (fitSectionsOnSongRef.current && s.totalBars > 0) {
+				fitSectionsOnSongRef.current = false;
+				update((m) => fitManifestToBars(m, s.totalBars) ?? m);
+			}
 		});
 		return () => {
 			disposed = true;
 		};
-	}, [manifest.mml]);
+	}, [manifest.mml, update]);
 
 	// ── オートセーブ / 履歴 ────────────────────────────────
 	useEffect(() => {
@@ -2656,7 +2669,10 @@ export default function MvMaker({
 		if (!picker) return;
 		if (picker.mode === "bgm") {
 			// MML専用ピッカーなので rawMml が必ず入る
-			if (result.rawMml) update((m) => ({ ...m, mml: result.rawMml! }));
+			if (result.rawMml) {
+				fitSectionsOnSongRef.current = true;
+				update((m) => ({ ...m, mml: result.rawMml! }));
+			}
 		} else if (picker.target === "stageBg") {
 			update((m) => ({
 				...m,
@@ -7615,6 +7631,31 @@ export default function MvMaker({
 				<p className="text-[10px] leading-relaxed text-gray-400">
 					小節番号で曲をカット分け（イントロ・Aメロ・サビ等）します。場面ごとに背景・画面効果・表示するレイヤーを完全に切り替えられます。
 				</p>
+				{(() => {
+					const span = sectionsSpanBars(manifest.sections);
+					const total = song.totalBars;
+					if (total <= 0 || span <= 0 || Math.abs(span - total) < 4) return null;
+					const last = sectionAtBar(manifest.sections, total);
+					return (
+						<div className="mt-2 space-y-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2">
+							<p className="text-[10px] leading-relaxed text-amber-100">
+								曲は {total} 小節ありますが、場面は {span} 小節ぶんの割り振りです
+								{last && total > span
+									? `（最後の「${last.label || "場面"}」が ${last.startBar} 〜 ${total} 小節を受け持っています）`
+									: ""}
+								。
+							</p>
+							<button
+								onClick={() =>
+									update((m) => fitManifestToBars(m, total) ?? m)
+								}
+								className="w-full rounded bg-amber-600 px-2 py-1.5 text-[11px] font-bold text-white hover:bg-amber-500"
+							>
+								場面の区切りを曲の長さ（{total} 小節）に合わせる
+							</button>
+						</div>
+					);
+				})()}
 
 				{/* 場面クイック切り替え・フィルタータグ */}
 				<div className="flex flex-wrap items-center gap-1.5 pt-2 pb-1 border-b border-gray-800">
@@ -7972,13 +8013,34 @@ export default function MvMaker({
 
 				<button
 					onClick={() => {
+						const startBar =
+							Math.max(0, ...manifest.sections.map((s) => s.startBar)) + 8;
 						const next: MvSection = {
 							id: mvUid("sec"),
 							label: `場面${manifest.sections.length + 1}`,
-							startBar:
-								Math.max(0, ...manifest.sections.map((s) => s.startBar)) + 8,
+							startBar,
 						};
-						update((m) => ({ ...m, sections: [...m.sections, next] }));
+						// 新しい場面は「いまその小節を受け持っている場面」を途中で区切るもの。
+						// 表示するレイヤーはそこから引き継ぐ——引き継がないと、場面を指定している
+						// レイヤーが新しい場面で全部消え、「64小節目でこれだけ消す」ができない。
+						const prev = sectionAtBar(manifest.sections, startBar);
+						update((m) => {
+							const sections = [...m.sections, next];
+							return {
+								...m,
+								sections,
+								layers: m.layers.map((l) => {
+									if (!l.sections || !prev || !l.sections.includes(prev.id))
+										return l;
+									const nextIds = [...l.sections, next.id];
+									return {
+										...l,
+										sections:
+											nextIds.length === sections.length ? undefined : nextIds,
+									};
+								}),
+							};
+						});
 					}}
 					className={`${ADD_BTN_CLASS} mt-3`}
 				>
