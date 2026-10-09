@@ -24,8 +24,8 @@ importers:
         specifier: 1.1.1
         version: 1.1.1
       '@onjmin/dtm':
-        specifier: 2.1.32
-        version: 2.1.32
+        specifier: 2.1.33
+        version: 2.1.33
       '@onjmin/oekaki':
         specifier: 1.0.67
         version: 1.0.67
@@ -463,8 +463,8 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
-  '@babel/runtime@7.29.7':
-    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
+  '@babel/runtime@7.29.10':
+    resolution: {integrity: sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA==}
     engines: {node: '>=6.9.0'}
 
   '@babel/template@7.29.7':
@@ -1256,8 +1256,8 @@ packages:
   '@onjmin/chord-parser@1.1.1':
     resolution: {integrity: sha512-nKp+oXxWGSajNOH+H7LRwcLL24GkiBTzk/V3mXkCfXZWvuRMjJuWdrowSNjGXJTXeIeLQIMO1PUE9+lx7wxOhg==}
 
-  '@onjmin/dtm@2.1.32':
-    resolution: {integrity: sha512-mKgLqApQjBTCSmcePKh4Rrexw4BALnzFpAWl2rGDhZKpZRyFvFF/BLdnZEASiXuZ0N8Qq2ZBHiw+s2LwXdkE/g==}
+  '@onjmin/dtm@2.1.33':
+    resolution: {integrity: sha512-CaMt8a4PX+WSe3cFvV+tHolcZRJ+2z7jufjWuevt9+40oHtH36v1qZGV1XuHwaZcAOHowC3ggTiNzlLJCZxC8A==}
 
   '@onjmin/koe@1.0.11':
     resolution: {integrity: sha512-JGcW2Y5w8HZSlepiewgx7JHakEEboKpOUGcF76dfJUXrawTWDEx/8IoOxGfZaD5THArBUIYijU4bHx17jAjmsQ==}
@@ -4578,7 +4578,7 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.7
 
-  '@babel/runtime@7.29.7': {}
+  '@babel/runtime@7.29.10': {}
 
   '@babel/template@7.29.7':
     dependencies:
@@ -5145,7 +5145,7 @@ snapshots:
 
   '@onjmin/chord-parser@1.1.1': {}
 
-  '@onjmin/dtm@2.1.32':
+  '@onjmin/dtm@2.1.33':
     dependencies:
       '@onjmin/chord-parser': 1.1.1
       '@onjmin/koe': 1.0.11
@@ -5952,7 +5952,7 @@ snapshots:
 
   broker-factory@3.1.15:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       fast-unique-numbers: 9.0.27
       tslib: 2.8.1
       worker-factory: 7.0.50
@@ -6593,7 +6593,7 @@ snapshots:
 
   fast-unique-numbers@9.0.27:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       tslib: 2.8.1
 
   fast-xml-builder@1.2.0:
@@ -7143,20 +7143,20 @@ snapshots:
 
   midi-json-parser-broker@4.0.132:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       broker-factory: 3.1.15
       midi-json-parser-worker: 8.1.66
       tslib: 2.8.1
 
   midi-json-parser-worker@8.1.66:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       tslib: 2.8.1
       worker-factory: 7.0.50
 
   midi-json-parser@8.1.74:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       midi-json-parser-broker: 4.0.132
       midi-json-parser-worker: 8.1.66
       tslib: 2.8.1
@@ -8048,7 +8048,7 @@ snapshots:
 
   worker-factory@7.0.50:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       fast-unique-numbers: 9.0.27
       tslib: 2.8.1
 
