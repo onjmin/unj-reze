@@ -10,6 +10,10 @@ import {
 } from "@/lib/hooks/useRealtime";
 import { chGame, chThread } from "@/lib/realtime/channels";
 import { getRealtimeClient } from "@/lib/realtime/client";
+import {
+	collectPostGuard,
+	prefetchPostGuard,
+} from "@/lib/security/post-guard-client";
 import { decodeId } from "@/lib/sqids";
 import type { GameVoteCandidate, GhostPlayer } from "@/lib/types";
 import { useRemoteJson } from "@/lib/hooks/use-remote-payload";
@@ -301,8 +305,12 @@ export default function LiveGameView({ userId }: Props) {
 									body: JSON.stringify({
 										content: text,
 										parentPostId: info.postId,
+										// Turnstile のトークンと指紋（lib/security/post-guard-client.ts）
+										...(await collectPostGuard()),
 									}),
 								});
+								// 次のコメントに備えてトークンを先取りしておく
+								prefetchPostGuard();
 								if (res.ok) {
 									const reply: { id: string } = await res.json();
 									const replyId = decodeId(reply.id) || 0;

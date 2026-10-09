@@ -282,14 +282,17 @@ export async function PATCH(
 		previousMml?: { deleteId: string; deleteHash: string };
 		previousImage?: { deleteId: string; deleteHash: string };
 	};
-	publishRealtime([
-		{ channel: CH_FEED, event: "post.updated", data: broadcast },
-		{
-			channel: chThread(encoded.threadId),
-			event: "post.updated",
-			data: broadcast,
-		},
-	]);
+	// 鍵アカの投稿は編集内容も配信しない（新規投稿の post.created と同じ扱い）
+	if (!result.authorIsPrivate) {
+		publishRealtime([
+			{ channel: CH_FEED, event: "post.updated", data: broadcast },
+			{
+				channel: chThread(encoded.threadId),
+				event: "post.updated",
+				data: broadcast,
+			},
+		]);
+	}
 	// 旧MMLの削除トークンをDB更新確定後だけレスポンスに載せる。作者判定は上で
 	// 通過済み。クライアントはこれを見てR2の旧オブジェクトを消す
 	// （lib/post/game-mv-client.ts の previousManifest と同じ仕組み、詳細は lib/uploader.ts）。

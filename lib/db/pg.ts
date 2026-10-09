@@ -559,7 +559,11 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		disliked: false,
 		repliesCount: Math.max(Number(row.res_count ?? 1) - 1, 0),
 		reposts: row.reposts ?? 0,
-		reposted: !!row.reposted,
+		// threads/res.reposted 列は全員共通のフラグだった名残で、もう読まない（ドロップ可）。
+		// 閲覧者ごとの値は finalizeForViewer が post_reposts から埋める。
+		reposted: false,
+		authorIsPrivate: !!row.author_is_private,
+		reactionsHidden: !!row.author_hide_reactions,
 		hasImage: disp.hasImage,
 		imageSrc: disp.imageSrc,
 		avatarColor: row.avatar_color || "from-blue-500 to-indigo-600",
@@ -613,7 +617,11 @@ function resRowToPost(row: any): DbPost {
 		disliked: false,
 		repliesCount: 0,
 		reposts: row.reposts ?? 0,
-		reposted: !!row.reposted,
+		// threads/res.reposted 列は全員共通のフラグだった名残で、もう読まない（ドロップ可）。
+		// 閲覧者ごとの値は finalizeForViewer が post_reposts から埋める。
+		reposted: false,
+		authorIsPrivate: !!row.author_is_private,
+		reactionsHidden: !!row.author_hide_reactions,
 		hasImage: disp.hasImage,
 		imageSrc: disp.imageSrc,
 		avatarColor: row.avatar_color || "from-blue-500 to-indigo-600",
@@ -663,7 +671,9 @@ function withViewerVoteState(
 	return { ...post, liked: state.liked, disliked: state.disliked };
 }
 
-const AUTHOR_SELECT = `u.display_name AS author_display_name, u.avatar_url AS author_avatar_url, u.hide_from_search AS author_hide_from_search`;
+// author_is_private / author_hide_reactions は行→DbPost 変換で authorIsPrivate /
+// reactionsHidden になる（閲覧者ごとの最終判定は finalizeForViewer）。
+const AUTHOR_SELECT = `u.display_name AS author_display_name, u.avatar_url AS author_avatar_url, u.hide_from_search AS author_hide_from_search, u.is_private AS author_is_private, u.hide_reactions AS author_hide_reactions`;
 
 /**
  * dat_key(専ブラ向け.datファイル名)のフォールバック計算。
@@ -730,6 +740,137 @@ async function getHiddenUserIds(viewerId?: string): Promise<Set<number>> {
 }
 
 // ============================================================================
+// 鍵アカウント・検索除外・リアクション非公開（users.is_private / hide_from_search /
+// hide_reactions）。仕様:
+// - is_private: 投稿（スレ・レスとも）は「投稿者本人」と「投稿者がフォローしている人」に
+//   だけ見える。許可リストは投稿者のフォロー一覧そのもので、承認フローは無い（フォロワー
+//   側から自分で閲覧権を得ることはできない）。それ以外の人には、フィード・プロフィール・
+//   検索・ハッシュタグ・メディア検索・個別ページ（404）・公開スレ内のレス一覧・専ブラの
+//   dat/subject.txt のどこにも出さない。リアルタイム配信もしない（API層で authorIsPrivate を見る）。
+// - hide_from_search: 検索・ハッシュタグ・メディア検索・トレンドから外す（本人の検索には出る）。
+//   フィードとプロフィールには出る。
+// - hide_reactions: 本人以外には いいね/だめね/リポスト/ハート の数を 0 で返し、
+//   reactionsHidden=true を立てる（UI は数を出さない）。
+//
+// 匿名（viewer 無し）の結果はエッジの共有キャッシュに載る（lib/edge-cache.ts）ので、
+// そこでは鍵アカの投稿を単純に除外する。viewer がいるときだけ「本人」「投稿者が viewer を
+// フォローしている」を足す。user_follows の主キー (follower_user_id, followed_user_id) で
+// EXISTS が1回のインデックス参照になるので、新しいインデックスは要らない。
+// `u` は投稿者の users を LEFT JOIN した別名（全クエリ共通）。
+// ============================================================================
+
+/** 投稿者 `authorCol` の投稿を viewer が見てよいかの SQL 条件。viewerUid は params に積む。 */
+function authorVisibleSql(
+	authorCol: string,
+	params: any[],
+	viewerUid: number | null,
+	usersAlias = "u",
+): string {
+	if (viewerUid === null) return `COALESCE(${usersAlias}.is_private, FALSE) = FALSE`;
+	params.push(viewerUid);
+	const v = `$${params.length}`;
+	return `(COALESCE(${usersAlias}.is_private, FALSE) = FALSE OR ${authorCol} = ${v}
+    OR EXISTS (SELECT 1 FROM user_follows vf WHERE vf.follower_user_id = ${authorCol} AND vf.followed_user_id = ${v}))`;
+}
+
+/** 検索系（検索・ハッシュタグ・メディア検索）に出してよいかの SQL 条件。本人の投稿は出す。 */
+function searchableSql(
+	authorCol: string,
+	params: any[],
+	viewerUid: number | null,
+): string {
+	if (viewerUid === null) return `COALESCE(u.hide_from_search, FALSE) = FALSE`;
+	params.push(viewerUid);
+	return `(COALESCE(u.hide_from_search, FALSE) = FALSE OR ${authorCol} = $${params.length})`;
+}
+
+/** DbPost の id 群を threads.id / res.id に振り分ける（返信も辿る）。 */
+function collectRawIds(posts: DbPost[], onlyReposted: boolean) {
+	const threadIds: number[] = [];
+	const resIds: number[] = [];
+	const walk = (p: DbPost) => {
+		if (!onlyReposted || p.reposts > 0) {
+			if (isReplyPostId(p.id)) resIds.push(postIdToResId(p.id));
+			else threadIds.push(postIdToThreadId(p.id));
+		}
+		for (const r of p.replies ?? []) walk(r);
+	};
+	for (const p of posts) walk(p);
+	return { threadIds, resIds };
+}
+
+/**
+ * 読み取り系の戻り値を閲覧者向けに仕上げる。全ての読み取りメソッドの出口で通すこと
+ * （通さない経路があると hide_reactions の数が漏れる）。
+ * - liked/disliked（インメモリの vote-guard）
+ * - reposted（post_reposts。viewer がいて、かつ reposts>0 の投稿があるときだけ1クエリ）
+ * - hide_reactions の数の伏せ字（本人以外）
+ * 返信（replies）も再帰的に処理する。
+ */
+async function finalizeForViewer(
+	posts: DbPost[],
+	viewerId: string | undefined,
+): Promise<DbPost[]> {
+	const viewerUid = toUid(viewerId);
+	let reposted: Set<string> | null = null;
+	if (viewerUid !== null) {
+		// 公開キャッシュ（viewer 無し）には reposted を載せない＝常に false。
+		// reposts=0 の投稿は誰もリポストしていないので引くまでもない。
+		const { threadIds, resIds } = collectRawIds(posts, true);
+		if (threadIds.length + resIds.length > 0) {
+			const { rows } = await q<{ post_kind: number; target_id: number }>(
+				`SELECT post_kind, target_id FROM post_reposts
+          WHERE user_id = $1
+            AND ((post_kind = ${REPOST_KIND_THREAD} AND target_id = ANY($2::int[]))
+              OR (post_kind = ${REPOST_KIND_RES} AND target_id = ANY($3::int[])))`,
+				[viewerUid, threadIds, resIds],
+			);
+			reposted = new Set(
+				rows.map((r) => `${Number(r.post_kind)}:${Number(r.target_id)}`),
+			);
+		}
+	}
+	const viewerKey = viewerUid !== null ? String(viewerUid) : undefined;
+	const finish = (p: DbPost): DbPost => {
+		const out = withViewerVoteState(p, viewerId);
+		if (reposted) {
+			const key = isReplyPostId(p.id)
+				? `${REPOST_KIND_RES}:${postIdToResId(p.id)}`
+				: `${REPOST_KIND_THREAD}:${postIdToThreadId(p.id)}`;
+			out.reposted = reposted.has(key);
+		}
+		if (out.reactionsHidden) {
+			if (viewerKey !== undefined && out.userId === viewerKey) {
+				out.reactionsHidden = false;
+			} else {
+				out.likes = 0;
+				out.dislikes = 0;
+				out.reposts = 0;
+				out.heartsTotal = 0;
+			}
+		}
+		if (out.replies?.length) out.replies = out.replies.map(finish);
+		return out;
+	};
+	return posts.map(finish);
+}
+
+async function finalizeOneForViewer(
+	post: DbPost | null,
+	viewerId: string | undefined,
+): Promise<DbPost | null> {
+	if (!post) return null;
+	return (await finalizeForViewer([post], viewerId))[0];
+}
+
+/** games 一覧・ランキングから鍵アカの作品を外す条件（listAllGames / listTopGames）。 */
+const PUBLIC_CREATOR_SQL = `(creator_user_id IS NULL OR creator_user_id NOT IN (SELECT id FROM users WHERE is_private))`;
+
+/** post_reposts.post_kind。threads と res は id 空間が別なので種別で分ける。 */
+const REPOST_KIND_THREAD = 0;
+const REPOST_KIND_RES = 1;
+
+// ============================================================================
 // フィード用: スレッドに付随する返信を軽量に埋め込む（全件は引かない）
 // ============================================================================
 const FEED_REPLIES_PER_THREAD = REPLIES_PAGE_SIZE;
@@ -737,17 +878,21 @@ const FEED_REPLIES_PER_THREAD = REPLIES_PAGE_SIZE;
 async function attachRepliesToThreads(
 	threads: DbPost[],
 	threadDbIds: number[],
+	viewerUid: number | null = null,
 ): Promise<void> {
 	if (threadDbIds.length === 0) return;
+	// 鍵アカの返信は窓（直近N件）を切る前に落とす。後から捨てると窓が欠けて件数が減る。
+	const params: any[] = [threadDbIds, FEED_REPLIES_PER_THREAD];
+	const visible = authorVisibleSql("r.user_id", params, viewerUid);
 	const { rows } = await q(
 		`SELECT * FROM (
        SELECT r.*, ${AUTHOR_SELECT},
          ROW_NUMBER() OVER (PARTITION BY r.thread_id ORDER BY r.num DESC) AS rn
        FROM res r
        LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.thread_id = ANY($1::int[])
+       WHERE r.thread_id = ANY($1::int[]) AND ${visible}
      ) x WHERE rn <= $2 ORDER BY thread_id, num`,
-		[threadDbIds, FEED_REPLIES_PER_THREAD],
+		params,
 	);
 	const byThread = new Map<number, any[]>();
 	for (const row of rows) {
@@ -791,9 +936,11 @@ export const pgStore: DataStore = {
 			cursor != null ? postIdToThreadId(Number(cursor)) : null;
 
 		const hidden = await getHiddenUserIds(userId);
+		const viewerUid = toUid(userId);
 
 		const where: string[] = ["t.deleted_at IS NULL", "t.board_id = 1"];
 		const params: any[] = [];
+		where.push(authorVisibleSql("t.user_id", params, viewerUid));
 		if (cursorThreadId != null) {
 			// age(上げ)順ページネーション: t.id ではなく「最終レス時刻」がソート基準なので、
 			// カーソルも同じ基準(latest_res_at, id)のkeysetで組む。カーソル自身が既に
@@ -850,9 +997,10 @@ export const pgStore: DataStore = {
 			await attachRepliesToThreads(
 				posts,
 				filtered.map((r) => Number(r.id)),
+				viewerUid,
 			);
 		}
-		return posts.map((p) => withViewerVoteState(p, userId));
+		return finalizeForViewer(posts, userId);
 	},
 
 	async getPost(
@@ -860,11 +1008,24 @@ export const pgStore: DataStore = {
 		userId?: string,
 		options?: { withReplies?: boolean },
 	) {
+		const viewerUid = toUid(userId);
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
+			// レス自身の投稿者に加えて、スレ主が鍵アカでスレごと見えない場合も null
+			// （getReplies と同じ扱い。レス単体のURLからスレの中身を覗けないように）。
+			const params: any[] = [resId];
+			const visible = authorVisibleSql("r.user_id", params, viewerUid);
+			const threadVisible = authorVisibleSql(
+				"t.user_id",
+				params,
+				viewerUid,
+				"tu",
+			);
 			const { rows } = await q(
-				`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id WHERE r.id = $1`,
-				[resId],
+				`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
+           JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id
+          WHERE r.id = $1 AND ${visible} AND ${threadVisible}`,
+				params,
 			);
 			if (rows.length === 0) return null;
 			const row = rows[0];
@@ -884,35 +1045,42 @@ export const pgStore: DataStore = {
 						? resToPostId(Number(parentRows[0].id))
 						: post.threadId;
 			}
-			return withViewerVoteState(post, userId);
+			return finalizeOneForViewer(post, userId);
 		}
 
 		const threadId = postIdToThreadId(id);
+		const params: any[] = [threadId];
+		const visible = authorVisibleSql("t.user_id", params, viewerUid);
 		const { rows } = await q(
-			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL`,
-			[threadId],
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL AND ${visible}`,
+			params,
 		);
 		if (rows.length === 0) return null;
 		const post = threadRowToPost(rows[0]);
 		if (options?.withReplies !== false) {
-			await attachRepliesToThreads([post], [threadId]);
+			await attachRepliesToThreads([post], [threadId], viewerUid);
 		}
-		return withViewerVoteState(post, userId);
+		return finalizeOneForViewer(post, userId);
 	},
 
 	async getPostByDatKey(datKey: number, userId?: string) {
 		// 旧データ(dat_key未採番)も引けるよう、NULLならcreated_atから都度算出して比較する。
+		// 専ブラ（dat / bbs.cgi）は viewer 無しで呼ぶので鍵アカのスレは見つからない扱い。
+		const viewerUid = toUid(userId);
+		const params: any[] = [datKey];
+		const visible = authorVisibleSql("t.user_id", params, viewerUid);
 		const { rows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
          WHERE t.deleted_at IS NULL
-           AND COALESCE(t.dat_key, FLOOR(EXTRACT(EPOCH FROM t.created_at))::BIGINT) = $1`,
-			[datKey],
+           AND COALESCE(t.dat_key, FLOOR(EXTRACT(EPOCH FROM t.created_at))::BIGINT) = $1
+           AND ${visible}`,
+			params,
 		);
 		if (rows.length === 0) return null;
 		const threadId = Number(rows[0].id);
 		const post = threadRowToPost(rows[0]);
-		await attachRepliesToThreads([post], [threadId]);
-		return withViewerVoteState(post, userId);
+		await attachRepliesToThreads([post], [threadId], viewerUid);
+		return finalizeOneForViewer(post, userId);
 	},
 
 	async createPost(data: CreatePostParams) {
@@ -1022,21 +1190,23 @@ export const pgStore: DataStore = {
 			}
 		}
 		const { rows: userRows } = await q(
-			`SELECT display_name, avatar_url FROM users WHERE id = $1`,
+			`SELECT display_name, avatar_url, is_private FROM users WHERE id = $1`,
 			[authorId],
 		);
 		row.author_display_name = userRows[0]?.display_name;
 		row.author_avatar_url = userRows[0]?.avatar_url;
+		// 呼び出し側（app/api/posts/route.ts）が鍵アカの投稿をリアルタイム配信しない判定に使う
+		row.author_is_private = userRows[0]?.is_private;
 		return threadRowToPost(row, []);
 	},
 
 	async likePost(id: number, userId: string) {
-		const post = await voteOnPost(id, "good_count");
+		const post = await voteOnPost(id, "good_count", userId);
 		await notifyPostAction(id, userId, "like");
 		return post;
 	},
 	async dislikePost(id: number, userId: string) {
-		return voteOnPost(id, "bad_count");
+		return voteOnPost(id, "bad_count", userId);
 	},
 
 	async heartPost(id: number, userId: string, count = 1) {
@@ -1050,24 +1220,51 @@ export const pgStore: DataStore = {
 			[n, rawId],
 		);
 		await notifyPostAction(id, userId, "heart");
-		return pgStore.getPost(id);
+		// 押した本人の視点で返す。viewer 無しで引くと鍵アカの投稿が null（＝404）になる
+		return pgStore.getPost(id, userId, { withReplies: false });
 	},
 
+	/**
+	 * リポストのトグル。誰がリポストしたかは post_reposts に1行ずつ持つ（以前は
+	 * threads/res.reposted という全員共通のフラグを反転していたので、誰かが押すと
+	 * 全員の表示が切り替わっていた）。reposts は非正規化した件数で、行が実際に
+	 * 増えた/減ったときだけ ±1 する（連打の競合でも件数と行がずれない）。
+	 * 呼び出し側（PUT /api/posts/[id]）でセッション必須。
+	 */
 	async repostPost(id: number, userId?: string) {
-		const table = isReplyPostId(id) ? "res" : "threads";
-		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
-		const { rows } = await q(
-			`UPDATE ${table} SET reposted = NOT reposted,
-         reposts = CASE WHEN reposted THEN GREATEST(reposts - 1, 0) ELSE reposts + 1 END
-       WHERE id = $1
-       RETURNING reposted`,
-			[rawId],
+		const uid = toUid(userId);
+		if (uid === null) return null;
+		const isReply = isReplyPostId(id);
+		const table = isReply ? "res" : "threads";
+		const kind = isReply ? REPOST_KIND_RES : REPOST_KIND_THREAD;
+		const rawId = isReply ? postIdToResId(id) : postIdToThreadId(id);
+		// 見えない投稿（鍵アカ・削除済み）には押させない
+		const visible = await pgStore.getPost(id, userId, { withReplies: false });
+		if (!visible) return null;
+		const { rows: removed } = await q(
+			`DELETE FROM post_reposts WHERE user_id = $1 AND post_kind = $2 AND target_id = $3 RETURNING 1`,
+			[uid, kind, rawId],
 		);
-		// リポスト解除ではなく「リポストした」瞬間だけ通知する
-		if (userId && rows[0]?.reposted) {
-			await notifyPostAction(id, userId, "repost");
+		if (removed.length > 0) {
+			await q(
+				`UPDATE ${table} SET reposts = GREATEST(reposts - 1, 0) WHERE id = $1`,
+				[rawId],
+			);
+		} else {
+			const { rows: added } = await q(
+				`INSERT INTO post_reposts (user_id, post_kind, target_id) VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING RETURNING 1`,
+				[uid, kind, rawId],
+			);
+			if (added.length > 0) {
+				await q(`UPDATE ${table} SET reposts = reposts + 1 WHERE id = $1`, [
+					rawId,
+				]);
+				// リポスト解除ではなく「リポストした」瞬間だけ通知する
+				await notifyPostAction(id, String(uid), "repost");
+			}
 		}
-		return pgStore.getPost(id);
+		return pgStore.getPost(id, userId, { withReplies: false });
 	},
 
 	async getReplies(postId: number, userId?: string, options?: GetRepliesOptions) {
@@ -1097,10 +1294,20 @@ export const pgStore: DataStore = {
 			params.push(options.beforeNum);
 			cursorWhere = ` AND r.num < $${params.length}`;
 		}
+		// 鍵アカのレスは除外（窓を切る前に落とす）。スレ主が鍵アカで見えないスレは
+		// レスも丸ごと返さない（相関しない EXISTS なので1回だけ評価される）。
+		// threads.res_count は除外ぶんも数えたまま＝「N件の返信」は見えない分を含む。
+		// 番号（num）は欠番になる（削除と同じ見え方）。
+		const viewerUid = toUid(userId);
+		const visible = authorVisibleSql("r.user_id", params, viewerUid);
+		const threadVisible = authorVisibleSql("t.user_id", params, viewerUid, "tu");
 		params.push(limit);
 		const { rows: desc } = await q(
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.thread_id = $1${cursorWhere} ORDER BY r.num DESC LIMIT $${params.length}`,
+       WHERE r.thread_id = $1${cursorWhere} AND ${visible}
+         AND EXISTS (SELECT 1 FROM threads t LEFT JOIN users tu ON tu.id = t.user_id
+                      WHERE t.id = $1 AND ${threadVisible})
+       ORDER BY r.num DESC LIMIT $${params.length}`,
 			params,
 		);
 		// 表示は常に古い→新しいの昇順。
@@ -1111,13 +1318,16 @@ export const pgStore: DataStore = {
 		]);
 		for (const r of filtered)
 			numToPostId.set(Number(r.num), resToPostId(Number(r.id)));
-		return filtered.map((r) => {
-			const post = resRowToPost(r);
-			const parentNum = r.parent_num != null ? Number(r.parent_num) : 1;
-			post.parentPostId =
-				numToPostId.get(parentNum) ?? threadToPostId(threadId);
-			return withViewerVoteState(post, userId);
-		});
+		return finalizeForViewer(
+			filtered.map((r) => {
+				const post = resRowToPost(r);
+				const parentNum = r.parent_num != null ? Number(r.parent_num) : 1;
+				post.parentPostId =
+					numToPostId.get(parentNum) ?? threadToPostId(threadId);
+				return post;
+			}),
+			userId,
+		);
 	},
 	async addReply(postId: number, data: ReplyParams) {
 		// DataStore.addReply(postId, ...) の postId は「返信先スレッド」＝OPのid。
@@ -1137,12 +1347,26 @@ export const pgStore: DataStore = {
 			throw new Error("addReply には解決済みの投稿者(slug=users.id)が必要です");
 		}
 
+		// 鍵アカのスレには、スレ主本人とスレ主がフォローしている人しか書き込めない
+		// （見えないスレに返信できると、返信の通知や res_count から存在が漏れる）。
+		const threadParams: any[] = [threadId];
+		const threadVisible = authorVisibleSql(
+			"t.user_id",
+			threadParams,
+			authorId,
+		);
 		const { rows: threadRows } = await q(
-			`SELECT id, user_id, res_count FROM threads WHERE id = $1 AND deleted_at IS NULL`,
-			[threadId],
+			`SELECT t.id, t.user_id, t.res_count FROM threads t LEFT JOIN users u ON u.id = t.user_id
+        WHERE t.id = $1 AND t.deleted_at IS NULL AND ${threadVisible}`,
+			threadParams,
 		);
 		if (threadRows.length === 0) return null;
 		const thread = threadRows[0];
+		const { rows: userRows } = await q(
+			`SELECT display_name, avatar_url, is_private FROM users WHERE id = $1`,
+			[authorId],
+		);
+		const authorIsPrivate = !!userRows[0]?.is_private;
 		if (isThreadFull(Number(thread.res_count ?? 1))) {
 			throw new Error(`このスレッドは上限（${RES_LIMIT}レス）に達しています`);
 		}
@@ -1232,16 +1456,25 @@ export const pgStore: DataStore = {
 			}
 		}
 
-		await q(
-			`UPDATE threads SET res_count = res_count + 1, latest_res = $1, latest_res_at = CURRENT_TIMESTAMP WHERE id = $2`,
-			[
-				(data.content || "")
-					.split("\n")
-					.find((l) => l.trim())
-					?.slice(0, 64) || "",
-				threadId,
-			],
-		);
+		// latest_res は unj 側の一覧に本文の抜粋として出るので、鍵アカのレスでは
+		// 書き換えない（age＝latest_res_at だけ進める）。
+		if (authorIsPrivate) {
+			await q(
+				`UPDATE threads SET res_count = res_count + 1, latest_res_at = CURRENT_TIMESTAMP WHERE id = $1`,
+				[threadId],
+			);
+		} else {
+			await q(
+				`UPDATE threads SET res_count = res_count + 1, latest_res = $1, latest_res_at = CURRENT_TIMESTAMP WHERE id = $2`,
+				[
+					(data.content || "")
+						.split("\n")
+						.find((l) => l.trim())
+						?.slice(0, 64) || "",
+					threadId,
+				],
+			);
+		}
 
 		// 通知（返信先の投稿者へ）。自分自身への返信は通知しない
 		if (Number(thread.user_id) !== authorId) {
@@ -1270,12 +1503,10 @@ export const pgStore: DataStore = {
 			}
 		}
 
-		const { rows: userRows } = await q(
-			`SELECT display_name, avatar_url FROM users WHERE id = $1`,
-			[authorId],
-		);
 		inserted.author_display_name = userRows[0]?.display_name;
 		inserted.author_avatar_url = userRows[0]?.avatar_url;
+		// 呼び出し側が鍵アカのレスをリアルタイム配信しない判定に使う
+		inserted.author_is_private = authorIsPrivate;
 		const post = resRowToPost(inserted);
 		post.parentPostId =
 			parentNum === 1 ? threadToPostId(threadId) : post.parentPostId;
@@ -1540,19 +1771,24 @@ export const pgStore: DataStore = {
 				? new Date(before).toISOString()
 				: null;
 
+		// 鍵アカのプロフィールは、本人と本人がフォローしている人以外には投稿0件
+		// （ヘッダー＝名前・アイコン・自己紹介は見せる。app/api/users/[id] が isPrivate を返す）。
+		const viewerUid = toUid(userId);
+		const tParams: any[] = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+		const tVisible = authorVisibleSql("t.user_id", tParams, viewerUid);
 		const tQuery = beforeDate
 			? `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.created_at < $2 ORDER BY t.created_at DESC, t.id DESC LIMIT $3`
+       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.created_at < $2 AND ${tVisible} ORDER BY t.created_at DESC, t.id DESC LIMIT $3`
 			: `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = $1 AND t.deleted_at IS NULL ORDER BY t.id DESC LIMIT $2`;
-		const tParams = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND ${tVisible} ORDER BY t.id DESC LIMIT $2`;
 
+		const rParams: any[] = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+		const rVisible = authorVisibleSql("r.user_id", rParams, viewerUid);
 		const rQuery = beforeDate
 			? `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.user_id = $1 AND r.created_at < $2 ORDER BY r.created_at DESC, r.id DESC LIMIT $3`
+       WHERE r.user_id = $1 AND r.created_at < $2 AND ${rVisible} ORDER BY r.created_at DESC, r.id DESC LIMIT $3`
 			: `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.user_id = $1 ORDER BY r.id DESC LIMIT $2`;
-		const rParams = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
+       WHERE r.user_id = $1 AND ${rVisible} ORDER BY r.id DESC LIMIT $2`;
 
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(tQuery, tParams),
@@ -1565,7 +1801,7 @@ export const pgStore: DataStore = {
 		]
 			.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 			.slice(0, safeLimit);
-		return posts.map((p) => withViewerVoteState(p, userId));
+		return finalizeForViewer(posts, userId);
 	},
 
 	async getUserDisplayName(slug: string) {
@@ -1720,13 +1956,17 @@ export const pgStore: DataStore = {
 
 	async getTrends() {
 		try {
+			// 鍵アカ・検索除外（is_private / hide_from_search）の投稿はトレンドに数えない。
+			// 該当ユーザーは少数なので NOT IN のハッシュ化サブプランで足りる。
 			const { rows } = await q(`
+        WITH excluded AS (SELECT id FROM users WHERE is_private OR hide_from_search)
         SELECT '#' || m[1] AS keyword, COUNT(*) AS count FROM (
           SELECT regexp_replace(content_text, 'https?://[^\\s]+|www\\.[^\\s]+', '', 'gi') AS cleaned
           FROM (
             SELECT content_text FROM threads WHERE board_id = 1 AND deleted_at IS NULL
+              AND user_id NOT IN (SELECT id FROM excluded)
             UNION ALL
-            SELECT content_text FROM res
+            SELECT content_text FROM res WHERE user_id NOT IN (SELECT id FROM excluded)
           ) c
         ) p, LATERAL regexp_matches(p.cleaned, '(?:^|\\s)#([^\\s#]+)', 'g') AS m
         WHERE m[1] !~ '^\\d+$'
@@ -1746,18 +1986,25 @@ export const pgStore: DataStore = {
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const like = `%${escapeLike(query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH))}%`;
 		const hidden = await getHiddenUserIds(userId);
+		const viewerUid = toUid(userId);
+		const tParams: any[] = [like, safeLimit];
+		const tFilter = `${authorVisibleSql("t.user_id", tParams, viewerUid)} AND ${searchableSql("t.user_id", tParams, viewerUid)}`;
 		const { rows: tRows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
          AND (t.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,t.cc_user_name) ILIKE $1 ESCAPE '!')
+         AND ${tFilter}
        ORDER BY t.id DESC LIMIT $2`,
-			[like, safeLimit],
+			tParams,
 		);
+		const rParams: any[] = [like, safeLimit];
+		const rFilter = `${authorVisibleSql("r.user_id", rParams, viewerUid)} AND ${searchableSql("r.user_id", rParams, viewerUid)}`;
 		const { rows: rRows } = await q(
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1 ESCAPE '!'
+       WHERE (r.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1 ESCAPE '!')
+         AND ${rFilter}
        ORDER BY r.id DESC LIMIT $2`,
-			[like, safeLimit],
+			rParams,
 		);
 		const posts = [
 			...tRows
@@ -1769,7 +2016,7 @@ export const pgStore: DataStore = {
 		]
 			.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 			.slice(0, safeLimit);
-		return posts.map((p) => withViewerVoteState(p, userId));
+		return finalizeForViewer(posts, userId);
 	},
 
 	async searchMedia(
@@ -1792,7 +2039,10 @@ export const pgStore: DataStore = {
 		const contentType = kind === "image" ? CT.Image : CT.Dtm;
 		const trimmed = query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH);
 		const params: any[] = [contentType];
-		let where = `content_type = $1 AND COALESCE(u.hide_from_search, false) = false`;
+		const viewerUid = toUid(userId);
+		// 鍵アカ・検索除外は threads/res のどちらにも同じ条件で掛ける。投稿者の列名
+		// （素の user_id）も下の scoped() で t./r. に差し替わる。
+		let where = `content_type = $1 AND ${authorVisibleSql("user_id", params, viewerUid)} AND ${searchableSql("user_id", params, viewerUid)}`;
 		if (trimmed) {
 			params.push(`%${escapeLike(trimmed)}%`);
 			where += ` AND (content_text ILIKE $${params.length} ESCAPE '!' OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length} ESCAPE '!')`;
@@ -1804,7 +2054,7 @@ export const pgStore: DataStore = {
 		params.push(fetchEach);
 		const scoped = (alias: string) =>
 			where.replace(
-				/\b(content_type|content_text|cc_user_name|created_at)\b/g,
+				/\b(content_type|content_text|cc_user_name|created_at|user_id)\b/g,
 				`${alias}.$1`,
 			);
 
@@ -1825,6 +2075,11 @@ export const pgStore: DataStore = {
 				params,
 			),
 		]);
+		// hide_reactions の投稿者は本人以外に数を見せない（finalizeForViewer と同じ扱い）
+		const reactionCount = (r: any, n: unknown) =>
+			r.author_hide_reactions && String(r.user_id) !== userId
+				? 0
+				: Number(n ?? 0);
 		const out: DbMediaSearchPost[] = [
 			...tRows.map(
 				(r): DbMediaSearchPost => ({
@@ -1839,10 +2094,10 @@ export const pgStore: DataStore = {
 					animFps: r.anim_fps != null ? Number(r.anim_fps) : undefined,
 					walkPreset: r.walk_preset ?? undefined,
 					originType: r.origin_type || undefined,
-					isOwner: userId ? r.user_id === userId : false,
+					isOwner: userId ? String(r.user_id) === userId : false,
 					createdAt: toIso(r.created_at),
-					likes: Number(r.good_count ?? 0),
-					dislikes: Number(r.bad_count ?? 0),
+					likes: reactionCount(r, r.good_count),
+					dislikes: reactionCount(r, r.bad_count),
 					repliesCount: Math.max(Number(r.res_count ?? 1) - 1, 0),
 				}),
 			),
@@ -1859,10 +2114,10 @@ export const pgStore: DataStore = {
 					animFps: r.anim_fps != null ? Number(r.anim_fps) : undefined,
 					walkPreset: r.walk_preset ?? undefined,
 					originType: r.origin_type || undefined,
-					isOwner: userId ? r.user_id === userId : false,
+					isOwner: userId ? String(r.user_id) === userId : false,
 					createdAt: toIso(r.created_at),
-					likes: Number(r.good_count ?? 0),
-					dislikes: Number(r.bad_count ?? 0),
+					likes: reactionCount(r, r.good_count),
+					dislikes: reactionCount(r, r.bad_count),
 					repliesCount: 0,
 				}),
 			),
@@ -1880,16 +2135,23 @@ export const pgStore: DataStore = {
 		const escapedTag = rawTag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const hidden = await getHiddenUserIds(userId);
+		const viewerUid = toUid(userId);
+		const params: any[] = [escapedTag, safeLimit];
+		const filter = `${authorVisibleSql("t.user_id", params, viewerUid)} AND ${searchableSql("t.user_id", params, viewerUid)}`;
 		const { rows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id=t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
          AND t.content_text ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
+         AND ${filter}
        ORDER BY t.id DESC LIMIT $2`,
-			[escapedTag, safeLimit],
+			params,
 		);
-		return rows
-			.filter((r) => !hidden.has(Number(r.user_id)))
-			.map((r) => withViewerVoteState(threadRowToPost(r), userId));
+		return finalizeForViewer(
+			rows
+				.filter((r) => !hidden.has(Number(r.user_id)))
+				.map((r) => threadRowToPost(r)),
+			userId,
+		);
 	},
 
 	// ==========================================================================
@@ -2321,9 +2583,12 @@ export const pgStore: DataStore = {
 		return result;
 	},
 	async listAllGames(limit = 30) {
-		const { rows } = await q(`SELECT * FROM games ORDER BY id DESC LIMIT $1`, [
-			Math.min(limit, 50),
-		]);
+		// 鍵アカが作ったゲームは一覧・ランキングに出さない（投稿が見えないのに作品だけ出ると
+		// 存在が漏れる）。該当ユーザーは少数なので NOT IN のハッシュ化サブプランで足りる。
+		const { rows } = await q(
+			`SELECT * FROM games WHERE ${PUBLIC_CREATOR_SQL} ORDER BY id DESC LIMIT $1`,
+			[Math.min(limit, 50)],
+		);
 		return rows.map(rowToGame);
 	},
 
@@ -2529,7 +2794,7 @@ export const pgStore: DataStore = {
 
 	async listTopGames(limit = 30) {
 		const { rows } = await q(
-			`SELECT * FROM games ORDER BY COALESCE(plays,0) DESC, id DESC LIMIT $1`,
+			`SELECT * FROM games WHERE ${PUBLIC_CREATOR_SQL} ORDER BY COALESCE(plays,0) DESC, id DESC LIMIT $1`,
 			[Math.min(limit, 50)],
 		);
 		// ランキング表示は最大50件なので、postId解決のN+1は許容範囲
@@ -2664,13 +2929,15 @@ export const pgStore: DataStore = {
 async function voteOnPost(
 	id: number,
 	column: "good_count" | "bad_count",
+	actorId: string,
 ): Promise<DbPost | null> {
 	const table = isReplyPostId(id) ? "res" : "threads";
 	const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
 	await q(`UPDATE ${table} SET ${column} = ${column} + 1 WHERE id = $1`, [
 		rawId,
 	]);
-	return pgStore.getPost(id);
+	// 押した本人の視点で返す（鍵アカの投稿を viewer 無しで引くと null＝404 になる）
+	return pgStore.getPost(id, actorId, { withReplies: false });
 }
 
 // like/heart/repost の相手に通知する。自分の投稿への自作自演と、未読の同一通知の

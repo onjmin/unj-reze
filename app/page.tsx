@@ -70,6 +70,7 @@ import {
 	takeStashedMvRemix,
 	takeStashedRemix,
 } from "@/lib/social/remix";
+import { isPostGuardMessage } from "@/lib/security/post-guard-messages";
 import { ensureSessionId } from "@/lib/session";
 import { decodeId } from "@/lib/sqids";
 import { showToast, triggerHeartBurst } from "@/lib/toast";
@@ -1148,9 +1149,12 @@ export default function App() {
 				attachedAnim,
 				attachedMml,
 			});
+			// ボット確認（Turnstile）などで弾かれた時は理由をそのまま出す（再送すれば取り直す）
 			showToast(
 				"error",
-				"返信の送信に失敗しました。内容はホームのコンポーザに戻してあります",
+				isPostGuardMessage((err as Error)?.message)
+					? `${(err as Error).message}（内容はホームのコンポーザに戻してあります）`
+					: "返信の送信に失敗しました。内容はホームのコンポーザに戻してあります",
 			);
 		} finally {
 			replySubmittingRef.current = false;
@@ -1331,7 +1335,12 @@ export default function App() {
 			setTalkDraft(talkDraft);
 			setOtomadDraft(otomadDraft);
 			setOriginType(originType);
-			showToast("error", "投稿に失敗しました。内容は戻してあります");
+			showToast(
+				"error",
+				isPostGuardMessage((err as Error)?.message)
+					? `${(err as Error).message}（内容は戻してあります）`
+					: "投稿に失敗しました。内容は戻してあります",
+			);
 		}
 	};
 

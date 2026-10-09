@@ -39,7 +39,7 @@ export async function GET(
 	const displayNameResult = await db.getUserDisplayName(id);
 	const ownerId = displayNameResult || id;
 
-	const [posts, avatarUrl, bio] = await Promise.all([
+	const [posts, avatarUrl, bio, settings] = await Promise.all([
 		tab === "likes"
 			? db.getLikedPosts(ownerId, limit)
 			: tab === "dislikes"
@@ -49,6 +49,10 @@ export async function GET(
 					: db.getUserPostsBySlug(id, userId, limit, before),
 		db.getUserAvatarUrl(id),
 		db.getUserBio(id),
+		// プロフィールのヘッダーに 🔒 を出すため。鍵アカでもヘッダー（名前・アイコン・
+		// 自己紹介）は誰にでも見せ、投稿一覧だけ getUserPostsBySlug が絞る。
+		// 検索除外・リアクション非公開の設定値は他人に返さない。
+		db.getUserSettings(id),
 	]);
 
 	const displayName = ownerId;
@@ -65,6 +69,7 @@ export async function GET(
 		displayName,
 		avatarUrl,
 		bio,
+		isPrivate: settings.isPrivate,
 		posts: encodedPosts,
 		postCount: posts.length,
 		nextCursor,

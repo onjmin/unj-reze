@@ -9,6 +9,10 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getAvatarInfo } from "@/lib/social/avatar";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import {
+	collectPostGuard,
+	prefetchPostGuard,
+} from "@/lib/security/post-guard-client";
 
 interface ThreadReply {
 	id: string;
@@ -70,6 +74,8 @@ export default function GameThreadBoard({
 				body: JSON.stringify({
 					content,
 					parentPostId: postId,
+					// Turnstile のトークンと指紋（lib/security/post-guard-client.ts）
+					...(await collectPostGuard()),
 				}),
 			});
 			if (!res.ok) throw new Error("failed");
@@ -130,6 +136,7 @@ export default function GameThreadBoard({
 					<input
 						value={draft}
 						onChange={(e) => setDraft(e.target.value)}
+						onFocus={prefetchPostGuard}
 						onKeyDown={(e) => {
 							if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();

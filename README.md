@@ -111,6 +111,30 @@ R2 パブリックアクセスの有効化：バケットの **Settings → Publ
 流さないこと。スキーマを変えたときは、既存DBに当てる差分SQLを新しい順にここへ書き足す。
 （`docker/init.sql` と unj リポジトリの `wiki/init.sql` にも同じ変更を入れておく。）
 
+**2026-10-09 — `post_reposts`（リポストをユーザーごとに。`lib/db/pg.ts` repostPost）**
+
+以前は `threads/res.reposted` という全員共通のフラグを反転していたので、誰かがリポストすると
+全員の表示が切り替わっていた。**デプロイ前に当てること**：当てるまではリポスト操作が 500 になり、
+ログイン中の閲覧（`userId` 付きのフィード等）で `reposts > 0` の投稿があるページも 500 になる。
+既存の `reposts` 件数は誰が押したかの記録が無いので引き継げない（下で 0 に戻す。戻さないと、
+誰も解除できない件数が残る）。`reposted` 列は読まなくなったのでドロップしてよい（unj 側も未使用）。
+鍵アカウント（`users.is_private` 等）の反映は既存の列だけで動くので、SQL は要らない。
+
+```sql
+CREATE TABLE IF NOT EXISTS post_reposts (
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    post_kind SMALLINT NOT NULL, -- 0=スレ(threads.id) / 1=レス(res.id)
+    target_id INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, post_kind, target_id)
+);
+UPDATE threads SET reposts = 0 WHERE reposts <> 0;
+UPDATE res SET reposts = 0 WHERE reposts <> 0;
+-- 任意（後日でよい）:
+-- ALTER TABLE threads DROP COLUMN reposted;
+-- ALTER TABLE res DROP COLUMN reposted;
+```
+
 **2026-10-02 — `otomads`（音MAD。manifest 本体は R2、`docs/otomad-feature-design.md` §7）**
 
 `POST /api/otomads` が書く。当てるまでは音MAD付きの投稿が 500 になる（`GET /api/otomads/1` が 404 を返すかで

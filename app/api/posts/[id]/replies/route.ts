@@ -11,6 +11,7 @@ import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
+import { guardNewPost } from "@/lib/security/post-guard";
 import { decodeId, encodePost } from "@/lib/sqids";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
 import {
@@ -129,6 +130,11 @@ export async function POST(
 			decodedWorkIds[key] = decoded;
 		}
 
+		// 多層不正検知（Turnstile + 指紋 + TLS、lib/security/post-guard.ts）。
+		// ボットのためにユーザーを作らないよう、セッションユーザーの自動作成より前に掛ける。
+		const guardResponse = await guardNewPost(request, body, "reply");
+		if (guardResponse) return guardResponse;
+
 		// セッション本人を解決、未登録セッションなら自動作成
 		const sessionUser = await resolveOrCreateSessionUser(request, sessionId);
 		const displayName = sessionUser.displayName;
@@ -187,10 +193,13 @@ export async function POST(
 
 		// スレッド購読者（詳細画面・実況コメント）とフィードの返信タブへ push する。
 		// ライブ配信中の 2〜3秒ポーリングを置き換えるのがここ。
-		publishRealtime([
-			{ channel: chThread(id), event: "reply.created", data: encoded },
-			{ channel: CH_FEED, event: "reply.created", data: encoded },
-		]);
+		// 鍵アカのレスは配信しない（購読者を選べないので全員に届いてしまう）。
+		if (!reply.authorIsPrivate) {
+			publishRealtime([
+				{ channel: chThread(id), event: "reply.created", data: encoded },
+				{ channel: CH_FEED, event: "reply.created", data: encoded },
+			]);
+		}
 
 		const response = NextResponse.json(encoded, { status: 201 });
 		const resolvedSessionId =

@@ -273,6 +273,11 @@ export interface DataStore {
 	likePost(id: number, userId: string): Promise<DbPost | null>;
 	dislikePost(id: number, userId: string): Promise<DbPost | null>;
 	heartPost(id: number, userId: string, count?: number): Promise<DbPost | null>;
+	/**
+	 * userId（users.id）のリポストをトグルする。リポストはユーザーごと（post_reposts 表）で、
+	 * 戻り値の `reposted` はその人の状態。userId が無ければ何もせず null。
+	 * 読み取り系の `reposted` も閲覧者ごとで、viewer 無し（公開キャッシュ）では常に false。
+	 */
 	repostPost(id: number, userId?: string): Promise<DbPost | null>;
 	/**
 	 * スレッドの返信を**新しい順に limit 件だけ**返す（返り値自体は num の昇順）。

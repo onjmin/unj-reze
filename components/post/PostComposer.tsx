@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { prefetchPostGuard } from "@/lib/security/post-guard-client";
 import { getAvatarInfo } from "@/lib/social/avatar";
 import { ORIGIN_TYPE_OPTIONS, OriginType } from "@/lib/types";
 import OriginTypeModal from "./OriginTypeModal";
@@ -620,6 +621,9 @@ export default function PostComposer({
 			ref={textareaRef}
 			value={text}
 			onChange={(e) => setText(e.target.value)}
+			// 書く気になった時点で Turnstile を読み込み、送信用のトークンを先取りする。
+			// ページを見ているだけの人には読ませない（lib/security/turnstile-client.ts）
+			onFocus={prefetchPostGuard}
 			onKeyDown={handleKeyDown}
 			onPaste={handlePaste}
 			className={`w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none text-gray-100 ${md ? "md:px-5 md:py-4 md:text-lg h-24 md:h-48" : "h-20"}`}

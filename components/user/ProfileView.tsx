@@ -8,6 +8,7 @@ import {
 	Heart,
 	Image,
 	Loader2,
+	Lock,
 	Mail,
 	MessageCircle,
 	MoreHorizontal,
@@ -612,6 +613,9 @@ export default function ProfileView({
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
 	const [bio, setBio] = useState("");
+	// 鍵アカウント（users.is_private）か。投稿一覧はサーバー側で絞られているので、
+	// ここではヘッダーの 🔒 と「投稿が見えない理由」の表示にだけ使う。
+	const [isPrivateAccount, setIsPrivateAccount] = useState(false);
 	const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 	const [editBio, setEditBio] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
@@ -861,6 +865,7 @@ export default function ProfileView({
 				setHasMorePosts(data.posts.length >= 20 && Boolean(data.nextCursor));
 				setAvatarUrl(data.avatarUrl || undefined);
 				setBio(data.bio || "");
+				setIsPrivateAccount(!!data.isPrivate);
 				if (data.displayName) setProfileDisplayName(data.displayName);
 			})
 			.catch(() => {
@@ -1212,8 +1217,15 @@ export default function ProfileView({
 						)}
 					</div>
 					<div className="flex-1 min-w-0">
-						<h2 className="font-bold text-base text-white truncate">
-							{avatarInfo.username}
+						<h2 className="font-bold text-base text-white truncate flex items-center gap-1">
+							<span className="truncate">{avatarInfo.username}</span>
+							{isPrivateAccount && (
+								<Lock
+									size={13}
+									className="shrink-0 text-gray-400"
+									aria-label="鍵アカウント"
+								/>
+							)}
 						</h2>
 						<span className="text-[10px] text-gray-500 block truncate">
 							@{resolvedName}
@@ -1224,6 +1236,13 @@ export default function ProfileView({
 						<p className="text-xs text-gray-400 leading-relaxed mt-2 whitespace-pre-wrap break-words">
 							{bio || (isSelf ? "自己紹介を追加してみましょう" : "")}
 						</p>
+						{isPrivateAccount && (
+							<p className="text-[10px] text-gray-500 mt-1">
+								{isSelf
+									? "鍵アカウント: 投稿はあなたがフォローしている人にだけ表示されます"
+									: "鍵アカウント: 投稿はこのユーザーがフォローしている人にだけ表示されます"}
+							</p>
+						)}
 						{avatarError && (
 							<p className="text-[10px] text-red-400 mt-1">{avatarError}</p>
 						)}
@@ -1594,7 +1613,7 @@ export default function ProfileView({
 													className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${p.liked ? "text-blue-400 font-bold" : ""}`}
 												>
 													<ThumbsUp size={14} />
-													<span className="text-[11px]">{p.likes || ""}</span>
+													<span className="text-[11px]">{p.reactionsHidden ? "" : p.likes || ""}</span>
 												</button>
 												<button
 													onClick={(e) => {
@@ -1605,7 +1624,7 @@ export default function ProfileView({
 												>
 													<ThumbsDown size={14} />
 													<span className="text-[11px]">
-														{p.dislikes || ""}
+														{p.reactionsHidden ? "" : p.dislikes || ""}
 													</span>
 												</button>
 												<button
@@ -1627,7 +1646,7 @@ export default function ProfileView({
 													className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${p.reposted ? "text-purple-400" : ""}`}
 												>
 													<Repeat size={14} />
-													<span className="text-[11px]">{p.reposts || ""}</span>
+													<span className="text-[11px]">{p.reactionsHidden ? "" : p.reposts || ""}</span>
 												</button>
 												<button
 													onClick={(e) => {
@@ -1656,7 +1675,7 @@ export default function ProfileView({
 														className="fill-current text-pink-600/65"
 													/>
 													<span className="text-[10px]">
-														{p.heartsTotal || "0"}
+														{p.reactionsHidden ? "" : p.heartsTotal || "0"}
 													</span>
 												</button>
 											</div>

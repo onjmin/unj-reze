@@ -127,6 +127,18 @@ export interface DbPost {
 	originType?: OriginType;
 	isFalseDeclaration?: boolean;
 	isEdited?: boolean;
+	/**
+	 * 投稿者が鍵アカウント（users.is_private）か。true の投稿は投稿者本人と
+	 * 「投稿者がフォローしている人」にしか返らない（lib/db/pg.ts authorVisibleSql）。
+	 * リアルタイム配信を止める判定にも使う。
+	 */
+	authorIsPrivate?: boolean;
+	/**
+	 * 投稿者が「リアクション数を非公開」（users.hide_reactions）にしていて、
+	 * 閲覧者が本人ではないとき true。likes/dislikes/reposts/heartsTotal は 0 で返るので、
+	 * UI は数を出さない（0 と表示すると「反応ゼロ」と誤読される）。
+	 */
+	reactionsHidden?: boolean;
 	threadId: number;
 	parentPostId?: number;
 	/**

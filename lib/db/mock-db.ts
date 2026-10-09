@@ -182,6 +182,8 @@ class MockDB {
 		{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }
 	> = new Map();
 	private hiddenFromSearchSlugs: Set<string> = new Set();
+	/** リポストはユーザーごと（pg の post_reposts 相当）。キーは `${postId}:${閲覧者slug}` */
+	private repostKeys: Set<string> = new Set();
 	// Phase 2: 移行トークン(token -> 発行先と発行時刻)。期限は pg.ts と同じ30分。
 	private migrationTokens: Map<string, { userId: string; issuedAt: number }> =
 		new Map();
@@ -423,7 +425,9 @@ class MockDB {
 		return nowISO();
 	}
 
-	private applyUserState(post: Post, userId?: string): Post {
+	private applyUserState(source: Post, userId?: string): Post {
+		// 元の配列の要素を書き換えない（下で数を伏せるので、共有したままだと実データが消える）
+		const post: Post = { ...source };
 		if (userId) {
 			const likeKey = `${post.id}:${userId}:like`;
 			const dislikeKey = `${post.id}:${userId}:dislike`;
@@ -439,6 +443,23 @@ class MockDB {
 		if (user) {
 			post.displayName = user.displayName;
 			post.avatarUrl = user.avatarUrl;
+		}
+		// pg.ts の finalizeForViewer と同じ: reposted は閲覧者ごと（viewer 無しは false）、
+		// hide_reactions の投稿者は本人以外に数を見せない。
+		const viewerSlug = userId ? this.slugForUser(userId) : undefined;
+		post.reposted = viewerSlug
+			? this.repostKeys.has(`${post.id}:${viewerSlug}`)
+			: false;
+		const authorSettings = this.userSettings.get(post.slug ?? "");
+		post.authorIsPrivate = !!authorSettings?.isPrivate;
+		if (authorSettings?.hideReactions && viewerSlug !== post.slug) {
+			post.reactionsHidden = true;
+			post.likes = 0;
+			post.dislikes = 0;
+			post.reposts = 0;
+			post.heartsTotal = 0;
+		} else {
+			post.reactionsHidden = false;
 		}
 		return post;
 	}
@@ -528,6 +549,10 @@ class MockDB {
 								? []
 								: [...p.replies]
 										.filter((r) => !hidden.has(r.slug ?? ""))
+										// 鍵アカのレスは窓を切る前に落とす（pg の attachRepliesToThreads と同じ）
+										.filter((r) =>
+											this.canViewAuthor(r.slug ?? "", r.displayName, userId),
+										)
 										.slice(-REPLIES_PAGE_SIZE)
 										.map((r) => this.applyUserState(r, userId)),
 					},
@@ -559,12 +584,21 @@ class MockDB {
 			this.applyUserState(
 				{
 					...p,
-					replies: [...p.replies].map((r) => this.applyUserState(r, userId)),
+					replies: this.visibleReplies(p.replies, userId).map((r) =>
+						this.applyUserState(r, userId),
+					),
 				},
 				userId,
 			),
 		);
 		return limit && limit > 0 ? res.slice(0, limit) : res;
+	}
+
+	/** 鍵アカのレスを閲覧者向けに落とす（pg の authorVisibleSql 相当） */
+	private visibleReplies(replies: Post[] | undefined, userId?: string): Post[] {
+		return (replies ?? []).filter((r) =>
+			this.canViewAuthor(r.slug ?? "", r.displayName, userId),
+		);
 	}
 
 	getLikedPosts(userId: string, limit?: number): Post[] {
@@ -620,10 +654,24 @@ class MockDB {
 		if (!post) return undefined;
 		if (!this.canViewAuthor(post.slug ?? "", post.displayName, userId))
 			return undefined;
+		// レスなら、スレ主が鍵アカで見えないスレのレスも見せない（pg と同じ）
+		if (post.threadId !== post.id) {
+			const thread = this.posts.find((p) => p.id === post.threadId);
+			if (
+				thread &&
+				!this.canViewAuthor(thread.slug ?? "", thread.displayName, userId)
+			)
+				return undefined;
+		}
 		// 個別ページも直近 REPLIES_PAGE_SIZE 件だけ（pg.ts の getPost と同じ）。
 		// それより古いレスは /api/posts/[id]/replies?before=N で追加取得する。
 		return this.applyUserState(
-			{ ...post, replies: post.replies.slice(-REPLIES_PAGE_SIZE) },
+			{
+				...post,
+				replies: this.visibleReplies(post.replies, userId)
+					.slice(-REPLIES_PAGE_SIZE)
+					.map((r) => this.applyUserState(r, userId)),
+			},
 			userId,
 		);
 	}
@@ -640,7 +688,12 @@ class MockDB {
 		// attachRepliesToThreads 経由で同じ窓）。専ブラ向け .dat 本文は
 		// app/unj/dat/[id]/route.ts が getReplies で別途スレ全件を引く。
 		return this.applyUserState(
-			{ ...post, replies: post.replies.slice(-REPLIES_PAGE_SIZE) },
+			{
+				...post,
+				replies: this.visibleReplies(post.replies, userId)
+					.slice(-REPLIES_PAGE_SIZE)
+					.map((r) => this.applyUserState(r, userId)),
+			},
 			userId,
 		);
 	}
@@ -740,7 +793,11 @@ class MockDB {
 		post.threadId = post.id;
 		this.heartCounts.set(post.id, 0);
 		this.posts.unshift(post);
-		return post;
+		// 呼び出し側が鍵アカの投稿をリアルタイム配信しない判定に使う（pg と同じ）
+		return {
+			...post,
+			authorIsPrivate: !!this.userSettings.get(post.slug ?? "")?.isPrivate,
+		};
 	}
 
 	likePost(id: number, userId: string): Post | null {
@@ -806,13 +863,23 @@ class MockDB {
 		return this.getPost(id) ?? null;
 	}
 
+	/**
+	 * リポストのトグル（ユーザーごと。pg の post_reposts と同じ）。userId 省略は
+	 * lib/api.ts のブラウザ内モック経路で、その場合は「ローカルの1人」として扱う。
+	 */
 	repostPost(id: number, userId?: string): Post | null {
 		const post = this.posts.find((p) => p.id === id);
 		if (!post) return null;
-		post.reposted = !post.reposted;
-		post.reposts = post.reposted ? post.reposts + 1 : post.reposts - 1;
+		if (!this.getPost(id, userId)) return null;
+		const viewerSlug = userId ? this.slugForUser(userId) : "";
+		const key = `${id}:${viewerSlug}`;
+		const nowReposted = !this.repostKeys.has(key);
+		if (nowReposted) this.repostKeys.add(key);
+		else this.repostKeys.delete(key);
+		// 返信は posts と親の replies の両方に同じオブジェクトで入っているので1回でよい
+		post.reposts = Math.max(0, post.reposts + (nowReposted ? 1 : -1));
 		// リポスト解除ではなく「リポストした」瞬間だけ通知する
-		if (post.reposted && userId) {
+		if (nowReposted && userId) {
 			this.createNotification({
 				recipientId: post.displayName,
 				actor: userId,
@@ -820,13 +887,17 @@ class MockDB {
 				postId: id,
 			});
 		}
-		return post;
+		const result = this.getPost(id, userId) ?? null;
+		// userId 無し（ブラウザ内モック）は getPost が reposted=false を返すので、押した結果を載せる
+		if (result && !userId) result.reposted = nowReposted;
+		return result;
 	}
 
 	addReply(
 		postId: number,
 		data: {
 			displayName?: string;
+			slug?: string;
 			content: string;
 			parentPostId?: number;
 			hasImage?: boolean;
@@ -849,14 +920,18 @@ class MockDB {
 	): Post | null {
 		const post = this.posts.find((p) => p.id === postId);
 		if (!post) return null;
+		// 鍵アカのスレには、スレ主本人とスレ主がフォローしている人しか書き込めない（pg と同じ）
+		if (!this.canViewAuthor(post.slug ?? "", post.displayName, data.slug))
+			return null;
 		const id = Math.max(0, ...this.posts.map((p) => p.id)) + 1;
 		const name = data.displayName || "名無し";
 		const replyHasMml = extractMmlFromContent(data.content) !== null;
 		const reply: Post = {
 			id,
 			displayName: name,
-			slug: name,
-			userId: name,
+			// セッションから解決済みの slug があればそれを持ち主キーにする（pg の users.id 相当）
+			slug: data.slug || name,
+			userId: data.slug || name,
 			createdAt: new Date().toISOString(),
 			time: "たった今",
 			content: data.content,
@@ -936,7 +1011,10 @@ class MockDB {
 				}
 			}
 		}
-		return reply;
+		return {
+			...reply,
+			authorIsPrivate: !!this.userSettings.get(reply.slug ?? "")?.isPrivate,
+		};
 	}
 
 	/**
@@ -951,6 +1029,8 @@ class MockDB {
 	): Post[] {
 		const post = this.posts.find((p) => p.id === postId);
 		if (!post) return [];
+		// スレ主が鍵アカで見えないスレはレスも返さない（pg の getReplies と同じ）
+		if (!this.canViewAuthor(post.slug ?? "", post.displayName, userId)) return [];
 		const hidden = this.getHiddenSlugs(userId);
 		const limit = Math.max(
 			1,
@@ -959,12 +1039,13 @@ class MockDB {
 		const beforeNum = options?.beforeNum;
 		const visible = (post.replies ?? [])
 			.map((r, i) => (r.num == null ? { ...r, num: i + 2 } : r))
-			.filter((r) => !hidden.has(r.slug ?? ""));
+			.filter((r) => !hidden.has(r.slug ?? ""))
+			.filter((r) => this.canViewAuthor(r.slug ?? "", r.displayName, userId));
 		const windowed =
 			beforeNum != null
 				? visible.filter((r) => (r.num ?? 0) < beforeNum)
 				: visible;
-		return windowed.slice(-limit);
+		return windowed.slice(-limit).map((r) => this.applyUserState(r, userId));
 	}
 
 	/**
@@ -1165,9 +1246,9 @@ class MockDB {
 		const res = this.posts
 			.filter((p) => p.id === p.threadId)
 			.filter((p) => !hidden.has(p.slug ?? ""))
-			.filter((p) => !this.hiddenFromSearchSlugs.has(p.slug ?? ""))
+			.filter((p) => this.searchableFor(p, userId))
 			.filter((p) => {
-				const threadPosts = [p, ...(p.replies || [])];
+				const threadPosts = [p, ...this.visibleReplies(p.replies, userId)];
 				return threadPosts.some(
 					(tp) =>
 						tp.content.toLowerCase().includes(q) ||
@@ -1175,7 +1256,10 @@ class MockDB {
 				);
 			})
 			.map((p) =>
-				this.applyUserState({ ...p, replies: [...p.replies] }, userId),
+				this.applyUserState(
+					{ ...p, replies: this.visibleReplies(p.replies, userId) },
+					userId,
+				),
 			);
 		return limit && limit > 0 ? res.slice(0, limit) : res;
 	}
@@ -1213,7 +1297,7 @@ class MockDB {
 		const res = all
 			.filter((p) => (kind === "image" ? p.hasImage : p.hasMml))
 			.filter((p) => !hidden.has(p.slug ?? ""))
-			.filter((p) => !this.hiddenFromSearchSlugs.has(p.slug ?? ""))
+			.filter((p) => this.searchableFor(p, userId))
 			.filter(
 				(p) =>
 					!q ||
@@ -1244,8 +1328,9 @@ class MockDB {
 				originType: p.originType,
 				isOwner: mySlug !== undefined && p.slug === mySlug,
 				createdAt: p.createdAt,
-				likes: p.likes,
-				dislikes: p.dislikes,
+				// hide_reactions の伏せ字は applyUserState に任せる
+				likes: this.applyUserState(p, userId).likes,
+				dislikes: this.applyUserState(p, userId).dislikes,
 				repliesCount: p.repliesCount,
 			}));
 		const start = !before && offset && offset > 0 ? offset : 0;
@@ -1259,22 +1344,35 @@ class MockDB {
 		const res = this.posts
 			.filter((p) => p.id === p.threadId)
 			.filter((p) => !hidden.has(p.slug ?? ""))
-			.filter((p) => !this.hiddenFromSearchSlugs.has(p.slug ?? ""))
+			.filter((p) => this.searchableFor(p, userId))
 			.filter((p) => {
 				const tags = p.content.match(/#[^\s#]+/g);
 				return tags?.some((t) => t === normalized) ?? false;
 			})
 			.map((p) =>
-				this.applyUserState({ ...p, replies: [...p.replies] }, userId),
+				this.applyUserState(
+					{ ...p, replies: this.visibleReplies(p.replies, userId) },
+					userId,
+				),
 			);
 		return limit && limit > 0 ? res.slice(0, limit) : res;
 	}
 
 	getTrends(): Trend[] {
 		const freq = new Map<string, number>();
+		// 鍵アカ・検索除外の投稿は数えない（pg の getTrends と同じ）
+		const counted = (p: Post) => {
+			const st = this.userSettings.get(p.slug ?? "");
+			return !st?.isPrivate && !st?.hideFromSearch;
+		};
 		const allContent = this.posts
+			.filter(counted)
 			.map((p) => p.content)
-			.concat(this.posts.flatMap((p) => p.replies.map((r) => r.content)));
+			.concat(
+				this.posts.flatMap((p) =>
+					p.replies.filter(counted).map((r) => r.content),
+				),
+			);
 		for (const content of allContent) {
 			const cleaned = cleanContentForTrends(content);
 			// 先頭が空白/行頭でない「#」は和音進行(例: C#m)のシャープ記号なのでハッシュタグ扱いしない
@@ -1663,17 +1761,34 @@ class MockDB {
 		else this.hiddenFromSearchSlugs.delete(key);
 	}
 
-	/** 鍵アカウント考慮: 閲覧者が投稿主を閲覧できるか。 */
+	/**
+	 * 鍵アカウント考慮: 閲覧者が投稿主の投稿を見られるか（pg の authorVisibleSql と同じ）。
+	 * 見られるのは本人と「投稿者がフォローしている人」だけ。閲覧者が投稿者をフォロー
+	 * しているかは関係ない（フォロワー側から閲覧権を得る経路は無い）。
+	 */
 	private canViewAuthor(
 		authorSlug: string,
-		authorDisplayName: string,
+		_authorDisplayName: string,
 		viewerId?: string,
 	): boolean {
 		const settings = this.userSettings.get(authorSlug);
 		if (!settings?.isPrivate) return true;
 		if (!viewerId) return false;
 		if (this.slugForUser(viewerId) === authorSlug) return true; // 本人
-		return this.isFollowing(viewerId, authorDisplayName);
+		return this.isFollowing(authorSlug, viewerId);
+	}
+
+	/** 検索系に出してよいか（鍵アカの可視性 ＋ 検索除外。本人の投稿は検索除外でも出す） */
+	private searchableFor(p: Post, viewerId?: string): boolean {
+		const slug = p.slug ?? "";
+		if (!this.canViewAuthor(slug, p.displayName, viewerId)) return false;
+		if (!this.hiddenFromSearchSlugs.has(slug)) return true;
+		return !!viewerId && this.slugForUser(viewerId) === slug;
+	}
+
+	/** ゲーム一覧・ランキングから外す鍵アカか（lib/db/mock.ts listTopGames 等） */
+	isPrivateSlug(slug: string | undefined): boolean {
+		return !!slug && !!this.userSettings.get(slug)?.isPrivate;
 	}
 
 	// ── 移行トークン(匿名アカウントの引き継ぎ) ──

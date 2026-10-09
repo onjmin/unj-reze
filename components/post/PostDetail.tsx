@@ -1691,14 +1691,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? "text-blue-400 font-bold" : ""}`}
 							>
 								<ThumbsUp size={14} />
-								<span className="text-[11px]">{post.likes || ""}</span>
+								<span className="text-[11px]">{post.reactionsHidden ? "" : post.likes || ""}</span>
 							</button>
 							<button
 								onClick={() => handleDislike(post.id)}
 								className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? "text-red-500 font-bold" : ""}`}
 							>
 								<ThumbsDown size={14} />
-								<span className="text-[11px]">{post.dislikes || ""}</span>
+								<span className="text-[11px]">{post.reactionsHidden ? "" : post.dislikes || ""}</span>
 							</button>
 							<button
 								onClick={() => openComposer(null)}
@@ -1712,7 +1712,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? "text-purple-400" : ""}`}
 							>
 								<Repeat size={14} />
-								<span className="text-[11px]">{post.reposts || ""}</span>
+								<span className="text-[11px]">{post.reactionsHidden ? "" : post.reposts || ""}</span>
 							</button>
 							<button
 								onClick={(e) => {
@@ -1741,7 +1741,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							className="flex items-center space-x-1 -mr-1.5 py-1.5 pl-2.5 pr-3 rounded-full hover:bg-pink-500/10 hover:text-pink-400 active:scale-90 transition-all"
 						>
 							<Heart size={16} className="fill-current text-pink-600/65" />
-							<span className="text-[11px]">{post.heartsTotal || "0"}</span>
+							<span className="text-[11px]">{post.reactionsHidden ? "" : post.heartsTotal || "0"}</span>
 						</button>
 					</div>
 				</div>
@@ -2619,14 +2619,14 @@ function ReplyTreeItem({
 								className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${localPost.liked ? "text-blue-400 font-bold" : ""}`}
 							>
 								<ThumbsUp size={14} />
-								<span className="text-[11px]">{localPost.likes || ""}</span>
+								<span className="text-[11px]">{localPost.reactionsHidden ? "" : localPost.likes || ""}</span>
 							</button>
 							<button
 								onClick={() => handleDislike(localPost.id)}
 								className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? "text-red-500 font-bold" : ""}`}
 							>
 								<ThumbsDown size={14} />
-								<span className="text-[11px]">{localPost.dislikes || ""}</span>
+								<span className="text-[11px]">{localPost.reactionsHidden ? "" : localPost.dislikes || ""}</span>
 							</button>
 							<button
 								onClick={() => onReply(localPost)}
@@ -2640,7 +2640,7 @@ function ReplyTreeItem({
 								className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? "text-purple-400" : ""}`}
 							>
 								<Repeat size={14} />
-								<span className="text-[11px]">{localPost.reposts || ""}</span>
+								<span className="text-[11px]">{localPost.reactionsHidden ? "" : localPost.reposts || ""}</span>
 							</button>
 							<button
 								onClick={(e) => {
@@ -2665,7 +2665,7 @@ function ReplyTreeItem({
 							className="flex items-center space-x-1 -mr-1.5 py-1.5 pl-2.5 pr-3 rounded-full hover:bg-pink-500/10 hover:text-pink-400 active:scale-90 transition-all"
 						>
 							<Heart size={16} className="fill-current text-pink-600/65" />
-							<span className="text-[11px]">{localPost.heartsTotal || "0"}</span>
+							<span className="text-[11px]">{localPost.reactionsHidden ? "" : localPost.heartsTotal || "0"}</span>
 						</button>
 					</div>
 

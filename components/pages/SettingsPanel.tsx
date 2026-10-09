@@ -221,24 +221,25 @@ export default function SettingsPanel({
 					<label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
 						プライバシー
 					</label>
+					{/* 各設定の正確な効き方は lib/db/pg.ts authorVisibleSql 直前のコメント */}
 					<div className="space-y-1.5">
 						<PrivacyToggle
 							label="鍵アカウント"
-							desc="フォロワーのみに投稿を公開"
+							desc="投稿と返信を、あなたがフォローしている人にだけ表示します。フィード・検索・専ブラ・リアルタイム更新にも出ません（名前とアイコンは見えます）"
 							icon={Lock}
 							active={privacy.isPrivate}
 							onClick={() => togglePrivacy("isPrivate")}
 						/>
 						<PrivacyToggle
 							label="検索から除外"
-							desc="検索・トレンドに自分の投稿を出さない"
+							desc="検索・ハッシュタグ・画像/音楽検索・トレンドに自分の投稿を出しません（フィードとプロフィールには出ます）"
 							icon={EyeOff}
 							active={privacy.hideFromSearch}
 							onClick={() => togglePrivacy("hideFromSearch")}
 						/>
 						<PrivacyToggle
-							label="リアクション履歴を非公開"
-							desc="いいね／ハート等の履歴を隠す"
+							label="リアクション数を非公開"
+							desc="自分の投稿についた いいね・だめね・リポスト・ハートの数を、自分以外には表示しません"
 							icon={Heart}
 							active={privacy.hideReactions}
 							onClick={() => togglePrivacy("hideReactions")}

@@ -372,7 +372,10 @@ export const mockStore: DataStore = {
 	},
 
 	async listAllGames(limit?: number) {
-		const list = Array.from(gameStore.values());
+		// 鍵アカが作ったゲームは一覧に出さない（pg の PUBLIC_CREATOR_SQL と同じ）
+		const list = Array.from(gameStore.values()).filter(
+			(g) => !mockDb.isPrivateSlug(g.creatorSlug),
+		);
 		return limit && limit > 0 ? list.slice(0, limit) : list;
 	},
 
@@ -550,6 +553,7 @@ export const mockStore: DataStore = {
 	async listTopGames(limit?: number) {
 		const safeLimit = Math.max(1, Math.min(limit || 30, 50));
 		return Array.from(gameStore.values())
+			.filter((g) => !mockDb.isPrivateSlug(g.creatorSlug))
 			.sort((a, b) => (b.plays ?? 0) - (a.plays ?? 0) || b.id - a.id)
 			.slice(0, safeLimit);
 	},

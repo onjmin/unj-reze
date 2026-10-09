@@ -12,6 +12,7 @@ import { db as mockDbInstance } from "./db/mock-db";
 import type { MvManifest } from "./mv/mv-config";
 import type { OtomadManifest } from "./otomad/otomad-config";
 import type { TalkManifest } from "./talk/talk-config";
+import { collectPostGuard } from "./security/post-guard-client";
 import { ensureSessionId } from "./session";
 import { deleteObject, isUploaderAvailable, uploadImage } from "./uploader";
 import {
@@ -446,6 +447,7 @@ const staticApi = {
 			}
 			const avatarUrl = mockDbInstance.getUserAvatarUrl(id);
 			const bio = mockDbInstance.getUserBio(id);
+			const isPrivate = mockDbInstance.getUserSettings(id).isPrivate;
 			const nextCursor =
 				posts.length > 0 && posts[posts.length - 1]?.createdAt
 					? posts[posts.length - 1].createdAt
@@ -455,6 +457,7 @@ const staticApi = {
 				displayName,
 				avatarUrl,
 				bio,
+				isPrivate,
 				posts,
 				postCount: posts.length,
 				nextCursor,
@@ -742,16 +745,22 @@ const liveApi = {
 			animFps?: number;
 			walkPreset?: string;
 			originType?: OriginType;
-		}) =>
-			fetcher<Post>("/posts", {
+		}) => {
+			const mml = await externalizeMml(data.content);
+			// Turnstile のトークンは 1 回きりなので、送信のたびに（再送でも）取り直す
+			// （lib/security/post-guard-client.ts）
+			const guard = await collectPostGuard();
+			return fetcher<Post>("/posts", {
 				method: "POST",
 				body: JSON.stringify({
 					...data,
 					...imageTokensFor(data.imageSrc),
-					...(await externalizeMml(data.content)),
+					...mml,
+					...guard,
 					sessionId: ensureSessionId(),
 				}),
-			}),
+			});
+		},
 		like: (id: string) =>
 			fetcher<Post>(`/posts/${id}`, {
 				method: "PUT",
@@ -919,13 +928,15 @@ const liveApi = {
 					originType?: OriginType;
 				},
 			) =>
-				externalizeMml(data.content).then((mml) =>
+				externalizeMml(data.content).then(async (mml) =>
 					fetcher<Post>(`/posts/${postId}/replies`, {
 						method: "POST",
 						body: JSON.stringify({
 							...data,
 							...imageTokensFor(data.imageSrc),
 							...mml,
+							// Turnstile のトークンと指紋（毎回取り直す。lib/security/post-guard-client.ts）
+							...(await collectPostGuard()),
 							sessionId: ensureSessionId(),
 						}),
 					}),
@@ -1022,6 +1033,8 @@ const liveApi = {
 				displayName: string;
 				avatarUrl?: string;
 				bio?: string;
+				/** 鍵アカウントか（ヘッダーの 🔒 表示用） */
+				isPrivate?: boolean;
 				posts: Post[];
 				postCount: number;
 				nextCursor?: string | null;

@@ -2,15 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveOrCreateSessionUser, resolveViewerId } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
-import { getClientIp } from "@/lib/ip";
 import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
 import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { CH_FEED } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
-import { scoreRequest } from "@/lib/security/scoring";
-import { readTlsSignalsFromHeaders } from "@/lib/security/tls";
-import { verifyTurnstileToken } from "@/lib/security/turnstile";
-import type { FingerprintSignals } from "@/lib/security/types";
+import { guardNewPost } from "@/lib/security/post-guard";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
@@ -109,8 +105,6 @@ export async function POST(request: NextRequest) {
 			animFps,
 			walkPreset,
 			originType,
-			turnstileToken,
-			fingerprint,
 			sessionId: bodySessionId,
 		}: {
 			displayName?: string;
@@ -130,8 +124,6 @@ export async function POST(request: NextRequest) {
 			animFps?: number;
 			walkPreset?: string;
 			originType?: OriginType;
-			turnstileToken?: string | null;
-			fingerprint?: FingerprintSignals | null;
 			sessionId?: string;
 		} = body;
 
@@ -158,47 +150,15 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
 		}
 
+		// 多層不正検知（Turnstile + 指紋 + TLS、lib/security/post-guard.ts）。
+		// ボットのためにユーザーを作らないよう、セッションユーザーの自動作成より前に掛ける。
+		const guardResponse = await guardNewPost(request, body, "post");
+		if (guardResponse) return guardResponse;
+
 		// セッション本人を解決、未登録セッションなら自動作成
 		const sessionUser = await resolveOrCreateSessionUser(request, bodySessionId);
 		const displayName = sessionUser.displayName;
 		const authorSlug = sessionUser.slug;
-
-		// 参考実装: 多層不正検知（Turnstile + 指紋 + IP/セッション相関）。
-		// fingerprint がクライアントから送られてきた場合のみ評価する後方互換設計 —
-		// 未対応クライアント（既存の PostComposer 等）はそのまま通過する。
-		if (fingerprint) {
-			const ip = getClientIp(request.headers);
-			const sessionId = request.cookies.get("unj_reze_session")?.value || null;
-			const userAgent = request.headers.get("user-agent") || "";
-			const tls = readTlsSignalsFromHeaders(request.headers);
-
-			const turnstileResult = await verifyTurnstileToken(
-				turnstileToken ?? null,
-				ip,
-			);
-			const assessment = await scoreRequest({
-				fingerprint,
-				ip,
-				sessionId,
-				userAgent,
-				tls,
-				turnstileOk: turnstileResult.success,
-				turnstileUnreachable: turnstileResult.unreachable,
-			});
-
-			if (assessment.blocked) {
-				return NextResponse.json(
-					{ error: "forbidden", reasons: assessment.reasons },
-					{ status: 403 },
-				);
-			}
-			if (assessment.rateLimited) {
-				return NextResponse.json(
-					{ error: "too many requests", reasons: assessment.reasons },
-					{ status: 429, headers: { "Retry-After": "10" } },
-				);
-			}
-		}
 
 		const decodedGameId = gameId ? decodeId(gameId) : undefined;
 		if (gameId && decodedGameId === null) {
@@ -262,7 +222,11 @@ export async function POST(request: NextRequest) {
 
 		// フィード購読者へ push する。これがあるおかげでクライアントは
 		// 「新着があるか」を確かめるためだけの定期ポーリングをしなくて済む。
-		publishRealtime({ channel: CH_FEED, event: "post.created", data: encoded });
+		// 鍵アカの投稿は配信しない（購読者を選べないので全員に届いてしまう）。
+		// 本人と許可された人は次の読み込み・ポーリングで見える（lib/db/pg.ts authorVisibleSql）。
+		if (!post.authorIsPrivate) {
+			publishRealtime({ channel: CH_FEED, event: "post.created", data: encoded });
+		}
 
 		return NextResponse.json(encoded, { status: 201 });
 	} catch (e) {

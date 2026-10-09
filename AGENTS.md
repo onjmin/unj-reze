@@ -117,10 +117,16 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
   forge them. Never change that to a merge.
 - A real JA4 needs Cloudflare Bot Management; without it only `tlsVersion`/`tlsCipher` arrive and
   `assessTls()` returns a low-confidence verdict. `unknown` never adds score (fail-open).
-  Middleware also tightens the write rate limit (30 → 5 per 10s) for non-browser TLS.
-- The **fingerprint** half is still staged but unwired: no caller sends `fingerprint`, so
-  `app/api/posts` skips scoring (`if (fingerprint)`) and nothing calls `app/api/security/verify`.
-  Wiring `collectFingerprint()` + `useTurnstile()` into the composer activates it.
+  Write rate limits use the Workers Rate Limiting bindings in `wrangler.json` (`WRITE_LIMITER` 30/10s,
+  `WRITE_LIMITER_STRICT` 5/10s for non-browser TLS/UA) via `lib/security/rate-limit.ts`; KV is only the
+  fallback when no binding exists (local dev).
+- New threads/replies go through `guardNewPost()` (`lib/security/post-guard.ts`): Turnstile is
+  **required** when `TURNSTILE_SECRET_KEY` is set, and the fingerprint feeds `scoreRequest()`. The client
+  side is injected centrally in `lib/api.ts` (`collectPostGuard()`), so any new post/reply caller must go
+  through `api.posts.create` / `api.posts.replies.create` (or spread `collectPostGuard()` itself).
+  `/test/bbs.cgi` cannot run Turnstile and stays on rate limiting only.
+- CSP: `frame-ancestors`/`object-src`/`base-uri` are enforced; the full policy is Report-Only
+  (`lib/security/csp.ts` → `/api/csp-report`). Add new external script/iframe origins there.
 - Geo comes from `cf-ipcountry` with `x-vercel-ip-country` / other fallbacks (`lib/security/geo.ts`).
 
 ---

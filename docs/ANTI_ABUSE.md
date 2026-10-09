@@ -28,50 +28,33 @@ Browser                          proxy (middleware.ts)              Next.js API 
 
 ## 1. Client-side layer
 
-### Turnstile (invisible mode) — `lib/hooks/useTurnstile.ts`
+### Turnstile — `lib/security/turnstile-client.ts` / `post-guard-client.ts`
 
-```tsx
-'use client';
-import { useTurnstile } from '@/lib/hooks/useTurnstile';
-import { collectFingerprint } from '@/lib/security/fingerprint';
+Wired for **new threads and replies**. The client half is injected centrally in `lib/api.ts`
+(`api.posts.create` / `api.posts.replies.create` spread `await collectPostGuard()` into the body),
+so every composer (home, thread detail, BBS view, hashtag view) gets it without per-screen wiring.
+The two raw-`fetch` reply callers (`GameThreadBoard`, `LiveGameView`) spread it themselves.
 
-function PostComposer() {
-  const { containerRef, getToken } = useTurnstile();
-
-  const handleSubmit = async () => {
-    // Always re-executes the widget right before the action, so the token
-    // returned here is guaranteed fresh (Turnstile tokens expire ~5 min,
-    // and can also expire mid-session — data-expired-callback resets the
-    // widget proactively so a stale token is never reused).
-    const turnstileToken = await getToken();
-    const fingerprint = collectFingerprint();
-
-    await fetch('/api/posts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName, content, turnstileToken, fingerprint }),
-    });
-  };
-
-  return (
-    <>
-      {/* invisible widget container — renders nothing visible */}
-      <div ref={containerRef} />
-      <button onClick={handleSubmit}>投稿</button>
-    </>
-  );
-}
-```
+- **Lazy load**: the Turnstile script is loaded only when a composer textarea gets focus
+  (`prefetchPostGuard()`), never on a plain page view.
+- **One token per submit**: tokens are single-use and live 300s. One token is prefetched on
+  focus; the submit takes it and discards it; any retry fetches a fresh one. A prefetched
+  token older than 240s is thrown away.
+- A fresh widget is rendered per token (`appearance: "interaction-only"`) into a fixed
+  bottom-right host and removed afterwards — normally nothing is visible; a checkbox appears
+  only if Cloudflare wants interaction (the wait then extends to 120s).
+- If the token can't be obtained, the request is sent without one and the server answers 403
+  with a message the UI shows as a toast; the failed-draft stash in `app/page.tsx` keeps the
+  draft, and the next submit gets a new token.
 
 Env vars (`.env`):
 ```
-TURNSTILE_SECRET_KEY=...        # server-only, never exposed to the client
-NEXT_PUBLIC_TURNSTILE_SITE_KEY=... # public, embedded in the widget
+TURNSTILE_SECRET_KEY=...           # server-only (Workers secret)
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=... # public, baked in at build time
 ```
-If `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is unset, the widget never renders and `getToken()`
-resolves `null` — this keeps local dev working without Cloudflare credentials. The
-server mirrors this: if `TURNSTILE_SECRET_KEY` is unset, verification is skipped
-(`turnstileOk = true`) rather than hard-failing every request.
+Set them **as a pair**. Without the site key the client sends no token; without the secret
+the server skips verification (logs a warning once) — this is how local dev works.
+**Secret set but site key missing = every post/reply is 403.**
 
 ### Browser fingerprinting — `lib/security/fingerprint.ts`
 
@@ -128,16 +111,21 @@ What is actually available depends on the plan:
 `unknown` never adds score — the signal degrades gracefully rather than false-flagging
 everyone when Bot Management isn't enabled.
 
-## 3. Backend layer — `app/api/security/verify/route.ts`
+## 3. Backend layer — `lib/security/post-guard.ts` (`guardNewPost`)
+
+Called from `POST /api/posts` and `POST /api/posts/[id]/replies` **before** the session user is
+auto-created (so bots don't mint users). `app/api/security/verify/route.ts` remains as a standalone
+pre-flight endpoint but nothing calls it.
 
 ### Step 1 — Turnstile verification (`lib/security/turnstile.ts`)
 
 - POSTs to `https://challenges.cloudflare.com/turnstile/v0/siteverify` with the secret,
   token, and `remoteip`.
-- Wrapped in `AbortController` with an 8s timeout — if Cloudflare is slow/unreachable,
-  we don't hang the request; we mark it `unreachable` and **fail soft** (+10 score)
-  rather than fail closed (+40 for an actual verification failure). This is the explicit
-  latency/availability tradeoff requested: don't let a Cloudflare outage block every user.
+- Wrapped in `AbortController` with a 3s timeout — if Cloudflare is slow/unreachable,
+  we don't hang the request; we mark it `unreachable` and **fail open** (+10 score only).
+  Don't let a Cloudflare outage block every user.
+- When `TURNSTILE_SECRET_KEY` is set, a missing/invalid token is a hard **403**
+  (`code: "turnstile_failed"`), not just +40 score.
 
 ### Step 2 — Multi-signal scoring (`lib/security/scoring.ts`)
 
@@ -157,7 +145,7 @@ Scores are additive, capped at 100. `blocked = score >= 80`.
 ### Step 3 — Rate limiting & enforcement
 
 A sliding 10-second window per fingerprint hash (`fp:{hash}:rate:{windowIndex}`, same
-windowed-counter pattern already used for IP-based rate limiting in `proxy.ts`) —
+windowed-counter pattern; IP-based limiting is separate, see "Write rate limiting" below) —
 more than 20 scored actions in 10s ⇒ `429`. `score >= 80` ⇒ `403`. Otherwise `200`
 with the score/reasons returned for observability, even when allowed.
 
@@ -174,14 +162,65 @@ with the score/reasons returned for observability, even when allowed.
 
 ### Integration pattern
 
-`app/api/posts/route.ts` demonstrates the reference wiring: if the request body includes
-a `fingerprint`, the route runs Turnstile + scoring inline before creating the post; if
-`fingerprint` is absent (older/unmigrated clients), it's skipped entirely. This
-backward-compatible, opt-in-per-field design lets you roll the check out to other write
-routes (`/api/posts/[id]/replies`, `/api/follow`, `/api/messages`, etc.) one at a time by
-copying the same block, without a flag day that breaks every client at once. A shared
-`app/api/security/verify/route.ts` endpoint is also provided standalone, for routes/flows
-where you'd rather call it as a separate pre-flight check instead of inlining.
+`guardNewPost(request, body, action)` returns `null` (continue) or a ready `NextResponse`
+(403 Turnstile / 403 score >= 80 / 429). Fingerprints are validated for shape and size before use
+(a malformed one is treated as absent); the session id is SHA-256-hashed before it reaches KV.
+Scoring failures (KV down) fail open with a warning. To protect another write route, call it the
+same way and make the client spread `collectPostGuard()` into the body.
+
+**Not covered: `/test/bbs.cgi` (専ブラ).** 2ch browsers cannot run Turnstile or JS, so that path
+stays on IP rate limiting only (strict 5/10s bucket when the UA/TLS looks non-browser).
+
+**Automation**: there is no API-key bypass. Posting from the real UI works (the UI fetches the
+token). A raw `fetch()` to `/api/posts` from a page console carries no token and is rejected once
+the secret is set — go through the UI or `api.posts.*`.
+
+**KV cost**: scoring does roughly 4-6 KV REST writes per post (hash maps + rate key). With
+`KV_PROVIDER=cloudflare` on the free tier (1,000 writes/day) that bounds scored posts to a
+couple of hundred per day; the middleware write limiter no longer touches KV (see below), which
+more than pays for it. If it becomes a problem, move the correlation maps to a Durable Object.
+
+## 4. Write rate limiting — `lib/security/rate-limit.ts`
+
+`middleware.ts` limits every write method on `/api/*` and `/test/bbs.cgi` per IP
+(IPv6 normalised to /64 by `rateLimitKeyFromIp`). Buckets:
+
+| Bucket | Binding (`wrangler.json` `ratelimits`) | Limit |
+|---|---|---|
+| `write` | `WRITE_LIMITER` (namespace 1001) | 30 / 10s |
+| `strict` (bot UA or non-browser TLS) | `WRITE_LIMITER_STRICT` (namespace 1002) | 5 / 10s |
+| `csp` (`/api/csp-report`) | `WRITE_LIMITER`, separate key | 30 / 10s |
+
+The Workers Rate Limiting binding is per-location and approximate, but it costs no KV operations
+and answers in well under a millisecond. The old KV read-then-write counter (non-atomic, eventually
+consistent, one KV write per request) is kept **only** as a fallback when no binding exists
+(`next dev` / `next start`), and logs once when used. Every path fails open.
+
+## 5. Content-Security-Policy — `lib/security/csp.ts`
+
+- **Enforced**: `frame-ancestors 'self'; object-src 'none'; base-uri 'self'`.
+- **Report-Only**: the full policy (script/style/font/img/media/connect/worker/frame sources),
+  built from an inventory of every external origin in the codebase and `@onjmin/dtm`
+  (Turnstile, GA, jsdelivr, surikov.github.io WebAudioFont, onjmin.github.io koe TTS, YouTube /
+  SoundCloud APIs, embed iframes...). `'unsafe-inline'` stays in `script-src` until nonces are wired
+  (Next's inline RSC payload + GA init). `img/media/font/connect` allow any `https:` because
+  posts, MV fonts and game assets reference arbitrary user URLs. `/api/rpgen/*` keeps its own
+  `sandbox` CSP and gets neither header.
+- Reports go to `/api/csp-report` (legacy `report-uri` and Reporting API `report-to`), which keeps
+  nothing and logs one line per violation:
+  `[csp-violation] report directive=script-src-elem blocked=https://example.com page=/post/123 source=...`
+  (blocked URL reduced to its origin, page to its path).
+
+**Reading reports**: `npx wrangler tail unj-reze --format pretty | grep csp-violation`, or Workers
+-> unj-reze -> Logs (observability is on) filtered by `csp-violation`. Group by
+`directive` + `blocked`: browser extensions (`chrome-extension:` / `moz-extension:`) are noise; a real
+origin we load means "add it to `csp.ts`".
+
+**When to enforce**: after about 2 weeks of normal traffic (including playing games, MV/talk/otomad
+playback with TTS, embeds, Turnstile, and the drawing tools) with no violations other than
+extension noise, switch the Report-Only header to the enforced one in `applySecurityHeaders`
+(keep `report-uri` so regressions still show up). Script/frame sources are the parts that matter;
+if in doubt, enforce just `script-src` + `frame-src` first.
 
 ## Analytical matrix — which signal counters which evasion
 

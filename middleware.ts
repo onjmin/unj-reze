@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCountryFromHeaders, isBlockedCountry } from '@/lib/security/geo';
-import { kvGet, kvSetEx } from '@/lib/kv';
 import { getClientIp, rateLimitKeyFromIp } from '@/lib/ip';
+import { checkRateLimit, type RateBucket, type RateLimitEnv } from '@/lib/security/rate-limit';
+import { ENFORCED_CSP, REPORTING_ENDPOINTS, buildReportOnlyCsp } from '@/lib/security/csp';
 import {
   assessTls,
   isBotUserAgent,
@@ -16,42 +17,34 @@ import {
 // 注意: next.config.ts が output:"export"(GitHub Pages)の場合 proxy は動作しない。
 // EU遮断・レートリミットは Netlify/Cloudflare 等のサーバー配備でのみ有効。
 
-// ── レートリミット設定 ──
-const RATE_LIMIT_WINDOW_SEC = 10;
-const RATE_LIMIT_MAX = 30; // 1ウィンドウ(10s)あたりの書き込み上限 / IP
-// TLSハンドシェイクがブラウザのものではないと判定された場合の上限。
-// ブロックはせず「予算を絞る」に留める(誤検知時の被害を限定するため)。
-const RATE_LIMIT_MAX_NON_BROWSER = 5;
+// ── レートリミット ──
+// 実体は lib/security/rate-limit.ts（本番は Workers の Rate Limiting バインディング、無ければ KV）。
+// - write : 1ウィンドウ(10s)あたり 30 回 / IP
+// - strict: TLSハンドシェイクがブラウザのものではない／ボットUA。ブロックはせず「予算を絞る」に
+//           留める(誤検知時の被害を限定するため)。5 回 / 10s
+// - csp   : /api/csp-report。利用者の書き込み枠を食わないよう別枠で数える
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const CSP_REPORT_PATH = '/api/csp-report';
 
-async function isRateLimited(ip: string, max: number): Promise<{ limited: boolean; retryAfter: number }> {
-  const windowIndex = Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000));
-  const key = `ratelimit:${ip}:${windowIndex}`;
-  let count = 0;
-  try {
-    count = parseInt((await kvGet(key)) || '0', 10);
-    // TTL を毎回リフレッシュ(ウィンドウ index でキーが自然にローテートする)
-    await kvSetEx(key, String(count + 1), RATE_LIMIT_WINDOW_SEC * 2);
-  } catch (err) {
-    // KV 障害時はレート制限を無効化(可用性優先)。ただし黙って素通しにはせず痕跡を残す。
-    console.warn('rate limit: KV unavailable, failing open', err);
-    return { limited: false, retryAfter: 0 };
-  }
-  const nextWindowStart = (windowIndex + 1) * RATE_LIMIT_WINDOW_SEC * 1000;
-  const retryAfter = Math.max(1, Math.ceil((nextWindowStart - Date.now()) / 1000));
-  return { limited: count + 1 > max, retryAfter };
+interface CfContextLike {
+  cf?: unknown;
+  env?: RateLimitEnv;
 }
 
-/** Cloudflare Workers 上でのみ request.cf が取れる。
- * `next dev`(workerd 外)や静的エクスポートでは取得できないため、その場合は空シグナルに倒す。 */
-async function getTlsSignals(): Promise<TlsSignals> {
+/** Cloudflare Workers 上でのみ request.cf とバインディングが取れる。
+ * `next dev`(workerd 外)や静的エクスポートでは取得できないため、その場合は null に倒す。 */
+async function getCfContext(): Promise<CfContextLike | null> {
   try {
     const { getCloudflareContext } = await import('@opennextjs/cloudflare');
-    const { cf } = await getCloudflareContext({ async: true });
-    return readTlsSignalsFromCf(cf as CfTlsProperties | undefined);
+    return (await getCloudflareContext({ async: true })) as CfContextLike;
   } catch {
-    return EMPTY_TLS_SIGNALS;
+    return null;
   }
+}
+
+function getTlsSignals(ctx: CfContextLike | null): TlsSignals {
+  if (!ctx) return EMPTY_TLS_SIGNALS;
+  return readTlsSignalsFromCf(ctx.cf as CfTlsProperties | undefined);
 }
 
 const BLOCKED_HTML = `<!doctype html>
@@ -93,13 +86,16 @@ function isRateLimitedWritePath(pathname: string): boolean {
   return pathname.startsWith('/api/') || pathname === BBS_POST_PATH || pathname.startsWith(`${BBS_POST_PATH}/`);
 }
 
-// 全レスポンスに付けるセキュリティヘッダ。script-src を含む本格的な CSP はまだ入れない
-// (インラインスクリプト・外部 CDN・YouTube 埋め込み等の棚卸しが要る)。ここは壊れようのないものだけ。
+// 全レスポンスに付けるセキュリティヘッダ。
+// - CSP は 2 段構え(lib/security/csp.ts): 壊れようのない frame-ancestors / object-src / base-uri だけ強制し、
+//   script-src 等を含む全体ポリシーは Report-Only で違反を /api/csp-report に集める。
 // - frame-ancestors 'self': このサイトを他所の iframe に埋め込む用途は無い(unj 側もリンクのみ)。
 // - Permissions-Policy: カメラ・マイク・位置情報は使っていない(getUserMedia 等の呼び出し無し)。
 //   クリップボード・全画面・自動再生は使うので触らない。
 // 静的アセット(_next/static と public/)は Workers の ASSETS から直接返り middleware を通らないので、
 // public/_headers でも同じものの一部を付けている。
+const REPORT_ONLY_CSP = buildReportOnlyCsp({ dev: process.env.NODE_ENV !== 'production' });
+
 function applySecurityHeaders(request: NextRequest, response: Response): Response {
   const h = response.headers;
   h.set('X-Content-Type-Options', 'nosniff');
@@ -108,7 +104,9 @@ function applySecurityHeaders(request: NextRequest, response: Response): Respons
   // RPGEN プロキシは自前で `sandbox` の CSP を付ける。middleware 側の値とどちらが勝つかに
   // 依存しないよう、そのパスでは付けない(ルート側で frame-ancestors も合わせて付けている)。
   if (!request.nextUrl.pathname.startsWith('/api/rpgen/')) {
-    h.set('Content-Security-Policy', "frame-ancestors 'self'");
+    h.set('Content-Security-Policy', ENFORCED_CSP);
+    h.set('Content-Security-Policy-Report-Only', REPORT_ONLY_CSP);
+    h.set('Reporting-Endpoints', REPORTING_ENDPOINTS);
   }
   // HSTS は本番の https だけ(ローカルの next start や http で付けても意味が無い／事故の元)
   if (process.env.NODE_ENV === 'production' && request.nextUrl.protocol === 'https:') {
@@ -133,7 +131,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // TLSを終端しているのは自分自身(Cloudflare Workers)なので、ここで直接ハンドシェイク情報を読む。
-  const tls = await getTlsSignals();
+  const cfContext = await getCfContext();
+  const tls = getTlsSignals(cfContext);
 
   // API と専ブラ書き込み口の書き込みメソッドにレートリミット。
   // ブラウザを名乗りながらTLSハンドシェイクが一致しない相手は書き込み予算を絞る。
@@ -141,11 +140,12 @@ export async function middleware(request: NextRequest) {
     const userAgent = request.headers.get('user-agent') || '';
     const claimsBrowser = !isBotUserAgent(userAgent);
     const suspiciousTls = claimsBrowser && assessTls(tls).verdict === 'non-browser';
-    const max = suspiciousTls || !claimsBrowser ? RATE_LIMIT_MAX_NON_BROWSER : RATE_LIMIT_MAX;
+    const bucket: RateBucket =
+      pathname === CSP_REPORT_PATH ? 'csp' : suspiciousTls || !claimsBrowser ? 'strict' : 'write';
 
     // IPv6 は /64 単位で数える(lib/ip.ts の rateLimitKeyFromIp 参照)
     const ip = rateLimitKeyFromIp(getClientIp(request.headers));
-    const { limited, retryAfter } = await isRateLimited(ip, max);
+    const { limited, retryAfter } = await checkRateLimit(cfContext?.env, ip, bucket);
     if (limited) {
       if (!pathname.startsWith('/api/')) {
         // 専ブラは JSON を読めないので bbs.cgi 流儀のエラーページで返す。

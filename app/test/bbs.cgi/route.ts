@@ -88,11 +88,13 @@ export async function POST(request: NextRequest) {
 			const content = subject ? `${subject}\n${message}` : message;
 			const post = await db.createPost({ displayName, content, slug: authorSlug });
 			const encoded = encodePost(post);
-			publishRealtime({
-				channel: CH_FEED,
-				event: "post.created",
-				data: encoded,
-			});
+			// 鍵アカの投稿は配信しない（app/api/posts と同じ）
+			if (!post.authorIsPrivate)
+				publishRealtime({
+					channel: CH_FEED,
+					event: "post.created",
+					data: encoded,
+				});
 			return okPage("新しいスレッドを立てました。");
 		}
 
@@ -116,7 +118,8 @@ export async function POST(request: NextRequest) {
 			return errorPage("スレッドが見つかりません。");
 		}
 		const encoded = encodePost(reply);
-		publishRealtime([
+		// 鍵アカのレスは配信しない（app/api/posts/[id]/replies と同じ）
+		if (!reply.authorIsPrivate) publishRealtime([
 			{
 				channel: chThread(String(op.id)),
 				event: "reply.created",
