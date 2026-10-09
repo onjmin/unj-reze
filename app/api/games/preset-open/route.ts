@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { EngineKind, PresetId } from "@/components/game/presets/shared";
 import { db } from "@/lib/db";
-import { getClientIp } from "@/lib/ip";
-import { kvExists, kvSetEx } from "@/lib/kv";
+import { getClientIp, rateLimitKeyFromIp } from "@/lib/ip";
+import {
+	getRateLimitEnv,
+	isFirstWithinWindow,
+} from "@/lib/security/rate-limit";
 
 /**
  * ゲームエディタのギャラリーで見本プリセット／まっさらテンプレートが開かれた回数を数える
@@ -12,11 +15,12 @@ import { kvExists, kvSetEx } from "@/lib/kv";
  *  - 数えた・間引いた・DB が失敗した（移行SQL未適用で表が無い等）のどれでも 204。500 は返さない。
  *  - 書き込みなので withEdgeCache は通さない（あれは読み取り GET 専用）。
  * レート制限は middleware.ts の書き込み共通のものに任せ、ここでは同じIPからの
- * 開き直しだけを間引く（/api/games/[id]/play と同じ方式）。IP は KV の間引きキーにしか使わず、
- * DB には一切残さない。
+ * 開き直しだけを間引く（/api/games/[id]/play と同じ方式）。IP（IPv6 は /64）は間引きのキーにしか
+ * 使わず、DB には一切残さない。
  */
 
-/** 同じIPが同じ見本を開き直しても数えない猶予（秒） */
+/** 同じIPが同じ見本を開き直しても数えない猶予（秒）。KV で判定するとき用
+ * （本番は DEDUPE_LIMITER の 60 秒窓。KV の書き込み枠を食わないことを優先した） */
 const PRESET_OPEN_DEDUPE_SEC = 600;
 
 // 受け付けるキーの一覧。Record にしているのは、PresetId / EngineKind に値を足したり消したり
@@ -62,14 +66,13 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "unknown preset" }, { status: 400 });
 	}
 
-	const dedupeKey = `presetopen:${preset}:${getClientIp(request.headers)}`;
-	try {
-		if (await kvExists(dedupeKey))
-			return new NextResponse(null, { status: 204 });
-		await kvSetEx(dedupeKey, "1", PRESET_OPEN_DEDUPE_SEC);
-	} catch {
-		// KV が落ちていても数えること自体は続ける
-	}
+	const ipKey = rateLimitKeyFromIp(getClientIp(request.headers));
+	const first = await isFirstWithinWindow(
+		await getRateLimitEnv(),
+		`preset:${preset}:${ipKey}`,
+		PRESET_OPEN_DEDUPE_SEC,
+	);
+	if (!first) return new NextResponse(null, { status: 204 });
 
 	try {
 		await db.recordPresetOpen(preset);

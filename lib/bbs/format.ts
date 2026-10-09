@@ -29,9 +29,13 @@ function formatJstDate(iso: string): string {
 	return `${y}/${m}/${day}(${weekday}) ${hh}:${mm}:${ss}`;
 }
 
-/** INFO欄: `DATE ID:xxxxxxxx` */
+/**
+ * INFO欄: `DATE ID:xxxx`
+ * cc_user_id（bbsId）が空のとき（ID 非表示のスレ・板）に slug へフォールバックしてはいけない。
+ * slug は生の users.id なので、unj が ID を隠している書き込みでも人を名寄せできてしまう。
+ */
 function formatInfo(post: DbPost): string {
-	const id = post.bbsId || post.slug || "????????";
+	const id = post.bbsId || "????";
 	return `${formatJstDate(post.createdAt)} ID:${id}`;
 }
 

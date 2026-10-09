@@ -26,7 +26,10 @@ interface UserActionMenuProps {
 	targetUserDisplayName: string;
 	targetUserId?: string;
 	targetUserSlug?: string;
-	/** 表示専用（isSelf判定・アバター等）。フォロー/DMなどAPI呼び出しには currentUserSlug を使う。 */
+	/**
+	 * 自分の表示名。users.display_name は一意でない（他人が同じ名前にできる）ので、
+	 * isSelf 判定にもフォロー/DMなどのAPI呼び出しにも使わない。本人判定は currentUserSlug だけ。
+	 */
 	currentUserId?: string;
 	currentUserSlug?: string;
 	onMention: (username: string) => void;
@@ -43,7 +46,6 @@ export default function UserActionMenu({
 	targetUserDisplayName,
 	targetUserId,
 	targetUserSlug,
-	currentUserId,
 	currentUserSlug,
 	onMention,
 	position,
@@ -68,10 +70,14 @@ export default function UserActionMenu({
 	const [dmSuccess, setDmSuccess] = useState(false);
 	const [reported, setReported] = useState(false);
 
-	const targetIdOrSlug = targetUserSlug || targetUserDisplayName;
+	// slug の無い相手（unj 純正の書き込み・システムユーザー）はサーバーが users.id を出さない
+	// ＝プロフィールなし。表示名で代用すると別人を指しうるので、プロフィール・フォロー・DM・
+	// ミュート・ブロック・ユーザー通報は出さず、@メンションだけにする。
+	const hasProfile = !!targetUserSlug;
+	const targetIdOrSlug = targetUserSlug || "";
+	// 表示名の一致では「自分」としない：同名にした相手のメニューでブロック・通報が消えてしまう。
 	const isSelf =
-		currentUserId === targetUserDisplayName ||
-		currentUserSlug === targetUserSlug;
+		hasProfile && !!currentUserSlug && currentUserSlug === targetUserSlug;
 	const avatarInfo = getAvatarInfo(
 		targetUserSlug || targetUserId,
 		targetUserDisplayName,
@@ -110,14 +116,14 @@ export default function UserActionMenu({
 
 		// フォロー判定・操作は本人識別＝users.id が要る。currentUserId は
 		// displayName（呼び出し元コメント参照）なので使わない。currentUserSlug を使う。
-		if (currentUserSlug && !isSelf) {
+		if (currentUserSlug && targetIdOrSlug && !isSelf) {
 			api.follow
 				.isFollowing(currentUserSlug, targetIdOrSlug)
 				.then((r) => setIsFollowingTarget(r.isFollowing))
 				.catch(() => {});
 		}
 		// 現在のミュート/ブロック状態を取り出して「解除」表示にできるようにする
-		if (currentUserSlug && !isSelf) {
+		if (currentUserSlug && targetIdOrSlug && !isSelf) {
 			api.mute
 				.list(currentUserSlug)
 				.then((r) => setMuted(r.muted.includes(targetIdOrSlug)))
@@ -132,7 +138,7 @@ export default function UserActionMenu({
 	if (!isOpen || !mounted) return null;
 
 	const handleFollowToggle = async () => {
-		if (!currentUserSlug || isSelf) return;
+		if (!currentUserSlug || !targetIdOrSlug || isSelf) return;
 		const wasFollowing = isFollowingTarget;
 		setIsFollowingTarget(!wasFollowing);
 		try {
@@ -153,7 +159,7 @@ export default function UserActionMenu({
 	};
 
 	const handleMuteToggle = async () => {
-		if (!currentUserSlug || isSelf || moderating) return;
+		if (!currentUserSlug || !targetIdOrSlug || isSelf || moderating) return;
 		const was = muted;
 		setModerating(true);
 		setMuted(!was);
@@ -169,7 +175,7 @@ export default function UserActionMenu({
 	};
 
 	const handleBlockToggle = async () => {
-		if (!currentUserSlug || isSelf || moderating) return;
+		if (!currentUserSlug || !targetIdOrSlug || isSelf || moderating) return;
 		const was = blocked;
 		setModerating(true);
 		setBlocked(!was);
@@ -185,7 +191,7 @@ export default function UserActionMenu({
 	};
 
 	const handleReportUser = async () => {
-		if (!currentUserSlug || isSelf || reported) return;
+		if (!currentUserSlug || !targetIdOrSlug || isSelf || reported) return;
 		try {
 			await api.report.create({
 				reporterSlug: currentUserSlug,
@@ -202,7 +208,8 @@ export default function UserActionMenu({
 	};
 
 	const handleSendDm = async () => {
-		if (!dmText.trim() || !currentUserSlug || isSelf) return;
+		if (!dmText.trim() || !currentUserSlug || !targetIdOrSlug || isSelf)
+			return;
 		setSendingDm(true);
 		try {
 			// sender は POST /api/messages がセッションから決めるので実質無視されるが、
@@ -259,23 +266,25 @@ export default function UserActionMenu({
 				className="z-50 w-44 rounded-lg border border-gray-800 bg-[#161922] shadow-2xl py-1 text-xs text-gray-300 animate-fade-in-up"
 				onClick={(e) => e.stopPropagation()}
 			>
-				<button
-					onClick={() => {
-						onClose();
-						// 名前だけでもプロフィール側が即描画できる（アイコンは呼び出し元が先に積んでいることが多い）。
-						cacheProfileSeed({
-							slug: targetUserSlug,
-							displayName: targetUserDisplayName,
-						});
-						router.push(`/user/${targetIdOrSlug}`);
-					}}
-					className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
-				>
-					<User size={14} className="shrink-0 text-gray-400" />
-					<span>プロフページ</span>
-				</button>
+				{hasProfile && (
+					<button
+						onClick={() => {
+							onClose();
+							// 名前だけでもプロフィール側が即描画できる（アイコンは呼び出し元が先に積んでいることが多い）。
+							cacheProfileSeed({
+								slug: targetUserSlug,
+								displayName: targetUserDisplayName,
+							});
+							router.push(`/user/${targetIdOrSlug}`);
+						}}
+						className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
+					>
+						<User size={14} className="shrink-0 text-gray-400" />
+						<span>プロフページ</span>
+					</button>
+				)}
 
-				{!isSelf && currentUserSlug && (
+				{hasProfile && !isSelf && currentUserSlug && (
 					<button
 						onClick={handleFollowToggle}
 						className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
@@ -294,7 +303,7 @@ export default function UserActionMenu({
 					</button>
 				)}
 
-				{!isSelf && currentUserSlug && !hideDm && (
+				{hasProfile && !isSelf && currentUserSlug && !hideDm && (
 					<>
 						{showDmInput ? (
 							<div className="px-3 py-2 border-t border-gray-800/80 bg-gray-950/20 flex flex-col gap-1.5">
@@ -308,6 +317,7 @@ export default function UserActionMenu({
 											type="text"
 											value={dmText}
 											onChange={(e) => setDmText(e.target.value)}
+											maxLength={5000}
 											placeholder="メッセージを入力"
 											className="w-full bg-gray-900/50 hover:bg-gray-900/80 border border-gray-800 rounded px-2 py-1 text-[11px] outline-none text-white focus:border-blue-600 transition-colors"
 											autoFocus
@@ -353,7 +363,7 @@ export default function UserActionMenu({
 					<span>@メンションする</span>
 				</button>
 
-				{!isSelf && currentUserSlug && (
+				{hasProfile && !isSelf && currentUserSlug && (
 					<>
 						<div className="border-t border-gray-800 my-1" />
 						<button

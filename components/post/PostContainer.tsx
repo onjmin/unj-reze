@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiErrorMessage } from "@/lib/api";
+import { isDeletedPlaceholder } from "@/lib/post/deleted-placeholder";
 import { avatarSeedOf, getAvatarInfo } from "@/lib/social/avatar";
 import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml/mml";
 import { cachePost } from "@/lib/post/post-cache";
@@ -141,8 +142,14 @@ export default function PostContainer({
 		walkPreset?: string | null;
 	} | null>(null);
 	const [optimisticallyDeleted, setOptimisticallyDeleted] = useState(false);
-	const targetSlug = post.slug || post.displayName;
-	const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
+	// slug はサーバーが reze 利用者の投稿にだけ付ける（unj 純正の書き込み・システムユーザーには
+	// 付かない＝users.id で名寄せさせない）。無ければ「プロフィールなし」として、プロフィール・
+	// DM・フォロー・ミュート・ブロックは出さない（表示名で代用すると別人を指しうる）。
+	const targetSlug = post.slug || "";
+	const hasProfile = !!targetSlug;
+	const isSelf = hasProfile && currentUserSlug === targetSlug;
+	// 削除済みのプレースホルダは編集（PATCH）が 404 になるので、編集・権利表記の導線を出さない
+	const canEdit = isSelf && !isDeletedPlaceholder(post);
 	const shareText = buildPostShareText(post);
 
 	const toggleMenu = useCallback((e: React.MouseEvent) => {
@@ -173,7 +180,7 @@ export default function PostContainer({
 		async (e: React.MouseEvent) => {
 			e.stopPropagation();
 			setMenuOpen(false);
-			if (!currentUserSlug) return;
+			if (!currentUserSlug || !targetSlug) return;
 			try {
 				if (blocked) {
 					await api.block.unblock(currentUserSlug, targetSlug);
@@ -194,7 +201,7 @@ export default function PostContainer({
 		async (e: React.MouseEvent) => {
 			e.stopPropagation();
 			setMenuOpen(false);
-			if (!currentUserSlug) return;
+			if (!currentUserSlug || !targetSlug) return;
 			try {
 				if (muted) {
 					await api.mute.unmute(currentUserSlug, targetSlug);
@@ -275,8 +282,8 @@ export default function PostContainer({
 				// PATCHレスポンスで該当エントリだけを差し替える。
 				onPostUpdated?.(updated);
 				onModerationChange?.();
-			} catch {
-				showToast("error", "投稿の編集に失敗しました");
+			} catch (e) {
+				showToast("error", apiErrorMessage(e, "投稿の編集に失敗しました"));
 			}
 		},
 		[
@@ -310,8 +317,8 @@ export default function PostContainer({
 					value ?? null,
 				);
 				onModerationChange?.();
-			} catch {
-				showToast("error", "権利表記の更新に失敗しました");
+			} catch (e) {
+				showToast("error", apiErrorMessage(e, "権利表記の更新に失敗しました"));
 			}
 		},
 		[currentUserDisplayName, post.id, post.content, onModerationChange],
@@ -438,13 +445,15 @@ export default function PostContainer({
 					onClick={(e) => {
 						e.stopPropagation();
 						// プロフィールへ行く可能性があるので、一覧で判っている見た目を先に渡しておく。
-						cacheProfileSeed({
-							slug: post.slug || undefined,
-							displayName: post.displayName,
-							avatarUrl: post.avatarUrl,
-						});
+						if (hasProfile) {
+							cacheProfileSeed({
+								slug: targetSlug,
+								displayName: post.displayName,
+								avatarUrl: post.avatarUrl,
+							});
+						}
 						if (isSelf) {
-							router.push(`/user/${post.slug || post.displayName}`);
+							router.push(`/user/${targetSlug}`);
 						} else {
 							const rect = e.currentTarget.getBoundingClientRect();
 							setAvatarMenuPos({ x: rect.left, y: rect.bottom });
@@ -552,7 +561,7 @@ export default function PostContainer({
 										<Copy size={12} className="shrink-0" />
 										<span>テキストをコピー</span>
 									</button>
-									{isSelf && (
+									{canEdit && (
 										<button
 											role="menuitem"
 											onClick={handleMenuEdit}
@@ -562,7 +571,7 @@ export default function PostContainer({
 											<span>ポストを編集</span>
 										</button>
 									)}
-									{isSelf && (
+									{canEdit && (
 										<button
 											role="menuitem"
 											onClick={handleMenuOriginType}
@@ -582,7 +591,7 @@ export default function PostContainer({
 											<span>ポストを削除</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={handleMenuFollow}
@@ -596,7 +605,7 @@ export default function PostContainer({
 											</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={handleMenuMute}
@@ -610,7 +619,7 @@ export default function PostContainer({
 											</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={handleMenuBlock}
@@ -844,19 +853,18 @@ export default function PostContainer({
 								<span className="text-[11px]">{post.reactionsHidden ? "" : post.reposts || ""}</span>
 							</button>
 
-							<button
-								onClick={(e) => {
-									e.stopPropagation();
-									const targetSlug = post.slug || post.displayName;
-									if (targetSlug) {
+							{hasProfile && (
+								<button
+									onClick={(e) => {
+										e.stopPropagation();
 										router.push(`/messages/${encodeURIComponent(targetSlug)}`);
-									}
-								}}
-								className="flex items-center hover:text-blue-400 transition-colors"
-								title="DMを送る"
-							>
-								<Mail size={14} />
-							</button>
+									}}
+									className="flex items-center hover:text-blue-400 transition-colors"
+									title="DMを送る"
+								>
+									<Mail size={14} />
+								</button>
+							)}
 
 							<ShareButton url={postShareUrl(post.id)} text={shareText} />
 						</div>
@@ -980,7 +988,7 @@ export default function PostContainer({
 				onClose={() => setUserMenuOpen(false)}
 				targetUserDisplayName={post.displayName}
 				targetUserId={post.bbsId || post.userId}
-				targetUserSlug={post.slug || undefined}
+				targetUserSlug={targetSlug || undefined}
 				currentUserId={currentUserDisplayName}
 				currentUserSlug={currentUserSlug}
 				onMention={(username) => {
@@ -1014,6 +1022,7 @@ export default function PostContainer({
 						<textarea
 							value={reportReason}
 							onChange={(e) => setReportReason(e.target.value)}
+							maxLength={1000}
 							placeholder="理由の詳細…"
 							rows={3}
 							className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
@@ -1075,11 +1084,21 @@ function ReplyPreview({
 	}, [index]);
 
 	const reply = replies[index];
+	// アイコンを重ねる単位（表示専用）。slug の無い unj 純正の書き込みは ID（bbsId）でまとめる。
+	// 表示名ではまとめない（別人が同じ「名無し」で1つに畳まれる）。どちらも無ければレスごとに別。
+	const replyAuthorKey = (r?: Post) =>
+		r
+			? r.slug
+				? `u:${r.slug}`
+				: r.bbsId
+					? `b:${r.bbsId}`
+					: `p:${r.id}`
+			: undefined;
 
 	const uniqueReplies = Array.from(
 		replies
 			.reduce((map, r) => {
-				map.set(r.slug || r.displayName, r);
+				map.set(replyAuthorKey(r) || r.id, r);
 				return map;
 			}, new Map<string, Post>())
 			.values(),
@@ -1104,9 +1123,7 @@ function ReplyPreview({
 			<div className="flex items-center gap-1.5 py-1">
 				<div className="flex items-center shrink-0 -space-x-1.5">
 					{uniqueReplies.slice(0, maxAvatars).map((r, i) => {
-						const isActive =
-							(r.slug || r.displayName) ===
-							(reply?.slug || reply?.displayName);
+						const isActive = replyAuthorKey(r) === replyAuthorKey(reply);
 						const rAuthorId = avatarSeedOf(r);
 						const rAvatarInfo = getAvatarInfo(rAuthorId, r.displayName);
 						return (

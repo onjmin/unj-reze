@@ -7,6 +7,8 @@ import {
 	isValidTrendKeyword,
 } from "@/lib/mml/mml";
 import { RES_LIMIT } from "@/lib/bbs/thread-limits";
+import { sanitizeBbsUserName } from "@/lib/bbs/user-name";
+import { canSendDm } from "@/lib/social/dm-rules";
 import { formatRelativeTime, nowISO } from "@/lib/time";
 import { AnonymousUser, FollowUser, OriginType } from "@/lib/types";
 import {
@@ -141,6 +143,18 @@ function randomGradient(): string {
 	return AVATAR_GRADIENTS[Math.floor(Math.random() * AVATAR_GRADIENTS.length)];
 }
 
+/** 利用者に見せてよい失敗（lib/db/pg.ts の userError と同じ形。ルートは expose を見て文言を返す） */
+function userError(message: string, status: number): Error {
+	return Object.assign(new Error(message), { expose: true as const, status });
+}
+
+/** pg.ts と同じ上限（DM の文字数・推しリストの件数・1レスのメンション通知数） */
+const MAX_MESSAGE_LENGTH = 5000;
+const MAX_OSHI_ITEMS = 100;
+const MAX_MENTIONS_PER_REPLY = 5;
+/** 削除した投稿の本文（pg.ts の DELETED_POST_TEXT と同じ。editPost はこれで削除済みを見分ける） */
+const DELETED_POST_TEXT = "(削除されました)";
+
 class MockDB {
 	private posts: Post[];
 	private notifications: Notification[];
@@ -256,9 +270,11 @@ class MockDB {
 	}
 
 	listOshiItems(userSlug: string): DbOshiItem[] {
+		// pg と同じく先頭 MAX_OSHI_ITEMS 件まで
 		return this.oshiItems
 			.filter((o) => o.userSlug === userSlug)
-			.sort((a, b) => a.position - b.position);
+			.sort((a, b) => a.position - b.position)
+			.slice(0, MAX_OSHI_ITEMS);
 	}
 
 	addOshiItem(
@@ -279,12 +295,21 @@ class MockDB {
 		const position = this.oshiItems.filter(
 			(o) => o.userSlug === userSlug,
 		).length;
+		// pg と同じく1人 MAX_OSHI_ITEMS 件まで、iTunes の ID は正の安全な整数だけ
+		if (position >= MAX_OSHI_ITEMS) {
+			throw userError(`推しリストは${MAX_OSHI_ITEMS}件までです`, 400);
+		}
+		const itunesId = (v: unknown) =>
+			typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : undefined;
 		const item: DbOshiItem = {
 			id,
 			userSlug,
 			position,
 			createdAt: this.now(),
 			...data,
+			trackId: itunesId(data.trackId),
+			collectionId: itunesId(data.collectionId),
+			artistId: itunesId(data.artistId),
 		};
 		this.oshiItems.push(item);
 		return item;
@@ -311,6 +336,13 @@ class MockDB {
 			bio: stored.bio,
 			createdAt: stored.createdAt,
 		};
+	}
+
+	/** pg の last_used_at 更新に相当（mock は lastSeenAt を進めるだけ） */
+	touchAnonymousSession(sessionId: string): void {
+		const id = this.sessionToUser.get(sessionId);
+		const stored = id ? this.anonUserData.get(id) : undefined;
+		if (stored) stored.lastSeenAt = this.now();
 	}
 
 	getOrCreateAnonymousUser(
@@ -388,7 +420,8 @@ class MockDB {
 		if (stored) {
 			const slug = stored.slug;
 			if (displayName !== undefined) {
-				stored.displayName = displayName;
+				// pg と同じく unj の名前エスケープと不可視文字の除去を掛けて保存する
+				stored.displayName = sanitizeBbsUserName(displayName);
 			}
 			if (avatarUrl !== undefined) {
 				stored.avatarUrl = avatarUrl;
@@ -646,7 +679,12 @@ class MockDB {
 
 	getUserDisplayName(slug: string): string | undefined {
 		const post = this.posts.find((p) => p.slug === slug);
-		return post?.displayName;
+		if (post) return post.displayName;
+		// まだ投稿していない利用者も引けるように（pg は users.display_name を読むので投稿の有無は問わない）
+		for (const u of this.anonUserData.values()) {
+			if (u.slug === slug) return u.displayName;
+		}
+		return undefined;
 	}
 
 	getPost(id: number, userId?: string): Post | undefined {
@@ -802,7 +840,8 @@ class MockDB {
 
 	likePost(id: number, userId: string): Post | null {
 		const post = this.posts.find((p) => p.id === id);
-		if (!post) return null;
+		// pg と同じく、押した本人に見えない投稿（鍵アカ）には加算も通知もしない
+		if (!post || !this.getPost(id, userId)) return null;
 		const likeKey = `${id}:${userId}:like`;
 		const dislikeKey = `${id}:${userId}:dislike`;
 		const alreadyLiked = this.votes.get(likeKey) === "like";
@@ -828,7 +867,7 @@ class MockDB {
 
 	dislikePost(id: number, userId: string): Post | null {
 		const post = this.posts.find((p) => p.id === id);
-		if (!post) return null;
+		if (!post || !this.getPost(id, userId)) return null;
 		const likeKey = `${id}:${userId}:like`;
 		const dislikeKey = `${id}:${userId}:dislike`;
 		const alreadyDisliked = this.votes.get(dislikeKey) === "dislike";
@@ -848,7 +887,7 @@ class MockDB {
 
 	heartPost(id: number, userId: string, count: number = 1): Post | null {
 		const post = this.posts.find((p) => p.id === id);
-		if (!post) return null;
+		if (!post || !this.getPost(id, userId)) return null;
 		for (let i = 0; i < count; i++) {
 			this.heartEntries.push({ postId: id, userId });
 		}
@@ -992,13 +1031,14 @@ class MockDB {
 			postId: post.id,
 		});
 
-		// 本文中の @slug メンション宛に通知
+		// 本文中の @slug メンション宛に通知（pg と同じく1レスあたり MAX_MENTIONS_PER_REPLY 人まで）
 		const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
 		if (mentions) {
 			const seen = new Set<string>();
 			for (const m of mentions) {
 				const slug = m.slice(1);
 				if (seen.has(slug)) continue;
+				if (seen.size >= MAX_MENTIONS_PER_REPLY) break;
 				seen.add(slug);
 				const target = this.posts.find((p) => p.slug === slug);
 				if (target && target.displayName !== parent.displayName) {
@@ -1226,6 +1266,28 @@ class MockDB {
 		text: string;
 		recipient?: string;
 	}): Message {
+		// pg と同じ入力検査（本文の型・長さ、自分宛て）
+		if (
+			typeof data.text !== "string" ||
+			!data.text.trim() ||
+			data.text.length > MAX_MESSAGE_LENGTH
+		) {
+			throw userError(
+				`メッセージは1〜${MAX_MESSAGE_LENGTH}文字で入力してください`,
+				400,
+			);
+		}
+		if (
+			data.recipient &&
+			this.slugForUser(data.recipient) === this.slugForUser(data.sender)
+		) {
+			throw userError("自分にはDMを送れません", 400);
+		}
+		// 初回DM制限（相手が返信するまで1通）は保存する側でも見る（pg と同じ。ルートの判定との間に
+		// 割り込んだ同時送信をここで止める）
+		if (data.recipient && !canSendDm(this.getDmGate(data.sender, data.recipient))) {
+			throw userError("相手から返信があるまで、送れるのは1通までです", 403);
+		}
 		const createdAt = this.now();
 		const msg: Message = {
 			id: this.genId(),
@@ -1333,8 +1395,10 @@ class MockDB {
 				dislikes: this.applyUserState(p, userId).dislikes,
 				repliesCount: p.repliesCount,
 			}));
+		// pg と同じく limit は 51 まで（ルートの hasMore 判定用の +1）、offset が 100 を超えたら空
 		const start = !before && offset && offset > 0 ? offset : 0;
-		const safeLimit = limit && limit > 0 ? limit : 50;
+		if (start > 100) return [];
+		const safeLimit = Math.min(limit && limit > 0 ? limit : 50, 51);
 		return res.slice(start, start + safeLimit);
 	}
 
@@ -1584,6 +1648,16 @@ class MockDB {
 		targetId: string;
 		reason: string;
 	}): void {
+		// pg と同じく、同じ人の同じ対象への通報は1件だけ（1日の件数上限は mock では見ない）
+		if (
+			this.reports.some(
+				(r) =>
+					r.reporterSlug === data.reporterSlug &&
+					r.targetType === data.targetType &&
+					r.targetId === data.targetId,
+			)
+		)
+			return;
 		this.reports.push({
 			id: this.genId(),
 			reporterSlug: data.reporterSlug,
@@ -1620,6 +1694,13 @@ class MockDB {
 	): Post | null {
 		const post = this.posts.find((p) => p.id === id);
 		if (!post || !this.ownsPost(post, userId)) return null;
+		// 削除済み（deletePost が残したプレースホルダ）は編集で書き戻させない（pg editPost と同じ）
+		if (
+			post.content === DELETED_POST_TEXT &&
+			!post.hasImage &&
+			!post.hasMml
+		)
+			return null;
 		const hasContentChanged = post.content !== content;
 		const hasOriginTypeChanged =
 			originType !== undefined &&
@@ -1688,11 +1769,15 @@ class MockDB {
 			this.posts.some((p) => p.parentPostId === id && p.id !== id) ||
 			(post.replies?.length ?? 0) > 0;
 
-		if (!isReply && hasChildren) {
-			// 子を持つスレッド親は論理削除(プレースホルダ表示)
-			post.content = "(削除されました)";
+		if (isReply || hasChildren) {
+			// レスと、子を持つスレッド親は論理削除(プレースホルダ表示)。pg と同じく
+			// レスは消さずに番号を残す（物理削除すると番号が詰まり、>>N が別のレスを指す）。
+			// 返信は posts と親の replies の両方に同じオブジェクトで入っているので1回でよい。
+			post.content = DELETED_POST_TEXT;
 			post.hasImage = false;
 			post.imageSrc = undefined;
+			post.hasMml = false;
+			post.mmlUrl = undefined;
 			post.hasGame = false;
 			post.gameId = undefined;
 			post.hasMv = false;
@@ -1701,18 +1786,16 @@ class MockDB {
 			post.talkId = undefined;
 			post.hasOtomad = false;
 			post.otomadId = undefined;
+			post.dotW = undefined;
+			post.dotH = undefined;
+			post.animFrames = undefined;
+			post.animFps = undefined;
+			post.walkPreset = undefined;
 			return true;
 		}
 
-		// それ以外はハード削除
+		// 返信の無いスレッドはハード削除（pg の deleted_at と同じく二度と出ない）
 		this.posts = this.posts.filter((p) => p.id !== id);
-		// 親スレッドの replies 配列とカウントを更新
-		for (const thread of this.posts) {
-			if (thread.replies?.some((r) => r.id === id)) {
-				thread.replies = thread.replies.filter((r) => r.id !== id);
-				thread.repliesCount = Math.max(0, thread.repliesCount - 1);
-			}
-		}
 		return true;
 	}
 

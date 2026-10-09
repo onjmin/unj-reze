@@ -1,4 +1,5 @@
 import { db as mockDb } from "./mock-db";
+import { sanitizeBbsUserName } from "@/lib/bbs/user-name";
 import type { MvManifest } from "@/lib/mv/mv-config";
 import { OriginType } from "@/lib/types";
 import type {
@@ -119,7 +120,7 @@ export const mockStore: DataStore = {
 		//   プロセス終了で消えるインメモリなので、消し忘れても実害は無い。
 		// threadId だけは削除前に控える（配信チャンネル名に使う。詳細は
 		// lib/db/interface.ts の deletePost のコメント）。mockDbはインメモリなので
-		// 事前取得のコストは無い。
+		// 事前取得のコストは無い。レスは pg と同じくプレースホルダ化（mockDb.deletePost）。
 		const threadId = mockDb.getPost(id)?.threadId;
 		const ok = mockDb.deletePost(id, userId);
 		return ok ? { threadId } : false;
@@ -219,6 +220,10 @@ export const mockStore: DataStore = {
 
 	async getAnonymousUserBySession(sessionId: string) {
 		return mockDb.getAnonymousUserBySession(sessionId);
+	},
+
+	async touchAnonymousSession(sessionId: string) {
+		mockDb.touchAnonymousSession(sessionId);
 	},
 
 	async updateUserDisplayName(
@@ -544,7 +549,8 @@ export const mockStore: DataStore = {
 		};
 		if (score > (existing.bestScore ?? 0)) {
 			updated.bestScore = score;
-			updated.bestScoreBy = data.displayName || "名無し";
+			// pg と同じく表示名の名前エスケープ・不可視文字の除去を掛ける
+			updated.bestScoreBy = sanitizeBbsUserName(data.displayName || "名無し");
 		}
 		gameStore.set(gameId, updated);
 		return updated;
@@ -563,7 +569,10 @@ export const mockStore: DataStore = {
 	},
 
 	async getLiveGameInfo(_ipAddress: string) {
-		const games = Array.from(gameStore.values());
+		// 鍵アカが作ったゲームは注目ゲームにも候補にも出さない（pg と同じ）
+		const games = Array.from(gameStore.values()).filter(
+			(g) => !mockDb.isPrivateSlug(g.creatorSlug),
+		);
 		const slot = new Date().toISOString().slice(0, 13);
 		const game = games[0] ?? null;
 		return {

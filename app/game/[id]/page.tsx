@@ -10,6 +10,20 @@ import { decodeId, encodeId } from "@/lib/sqids";
 // generateMetadata と本体で同じゲームを二重フェッチしないようリクエスト単位でメモ化する
 const getCachedGame = cache(async (id: number) => db.getGame(id));
 
+/**
+ * OGP に出してよいゲーム。鍵アカの作者のゲームは GET /api/games/[id] と同じく他人には「無い」扱い
+ * （クローラにセッションは無いので、本人・フォロワーでも出さない）。タイトルと背景画像を漏らさない。
+ */
+async function getMetadataGame(id: number) {
+	const game = await getCachedGame(id);
+	if (!game) return null;
+	if (game.creatorSlug) {
+		const settings = await db.getUserSettings(game.creatorSlug);
+		if (settings.isPrivate) return null;
+	}
+	return game;
+}
+
 // generateMetadataが固まる/落ちてもナビゲーション全体を巻き添えにしないための上限。
 // 本文の描画自体はこの待ちに依存しない（下の GamePage 本体を参照）。
 const METADATA_TIMEOUT_MS = 800;
@@ -61,7 +75,7 @@ export async function generateMetadata({
 	}
 
 	const game = await withTimeout(
-		getCachedGame(decodedId).catch(() => null),
+		getMetadataGame(decodedId).catch(() => null),
 		METADATA_TIMEOUT_MS,
 	);
 	if (!game) {

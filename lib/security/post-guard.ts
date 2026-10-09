@@ -15,6 +15,7 @@ import type { FingerprintSignals } from "./types";
 // - 無ければ（ローカル開発）Turnstile は飛ばす。本番で設定し忘れに気付けるよう 1 度だけ警告する。
 // - 指紋が付いていればスコアリング（IP ホッピング・シークレットタブ使い回し・UA/TLS 不一致）。
 //   KV が落ちていたらスコアリングだけ飛ばして通す（可用性優先）。
+// - Tor（cf-ipcountry: T1）からは書かせない（unj と揃える。理由は torBlockedResponse のコメント）。
 // - 専ブラの /test/bbs.cgi は Turnstile を実行できないので対象外（middleware のレート制限だけ）。
 //
 // API キー等の抜け道は作らない。自動運用（ペルソナ運営）も実ブラウザの UI から投稿するので
@@ -72,6 +73,24 @@ async function hashedSessionId(
 }
 
 /**
+ * Tor（Cloudflare は出口ノードを国コード T1 で示す）からの書き込みなら 403 のレスポンス、
+ * そうでなければ null。
+ *
+ * reze で作る・書き換えるスレ・レスは unj と同じ threads/res に入り unj の板にも出るので、
+ * unj の Tor 拒否と揃える（unj 側だけ拒否しても reze 経由で書けてしまう）。
+ * 使っている場所は guardNewPost（新規スレ・返信）、PATCH /api/posts/[id]（編集）、
+ * app/test/bbs.cgi（同じ判定を errorPage で返す）の 3 か所。運用で Tor を許すと決めたら、
+ * この関数を常に null にして bbs.cgi の判定を消せばよい。
+ */
+export function torBlockedResponse(request: NextRequest): NextResponse | null {
+	if (request.headers.get("cf-ipcountry")?.toUpperCase() !== "T1") return null;
+	return NextResponse.json(
+		{ error: "Tor からの書き込みはできません", code: "tor_blocked" },
+		{ status: 403 },
+	);
+}
+
+/**
  * 通してよければ null、拒否するならそのまま返すレスポンス。
  * セッションユーザーの自動作成より**前**に呼ぶこと（ボットのためにユーザーを作らない）。
  */
@@ -80,6 +99,11 @@ export async function guardNewPost(
 	body: { turnstileToken?: unknown; fingerprint?: unknown; sessionId?: unknown },
 	action: "post" | "reply",
 ): Promise<NextResponse | null> {
+	// Tor は拒否（理由は torBlockedResponse）。Turnstile の siteverify（外部への fetch）より
+	// 前に置き、無駄なサブリクエストを使わない。
+	const torBlocked = torBlockedResponse(request);
+	if (torBlocked) return torBlocked;
+
 	const ip = getClientIp(request.headers);
 	const token =
 		typeof body.turnstileToken === "string" && body.turnstileToken.length <= 4096
@@ -89,7 +113,9 @@ export async function guardNewPost(
 	let turnstileOk = true;
 	let turnstileUnreachable = false;
 	if (process.env.TURNSTILE_SECRET_KEY) {
-		const result = await verifyTurnstileToken(token, ip);
+		// クライアント（lib/security/turnstile-client.ts）はスレ立て・返信とも action "post" で
+		// ウィジェットを出すので、ここも "post" で照合する（引数の action とは別物）
+		const result = await verifyTurnstileToken(token, ip, "post");
 		if (!result.success && !result.unreachable) {
 			console.warn(
 				`[post-guard] ${action}: turnstile rejected (${result.errorCodes.join(",") || "unknown"})`,

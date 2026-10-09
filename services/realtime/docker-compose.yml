@@ -11,7 +11,8 @@ services:
       dockerfile: Dockerfile
     image: unj-reze-realtime:local
     ports:
-      - "8000:8000"
+      # ローカル専用。全インターフェースで公開しない（同じ LAN から /publish や WS を叩かせない）
+      - "127.0.0.1:8000:8000"
     environment:
       PORT: "8000"
       # 本番では必ずランダムな長い値にする。Next 側の REALTIME_PUBLISH_SECRET と一致させること。

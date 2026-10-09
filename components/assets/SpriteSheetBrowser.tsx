@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Loader2, Search } from "lucide-react";
+import { forEachLimit } from "@/lib/async/for-each-limit";
 import { useEffect, useRef, useState } from "react";
 import {
 	getSpriteById,
@@ -101,12 +102,15 @@ export default function SpriteSheetBrowser({
 			.filter((id) => !spriteNameCache.has(id));
 		if (ids.length === 0) return;
 		const ctrl = new AbortController();
-		Promise.all(
-			ids.map((id) =>
+		// 一斉に投げず 6 本ずつ（lib/async/for-each-limit.ts）
+		forEachLimit(
+			ids,
+			6,
+			(id) =>
 				getSpriteById(id, ctrl.signal).then((res) => {
 					if (res?.name) spriteNameCache.set(id, res.name);
 				}),
-			),
+			ctrl.signal,
 		).then(() => {
 			if (!ctrl.signal.aborted) bumpNames((v) => v + 1);
 		});

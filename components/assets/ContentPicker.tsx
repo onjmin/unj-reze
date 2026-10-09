@@ -548,18 +548,26 @@ export default function ContentPicker({
 		if (!isMmlPost && !isImagePost) return;
 		if (loadingMore || loading || !hasMore) return;
 		setLoadingMore(true);
+		// offset ではなく before カーソルで遡る（MediaGrid と同じ）。サーバーは深い offset
+		// （100 超）を空で返すので、offset 送りだと 120 件ほどで打ち切られる
 		api.search
 			.media(
 				isMmlPost ? "mml" : "image",
 				query,
 				userId,
 				MEDIA_PAGE_SIZE,
-				posts.length,
+				0,
+				posts.at(-1)?.createdAt,
 			)
 			.then((data) => {
 				const nextPosts = Array.isArray(data) ? [] : data.posts;
-				setPosts((prev) => [...prev, ...nextPosts]);
-				setHasMore(Array.isArray(data) ? false : data.hasMore);
+				const seen = new Set(posts.map((p) => p.id));
+				const fresh = nextPosts.filter((p) => !seen.has(p.id));
+				setPosts((prev) => [...prev, ...fresh]);
+				// 1件も増えないなら打ち切る（同時刻の投稿や createdAt の無い行でカーソルが進まないとき）
+				setHasMore(
+					Array.isArray(data) ? false : data.hasMore && fresh.length > 0,
+				);
 			})
 			.catch((err) => {
 				console.error("[ContentPicker] Error loading more posts:", err);

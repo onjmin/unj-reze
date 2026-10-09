@@ -121,6 +121,13 @@ export function parseTimeToSeconds(timeStr?: string | null): number | undefined 
 	return Number.isNaN(num) ? undefined : num;
 }
 
+/**
+ * YouTube の動画 ID（11 文字）。iframe の src にそのまま連結するので、形の違うものは埋め込まない
+ * （`v=` はデコード済みの値で `/`・`?`・`#`、パスの `%2e%2e` は `..` として解釈され、
+ * youtube.com 上の別のページを iframe に読ませられる）。
+ */
+const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
 export const parseVideoEmbedYouTube = (url: URL): string | undefined => {
 	const path = url.pathname;
 	let id = "";
@@ -140,7 +147,7 @@ export const parseVideoEmbedYouTube = (url: URL): string | undefined => {
 		id = url.searchParams.get("v") || "";
 	}
 
-	if (!id) return;
+	if (!id || !YOUTUBE_ID_RE.test(id)) return;
 
 	// 開始秒数の抽出 (t=21s, start=21, time_continue=21, ハッシュ内の #t=21s など)
 	const timeParam =
@@ -190,7 +197,9 @@ export const parseAudioEmbedSuno = (url: URL): string | undefined => {
 export const parseGameEmbedRPGEN = (url: URL): string | undefined => {
 	const id = url.searchParams.get("map");
 	if (!id) return;
-	return `https://rpgen.org/dq/?map=${id}`;
+	// searchParams はデコード済み。生で連結すると `&`・`#` で別のパラメータを差し込めるので
+	// エンコードしてから連結する（unj の embed.ts と同じ扱い。英数字・`_`・`-` は変わらない）。
+	return `https://rpgen.org/dq/?map=${encodeURIComponent(id)}`;
 };
 /** 所有者の旧作（GitHub Pages）。ここに挙げたディレクトリ配下だけをフィードで遊べるようにする。 */
 const ONJMIN_GITHUB_GAMES = new Set(["rpg", "roguelike", "walksim"]);

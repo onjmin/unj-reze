@@ -6,6 +6,51 @@ import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
 import type { MvManifest } from "@/lib/mv/mv-config";
 import { decodeId, encodeMv } from "@/lib/sqids";
 
+/** 作品タイトルの上限（文字数）。超えた分は切る */
+const MAX_TITLE_LENGTH = 100;
+
+/**
+ * タイトルの前後の空白を落とし、上限を超えた分は切る。文字列でない・空なら null（400）。
+ * 長すぎても弾かない：タイトル欄に maxLength が無く、改造のたびに「（改造）」が付くうえ、
+ * 編集の保存（app/page.tsx handleSaveEdited*）は失敗を表示しないので、弾くと長いタイトルの
+ * 作品が黙って保存できなくなる。共有行に積ませない目的は切るだけで足りる。
+ */
+function parseTitle(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const t = value.trim();
+	if (!t) return null;
+	let cut = t.slice(0, MAX_TITLE_LENGTH);
+	// 切り口でサロゲートペアの片割れを残さない
+	if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+	return cut.trimEnd();
+}
+
+/**
+ * 利用者に見せてよいエラー（`expose: true` と `status` を持つ Error。db 側の入力検査など）は
+ * その文言と status の JSON にする。それ以外は投げ直す（従来どおり 500）。
+ */
+function exposedErrorResponse(e: unknown): NextResponse {
+	const err = e as {
+		expose?: unknown;
+		status?: unknown;
+		message?: unknown;
+	} | null;
+	if (
+		err &&
+		err.expose === true &&
+		typeof err.status === "number" &&
+		Number.isInteger(err.status) &&
+		err.status >= 400 &&
+		err.status <= 599
+	) {
+		return NextResponse.json(
+			{ error: String(err.message ?? "error") },
+			{ status: err.status },
+		);
+	}
+	throw e;
+}
+
 function isMvManifest(m: unknown): m is MvManifest {
 	if (!m || typeof m !== "object") return false;
 	const v = m as Partial<MvManifest>;
@@ -58,6 +103,13 @@ export async function PATCH(
 	if (!title) {
 		return NextResponse.json({ error: "title is required" }, { status: 400 });
 	}
+	const safeTitle = parseTitle(title);
+	if (safeTitle === null) {
+		return NextResponse.json(
+			{ error: "title must be a non-empty string" },
+			{ status: 400 },
+		);
+	}
 
 	// 編集は毎回R2の新しいキーへ上げ直したうえで、そのURLが送られてくる。
 	// 同じキーへの上書きは不可（immutable で配っているので古い内容が残り続ける）。
@@ -85,11 +137,16 @@ export async function PATCH(
 		);
 	}
 
-	const updated = await db.updateMv(decodedId, {
-		title,
-		...manifestRef,
-		bgUrl: parseBgRef(body.bgUrl),
-	});
+	let updated: Awaited<ReturnType<typeof db.updateMv>>;
+	try {
+		updated = await db.updateMv(decodedId, {
+			title: safeTitle,
+			...manifestRef,
+			bgUrl: parseBgRef(body.bgUrl),
+		});
+	} catch (e) {
+		return exposedErrorResponse(e);
+	}
 	if (!updated)
 		return NextResponse.json({ error: "not found" }, { status: 404 });
 

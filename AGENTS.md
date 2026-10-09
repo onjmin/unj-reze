@@ -51,8 +51,8 @@ external services. Do not hard-code a provider.
 
 - All stores implement `DataStore` (`lib/db/interface.ts`); adding a query means editing **both**
   `mock.ts` and `pg.ts` (there is no `d1`/SQLite provider — it was never wired to a Cloudflare
-  binding and has been removed). `lib/db.ts` wraps the store in a Proxy that **auto-falls back to
-  `mockStore`** on connection errors, so a "working" local run may silently be on mock data.
+  binding and has been removed). Outside production `lib/db.ts` **auto-falls back to `mockStore`** on
+  connection errors (a "working" local run may silently be on mock data); production rethrows.
 - `lib/db/pg.ts` talks to Postgres two ways depending on `DATABASE_URL`: the real
   `@neondatabase/serverless` `neon()` HTTP client normally, or — only when the host is
   `localhost`/`127.0.0.1` (i.e. `docker compose up -d db-neon` local dev) — `pg` (node-postgres)
@@ -85,6 +85,9 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
   returns null (→ empty result) rather than feeding `NaN` to an integer column and 500'ing.
   Passing `displayName` is what made the notifications page 500 — and mock tolerated it, so it
   only broke in production. Keep `mock.ts` id-keyed too, or that asymmetry hides the next one.
+- `Post.slug`/`userId` exist only for reze authors (`users.display_name` set; never unj-only users or system
+  user 1). Treat a missing slug as "no profile" (no profile/DM/follow/block UI) and never use displayName for
+  identity, self-detection or grouping; group for display by `u:slug`, then `b:bbsId`, then `p:id`.
 - Never `SELECT p.*` on `posts` — use `POST_COLUMNS` (`lib/db/pg.ts`), always paired with the
   `COALESCE(au.display_name, p.display_name)` alias or every author renders as 名無し.
 - Never select `games.manifest` in a list query; never reintroduce `COUNT(*) FROM post_hearts`
@@ -97,8 +100,9 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
   posts route; IDs are now raw numbers (`lib/sqids.ts`), which took that to 0.67ms. `decodeId` still
   accepts legacy sqids so old links keep working — don't remove that fallback.
 - Read routes go through `withEdgeCache` (`lib/edge-cache.ts`) — Cloudflare does **not** cache
-  Worker responses from `Cache-Control` alone, so it calls the Cache API. `userId`-keyed
-  responses stay `private`.
+  Worker responses from `Cache-Control` alone, so it calls the Cache API. Its key keeps only the
+  allow-listed query params (`CACHE_KEY_PARAMS` — add new ones there); `userId`-keyed responses stay `private`.
+  Every path that reaches `produce()` (MISS / personalized) is charged to the `miss` budget; hits are free.
 - `services/realtime/` is a single-instance Node WebSocket hub on Koyeb that holds ghost-player
   presence in memory (**`game_players` is not written on that path**) and pushes
   `post.created` / `reply.created` / `notify`. Channel names come from `lib/realtime/channels.ts`;
@@ -117,16 +121,24 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
   forge them. Never change that to a merge.
 - A real JA4 needs Cloudflare Bot Management; without it only `tlsVersion`/`tlsCipher` arrive and
   `assessTls()` returns a low-confidence verdict. `unknown` never adds score (fail-open).
-  Write rate limits use the Workers Rate Limiting bindings in `wrangler.json` (`WRITE_LIMITER` 30/10s,
-  `WRITE_LIMITER_STRICT` 5/10s for non-browser TLS/UA) via `lib/security/rate-limit.ts`; KV is only the
-  fallback when no binding exists (local dev).
+- Rate limits: Workers Rate Limiting bindings in `wrangler.json` via `lib/security/rate-limit.ts` (table:
+  docs/ANTI_ABUSE.md §4). Only `WRITE_LIMITER`/`WRITE_LIMITER_STRICT` fall back to KV (local dev); the optional
+  `READ_LIMITER(_48)`/`WRITE_LIMITER_48`/`SIGNUP_LIMITER(_48)` are skipped when absent — **never add a KV fallback**
+  (KV REST writes would burn on every GET); `DEDUPE_LIMITER` falls back to the old KV dedupe. IPv6 is counted
+  per /64 **and** per /48 (`checkTieredRateLimit`) — a /64-only limit is 65536× wider for a /48 holder.
+- Sessions are client-written only (`lib/session.ts`; no server `Set-Cookie`). `/api/auth/anonymous` is POST-only
+  (same-origin + JSON); new users need a UUID id + the signup budget; a write with no session id is a 401.
 - New threads/replies go through `guardNewPost()` (`lib/security/post-guard.ts`): Turnstile is
   **required** when `TURNSTILE_SECRET_KEY` is set, and the fingerprint feeds `scoreRequest()`. The client
   side is injected centrally in `lib/api.ts` (`collectPostGuard()`), so any new post/reply caller must go
   through `api.posts.create` / `api.posts.replies.create` (or spread `collectPostGuard()` itself).
-  `/test/bbs.cgi` cannot run Turnstile and stays on rate limiting only.
-- CSP: `frame-ancestors`/`object-src`/`base-uri` are enforced; the full policy is Report-Only
-  (`lib/security/csp.ts` → `/api/csp-report`). Add new external script/iframe origins there.
+  Turnstile's `action` must be `post`; the hostname is checked only if `TURNSTILE_ALLOWED_HOSTNAMES` is set.
+  Tor (`cf-ipcountry: T1`) is rejected on post/reply/PATCH and bbs.cgi. `/test/bbs.cgi` cannot run Turnstile:
+  it relies on rate limits, rejects cross-site browser posts (`Sec-Fetch-Site`/`Origin`), charges new identities
+  to the signup budget and caps the body at 64 KB (docs/ANTI_ABUSE.md §3).
+- CSP: `frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'` is enforced; the full policy
+  is Report-Only (`lib/security/csp.ts` → `/api/csp-report`) and allows only the two pinned jsdelivr paths
+  (midi-player-js@2.0.16, soundfont-player@0.12.0), never the whole host. Add new external origins there.
 - Geo comes from `cf-ipcountry` with `x-vercel-ip-country` / other fallbacks (`lib/security/geo.ts`).
 
 ---

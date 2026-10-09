@@ -10,6 +10,7 @@ import {
 	Square,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { forEachLimit } from "@/lib/async/for-each-limit";
 import { buildWalkRef } from "@/lib/assets/asset-ref";
 import {
 	getSoundById,
@@ -138,8 +139,11 @@ export default function RpgenAssetPanel({
 		const ids = memberIds.filter((id) => !nameCache.has(id));
 		if (ids.length === 0) return;
 		const ctrl = new AbortController();
-		Promise.all(
-			ids.map((id) =>
+		// 一斉に投げず 6 本ずつ（lib/async/for-each-limit.ts）
+		forEachLimit(
+			ids,
+			6,
+			(id) =>
 				(kind === "walk"
 					? getSpriteAnimById(id, ctrl.signal)
 					: getSoundById(id, ctrl.signal)
@@ -150,7 +154,7 @@ export default function RpgenAssetPanel({
 							: (res as SoundItem | null)?.title;
 					if (name) nameCache.set(id, name);
 				}),
-			),
+			ctrl.signal,
 		).then(() => {
 			if (!ctrl.signal.aborted) bumpNames((v) => v + 1);
 		});

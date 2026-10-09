@@ -122,7 +122,7 @@ export default function GameBox({
 				{gameThumbnail && (
 					<div
 						className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"
-						style={{ backgroundImage: `url('${gameThumbnail}')` }}
+						style={{ backgroundImage: `url(${JSON.stringify(gameThumbnail)})` }}
 					/>
 				)}
 				<div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />

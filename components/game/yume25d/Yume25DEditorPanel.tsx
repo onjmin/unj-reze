@@ -653,7 +653,7 @@ export default function Yume25DEditorPanel({
 										<div
 											className="w-full h-full"
 											style={{
-												background: `url(${t.imageUrl}) center/contain no-repeat #1c1826`,
+												background: `url(${JSON.stringify(t.imageUrl)}) center/contain no-repeat #1c1826`,
 											}}
 										/>
 									) : (
@@ -757,7 +757,7 @@ export default function Yume25DEditorPanel({
 								<div
 									className="w-full h-full"
 									style={{
-										background: `url(${t.imageUrl}) center/contain no-repeat #1c1826`,
+										background: `url(${JSON.stringify(t.imageUrl)}) center/contain no-repeat #1c1826`,
 									}}
 								/>
 							) : (

@@ -70,6 +70,20 @@ async function gzip(text: string): Promise<ArrayBuffer> {
  * （プリセットのまま無編集で投稿、編集を元に戻して再保存、同じMMLのコピペ）が
  * Worker のリプレイ検知で 403 になる。nonce自体が署名対象なのでリプレイ防止は効いたまま。
  */
+/**
+ * 失敗の文言。429（uploader のレート制限）は英語の本文ではなく、Retry-After（uploader が CORS で
+ * 公開している）の秒数を添えた日本語にする。それ以外は従来どおり status と本文。
+ */
+async function uploadErrorMessage(res: Response, label: string): Promise<string> {
+	if (res.status === 429) {
+		const sec = Number(res.headers.get("Retry-After"));
+		const wait =
+			Number.isFinite(sec) && sec > 0 ? `${Math.ceil(sec)}秒ほど` : "しばらく";
+		return `${label}が混み合っています。${wait}待ってから再試行してください`;
+	}
+	return `${label}に失敗しました: ${res.status} ${await res.text()}`;
+}
+
 export async function uploadText(
 	kind: UploadKind,
 	text: string,
@@ -97,10 +111,7 @@ export async function uploadText(
 		},
 		body: useGzip ? await gzip(text) : text,
 	});
-	if (!res.ok)
-		throw new Error(
-			`アップロードに失敗しました: ${res.status} ${await res.text()}`,
-		);
+	if (!res.ok) throw new Error(await uploadErrorMessage(res, "アップロード"));
 
 	const json = (await res.json()) as {
 		data: { link: string; delete_id: string; delete_hash: string };
@@ -147,9 +158,7 @@ export async function uploadImage(dataUrl: string): Promise<UploadResult> {
 		body: bytes,
 	});
 	if (!res.ok)
-		throw new Error(
-			`画像のアップロードに失敗しました: ${res.status} ${await res.text()}`,
-		);
+		throw new Error(await uploadErrorMessage(res, "画像のアップロード"));
 
 	const json = (await res.json()) as {
 		data: { link: string; delete_id: string; delete_hash: string };

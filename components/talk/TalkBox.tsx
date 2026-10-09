@@ -164,7 +164,7 @@ export default function TalkBox({
 				{talkThumbnail && (
 					<div
 						className="absolute inset-0 bg-cover bg-center opacity-30 transition-opacity group-hover:opacity-40"
-						style={{ backgroundImage: `url('${talkThumbnail}')` }}
+						style={{ backgroundImage: `url(${JSON.stringify(talkThumbnail)})` }}
 					/>
 				)}
 				<div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />

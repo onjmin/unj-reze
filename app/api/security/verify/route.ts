@@ -1,70 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getClientIp } from "@/lib/ip";
-import { scoreRequest } from "@/lib/security/scoring";
-import { readTlsSignalsFromHeaders } from "@/lib/security/tls";
-import { verifyTurnstileToken } from "@/lib/security/turnstile";
-import type { VerifyRequestBody } from "@/lib/security/types";
-
-function getSessionIdFromCookie(request: NextRequest): string | null {
-	return request.cookies.get("unj_reze_session")?.value || null;
-}
+import { NextResponse } from "next/server";
 
 /**
- * 投稿など不正利用の対象になりうるアクションの直前に呼び出す共通検証エンドポイント。
- * Turnstile検証 → 多信号スコアリング → レート制限判定 の順で評価し、
- * 呼び出し元ルートはこの結果を見て処理を継続するか拒否するかを決める。
+ * 廃止（410）。以前は Turnstile 検証 → 多信号スコアリング → レート判定を単独で行う
+ * 事前確認エンドポイントだったが、どこからも呼ばれていなかった（投稿・返信は
+ * lib/security/post-guard.ts の guardNewPost が同じことをルート内で行う）。
+ * 残しておくと、認証なしで叩くだけでスコアリングが KV へ書き込み（REST API の書き込み枠を
+ * 焼ける）、しかも生のセッションIDを KV のフィールド名に書いていた。
+ * スコアリングも KV も触らずに 410 を返す。
  */
-export async function POST(request: NextRequest) {
-	let body: VerifyRequestBody;
-	try {
-		body = await request.json();
-	} catch {
-		return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
-	}
-
-	if (!body.fingerprint) {
-		return NextResponse.json(
-			{ error: "fingerprint is required" },
-			{ status: 400 },
-		);
-	}
-
-	const ip = getClientIp(request.headers);
-	const sessionId = getSessionIdFromCookie(request);
-	const userAgent = request.headers.get("user-agent") || "";
-	// TLSシグナルは proxy(middleware) が request.cf から取り出して詰め直したものだけを読む。
-	// proxy はクライアント由来の同名ヘッダを必ず上書き/削除するため、ここでの偽装は成立しない。
-	const tls = readTlsSignalsFromHeaders(request.headers);
-
-	const turnstileResult = await verifyTurnstileToken(body.turnstileToken, ip);
-
-	const result = await scoreRequest({
-		fingerprint: body.fingerprint,
-		ip,
-		sessionId,
-		userAgent,
-		tls,
-		turnstileOk: turnstileResult.success,
-		turnstileUnreachable: turnstileResult.unreachable,
-	});
-
-	if (result.blocked) {
-		return NextResponse.json(
-			{ allowed: false, score: result.score, reasons: result.reasons },
-			{ status: 403 },
-		);
-	}
-
-	if (result.rateLimited) {
-		return NextResponse.json(
-			{ allowed: false, score: result.score, reasons: result.reasons },
-			{ status: 429, headers: { "Retry-After": "10" } },
-		);
-	}
-
-	return NextResponse.json({
-		allowed: true,
-		score: result.score,
-		reasons: result.reasons,
-	});
+export async function POST() {
+	return NextResponse.json(
+		{ error: "gone" },
+		{ status: 410, headers: { "Cache-Control": "no-store" } },
+	);
 }

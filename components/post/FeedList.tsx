@@ -221,7 +221,14 @@ export default function FeedList({
 
 	const groups: { id: string; authorKey: string; posts: Post[] }[] = [];
 	for (const post of displayPosts) {
-		const authorKey = (post.slug || post.displayName).trim();
+		// 表示上のまとまり専用。slug の無い unj 純正の書き込みは ID（bbsId）でまとめる。
+		// 表示名ではまとめない（ID非表示スレの別人が「名無し」で1人の連投に畳まれる）。
+		// どちらも無ければ投稿ごとに別扱い。接頭辞は数字だけの slug と bbsId の衝突よけ。
+		const authorKey = post.slug
+			? `u:${post.slug}`
+			: post.bbsId
+				? `b:${post.bbsId}`
+				: `p:${post.id}`;
 		const lastGroup = groups[groups.length - 1];
 		if (lastGroup && lastGroup.authorKey === authorKey) {
 			lastGroup.posts.push(post);

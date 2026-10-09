@@ -17,9 +17,9 @@ each fail differently, so an attacker has to defeat all three simultaneously.
 ```
 Browser                          proxy (middleware.ts)              Next.js API Route
 ────────                         ─────────────────────              ──────────────────
-1. Turnstile (invisible)         Runs on the Worker that             /api/security/verify
-   renders, executes right       terminated TLS, so it reads         or inline in a write
-   before a critical action  ──▶ request.cf directly and       ──▶  route (see posts/route.ts):
+1. Turnstile (invisible)         Runs on the Worker that             inline in a write route
+   renders, executes right       terminated TLS, so it reads         via guardNewPost (see
+   before a critical action  ──▶ request.cf directly and       ──▶  posts/route.ts):
 2. collectFingerprint()          rewrites x-ja4-fingerprint /        - verify Turnstile token
    (canvas/webgl/hw/screen/      x-tls-* (overwrite or delete,       - correlate signals in KV
    tz/lang/platform), sent       never merge — see tls.ts).          - score 0–100
@@ -114,8 +114,9 @@ everyone when Bot Management isn't enabled.
 ## 3. Backend layer — `lib/security/post-guard.ts` (`guardNewPost`)
 
 Called from `POST /api/posts` and `POST /api/posts/[id]/replies` **before** the session user is
-auto-created (so bots don't mint users). `app/api/security/verify/route.ts` remains as a standalone
-pre-flight endpoint but nothing calls it.
+auto-created (so bots don't mint users). The old standalone pre-flight endpoint
+`app/api/security/verify/route.ts` now always returns **410** without scoring or touching KV: nothing
+called it, and anyone could hit it to burn KV REST writes (it also wrote raw session ids into KV).
 
 ### Step 1 — Turnstile verification (`lib/security/turnstile.ts`)
 
@@ -126,6 +127,15 @@ pre-flight endpoint but nothing calls it.
   Don't let a Cloudflare outage block every user.
 - When `TURNSTILE_SECRET_KEY` is set, a missing/invalid token is a hard **403**
   (`code: "turnstile_failed"`), not just +40 score.
+- The widget `action` must be `"post"` (the client renders it with that action) whenever siteverify
+  returns one, so a token minted by another widget on the same site key can't be replayed into a post.
+  The hostname is checked only when the optional `TURNSTILE_ALLOWED_HOSTNAMES` (comma-separated) is set.
+
+### Tor
+
+`guardNewPost` (before Turnstile runs) and `PATCH /api/posts/[id]` reject Tor exits
+(`cf-ipcountry: T1`) with a 403 (`torBlockedResponse`), and `/test/bbs.cgi` does the same. Everything written here
+also appears on unj's boards, and unj rejects Tor, so reze must not be the way around it.
 
 ### Step 2 — Multi-signal scoring (`lib/security/scoring.ts`)
 
@@ -151,6 +161,9 @@ with the score/reasons returned for observability, even when allowed.
 
 ### Response contract
 
+`scoreRequest()`'s verdict, shown as the removed verify endpoint used to return it. `guardNewPost`
+maps `blocked` → 403 and `rateLimited` → 429 with its own `{ error, code }` body:
+
 ```jsonc
 // 200
 { "allowed": true, "score": 0, "reasons": [] }
@@ -169,7 +182,20 @@ Scoring failures (KV down) fail open with a warning. To protect another write ro
 same way and make the client spread `collectPostGuard()` into the body.
 
 **Not covered: `/test/bbs.cgi` (専ブラ).** 2ch browsers cannot run Turnstile or JS, so that path
-stays on IP rate limiting only (strict 5/10s bucket when the UA/TLS looks non-browser).
+stays on IP rate limiting (strict 5/10s bucket when the UA/TLS looks non-browser) plus:
+- cross-site browser submissions are rejected (`Sec-Fetch-Site` cross-site/same-site, or an `Origin`
+  host that differs from the request host). 2ch browsers send neither header, so they are unaffected;
+  this stops another site's auto-submitting form from posting under the visitor's IP identity;
+- Tor exits are rejected (above);
+- a new identity (`bbscgi:<IPv4>` / `bbscgi:<IPv6 /64>`) is charged to the `signup` budget like
+  `/api/auth/anonymous`; existing users keep their old key;
+- the form body is read as a stream and capped at 64 KB.
+
+**Text rules** (`app/api/_lib/unj-text-rules.ts`, ported from unj `content-schema.ts`): invisible,
+bidi and control characters are stripped, at most 8 URLs per post, and unj's blacklists (dark web,
+URL shorteners, other uploaders) apply. The URL count also includes reze-only link chunks that unj's
+regex misses (e.g. fullwidth hosts, which reze still renders as links), and `#mml` lines are checked too.
+New posts, replies, edits (`PATCH`, which only rejects URLs/images it adds) and bbs.cgi share them.
 
 **Automation**: there is no API-key bypass. Posting from the real UI works (the UI fetches the
 token). A raw `fetch()` to `/api/posts` from a page console carries no token and is rejected once
@@ -180,34 +206,88 @@ the secret is set — go through the UI or `api.posts.*`.
 couple of hundred per day; the middleware write limiter no longer touches KV (see below), which
 more than pays for it. If it becomes a problem, move the correlation maps to a Durable Object.
 
-## 4. Write rate limiting — `lib/security/rate-limit.ts`
+**KV circuit breaker** (`lib/kv/cloudflare.ts`): KV goes through the Cloudflare REST API, so once
+the write quota or the API rate limit is exhausted every call returns 429. On a 429, a 5xx or a
+network error the client stops calling for 120 s (per isolate) and throws immediately instead;
+every caller (scoring, play dedupe, the rate-limit KV fallback) already fails open, so features
+degrade quietly instead of adding a doomed round trip to each request.
+
+## 4. Rate limiting — `lib/security/rate-limit.ts`
 
 `middleware.ts` limits every write method on `/api/*` and `/test/bbs.cgi` per IP
-(IPv6 normalised to /64 by `rateLimitKeyFromIp`). Buckets:
+(IPv6 normalised to /64 by `rateLimitKeyFromIp`, plus a second /48 tier by `rateLimitKey48FromIp`;
+both tiers go through `checkTieredRateLimit`), and GET/HEAD on expensive read paths that are **not**
+edge-cached (`/unj/dat/*`, `/api/search` (not `/trends`), `/api/hashtag/*`, `/api/users/*`,
+`/api/posts/<id>` (not `/replies`), `/api/games/*` (not `/ranking`), `/api/media-search`,
+`/api/music/search`, `/api/rpgen/*` except `/api/rpgen/data/*`, `/api/messages`, `/api/oshi`).
+Edge-cached routes are charged inside `withEdgeCache` instead, and only for requests that reach
+`produce()` (MISS, personalized, no Cache API) — hits are free, so ordinary browsing barely counts,
+but varying an allow-listed param (`beforeId`, `limit=20<junk>`) to force misses is capped.
+New anonymous users are budgeted in `getOrCreateSessionUserById` (`lib/auth/session-server.ts`). Buckets:
 
-| Bucket | Binding (`wrangler.json` `ratelimits`) | Limit |
-|---|---|---|
-| `write` | `WRITE_LIMITER` (namespace 1001) | 30 / 10s |
-| `strict` (bot UA or non-browser TLS) | `WRITE_LIMITER_STRICT` (namespace 1002) | 5 / 10s |
-| `csp` (`/api/csp-report`) | `WRITE_LIMITER`, separate key | 30 / 10s |
+| Bucket | Binding (`wrangler.json` `ratelimits`) | Limit | No binding |
+|---|---|---|---|
+| `write` | `WRITE_LIMITER` (namespace 1001) | 30 / 10s per /64 | KV counter |
+| `strict` (bot UA or non-browser TLS) | `WRITE_LIMITER_STRICT` (namespace 1002) | 5 / 10s per /64 | KV counter |
+| `csp` (`/api/csp-report`) | `WRITE_LIMITER`, separate key | 30 / 10s per /64 (no /48 tier) | KV counter |
+| `write48` (IPv6 writes except csp) | `WRITE_LIMITER_48` (namespace 1004) | 240 / 10s per /48 | skipped |
+| `read` (expensive GETs above) | `READ_LIMITER` (namespace 1003) | 60 / 10s per /64 | skipped |
+| `readBurst` (`/api/rpgen/{sprites,sprite-anims,sounds}/<id>`) | `READ_LIMITER_48`, separate key | 480 / 10s per /64 | skipped |
+| `read48` (IPv6 reads) | `READ_LIMITER_48` (namespace 1008) | 480 / 10s per /48 | skipped |
+| `miss` (edge-cache misses) | `READ_LIMITER`, separate key | 60 / 10s per /64 | skipped |
+| `miss48` (IPv6 misses) | `READ_LIMITER_48`, separate key | 480 / 10s per /48 | skipped |
+| `signup` (new users only) | `SIGNUP_LIMITER` (namespace 1005) | 20 / 60s per /64 | skipped |
+| `signup48` (IPv6 new users) | `SIGNUP_LIMITER_48` (namespace 1007) | 60 / 60s per /48 | skipped |
+| dedupe (`dedupeOnce`) | `DEDUPE_LIMITER` (namespace 1006) | 1 / 60s per key | old KV dedupe |
 
 The Workers Rate Limiting binding is per-location and approximate, but it costs no KV operations
 and answers in well under a millisecond. The old KV read-then-write counter (non-atomic, eventually
-consistent, one KV write per request) is kept **only** as a fallback when no binding exists
-(`next dev` / `next start`), and logs once when used. Every path fails open.
+consistent, one KV write per request) is kept **only** as a fallback for `write`/`strict`/`csp` when
+no binding exists (`next dev` / `next start`), and logs once when used. Every other bucket is
+**never** counted in KV (a read limiter on KV would burn the write quota on every GET) — without
+its binding it logs once and lets everything through. Every path fails open.
+
+429 bodies: JSON for `/api/*`, bbs.cgi-style HTML for `/test/bbs.cgi` (2ch browsers read the post
+result as HTML), and **no body** for other `/unj/*` GETs — a 2ch browser parses dat/subject.txt
+as numbers and crashes on `<`. A limited dat poll that sent `If-Modified-Since` gets 304 instead
+("no new posts"); the next poll after the window re-fetches from its own timestamp, so nothing is lost.
+
+The rpgen detail lookups get `readBurst` because the asset browsers fetch every member name of an
+opened sheet (100+ requests); under `read` the names went missing and the next search failed with 429.
+The browsers now send them 6 at a time (`lib/async/for-each-limit.ts`) instead of one `Promise.all`.
+
+`DEDUPE_LIMITER` replaces the KV `kvExists` + `kvSetEx` pair for play / clear / preset-open counts
+(`isFirstWithinWindow`, keys `play:<kind>:<id>:<ip64>`, `clear:game:…`, `preset:…`), the post
+votes/hearts in posts-write (`vote:<uid>:<postId>`, `heart:<uid>:<postId>`), and the session
+`last_used_at` bump (`touch:<userId>`, at most once per 60 s per user and location); use a new key
+prefix for a new use. Its window is fixed at 60 s; the old KV path (local dev) keeps its longer TTLs.
+
+Session creation: `/api/auth/anonymous` is POST-only (same-origin `Sec-Fetch-Site`/`Origin` and a
+JSON body; GET is 410) and never sets a cookie — `lib/session.ts` writes it client-side, preferring
+localStorage when the two disagree. Unknown session ids create a user only if UUID-shaped and within
+the `signup` (and, for IPv6, `signup48`) budget; writes without any session id get 401 instead of
+minting an orphan user. A first visit sends 2–4 concurrent POSTs with the same new id (one per
+`useCurrentUser` + the page itself), and each one is charged — exempting repeats of the same id would
+let anyone skip the budget by sending an id twice — so `SIGNUP_LIMITER` is sized at 20 / 60s
+(≈5–10 brand-new visitors per minute behind one IPv4). The client now shares one in-flight POST per
+session id (`lib/api.ts` `sharedAnonymous`), so once that build is everywhere it can be lowered toward
+5–10 / 60s.
 
 ## 5. Content-Security-Policy — `lib/security/csp.ts`
 
-- **Enforced**: `frame-ancestors 'self'; object-src 'none'; base-uri 'self'`.
+- **Enforced**: `frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'`.
 - **Report-Only**: the full policy (script/style/font/img/media/connect/worker/frame sources),
   built from an inventory of every external origin in the codebase and `@onjmin/dtm`
-  (Turnstile, GA, jsdelivr, surikov.github.io WebAudioFont, onjmin.github.io koe TTS, YouTube /
+  (Turnstile, GA, the two pinned jsdelivr paths `npm/midi-player-js@2.0.16/` and
+  `npm/soundfont-player@0.12.0/` — never the whole host, which serves any npm/GitHub file —,
+  surikov.github.io WebAudioFont, onjmin.github.io koe TTS, YouTube /
   SoundCloud APIs, embed iframes...). `'unsafe-inline'` stays in `script-src` until nonces are wired
   (Next's inline RSC payload + GA init). `img/media/font/connect` allow any `https:` because
   posts, MV fonts and game assets reference arbitrary user URLs. `/api/rpgen/*` keeps its own
   `sandbox` CSP and gets neither header.
 - Reports go to `/api/csp-report` (legacy `report-uri` and Reporting API `report-to`), which keeps
-  nothing and logs one line per violation:
+  nothing and logs one line per violation (at most 3 per request, control characters stripped so a
+  crafted report cannot forge extra log lines):
   `[csp-violation] report directive=script-src-elem blocked=https://example.com page=/post/123 source=...`
   (blocked URL reduced to its origin, page to its path).
 

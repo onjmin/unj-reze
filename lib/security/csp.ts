@@ -2,13 +2,16 @@
 //
 // 2 段構え:
 // - ENFORCED: 壊れようのないものだけを強制する（<object>/<embed> は一切使っていない、<base> も無い、
-//   他所の iframe へ埋め込まれる用途も無い）。
+//   他所の iframe へ埋め込まれる用途も無い、<form> はどれも onSubmit で preventDefault して fetch する
+//   だけで他オリジンへ送るものが無い → form-action 'self'）。
 // - REPORT_ONLY: スクリプト・iframe・画像などを含む本番想定の全体ポリシー。まだ強制はせず、
 //   違反を /api/csp-report に集めて取りこぼしを洗い出す（docs/ANTI_ABUSE.md「CSP」参照）。
 //
 // 外部オリジンの棚卸し（2026-10 時点。増やしたらここに足すこと）:
-// - script: Turnstile(challenges.cloudflare.com)、GA(googletagmanager)、BgmManager の midi-player
-//   (cdn.jsdelivr.net)、YouTube/SoundCloud の iframe API、@onjmin/dtm の WebAudioFont
+// - script: Turnstile(challenges.cloudflare.com)、GA(googletagmanager)、BgmManager の midi-player /
+//   soundfont-player（cdn.jsdelivr.net は誰でも任意の npm/GitHub を配れるので、ホスト全体ではなく
+//   版を固定した 2 パッケージのパスだけ許す。版を上げたら SCRIPT_ORIGINS も直す。glTF などの
+//   モデルは fetch なので connect-src 側）、YouTube/SoundCloud の iframe API、@onjmin/dtm の WebAudioFont
 //   (surikov.github.io を <script> で読む) と koe の TTS（onjmin.github.io の Go ランタイム・
 //   jpreprocess を動的 import・worldline.js）。
 // - wasm: dtm の utautts.wasm / jpreprocess / worldline と Havok → 'wasm-unsafe-eval'。
@@ -21,6 +24,8 @@
 //
 // script-src の 'unsafe-inline' は Next の RSC ペイロード（インライン <script>）と GA の初期化
 // スクリプトのため。nonce を配線すれば外せる（その時は 'strict-dynamic' と組で）。
+// script-src・frame-src の強制はまだしない（nonce/ハッシュ方式の設計と違反レポートの確認が先。
+// nonce は全ページの動的化になり Workers の CPU 10ms 枠と衝突する）。
 
 const REPORT_URI = "/api/csp-report";
 export const CSP_REPORT_GROUP = "csp-endpoint";
@@ -28,7 +33,9 @@ export const CSP_REPORT_GROUP = "csp-endpoint";
 const SCRIPT_ORIGINS = [
 	"https://challenges.cloudflare.com",
 	"https://www.googletagmanager.com",
-	"https://cdn.jsdelivr.net",
+	// lib/game/BgmManager.ts の playMidi が読む 2 本だけ（末尾 / でパス前方一致）
+	"https://cdn.jsdelivr.net/npm/midi-player-js@2.0.16/",
+	"https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/",
 	"https://surikov.github.io",
 	"https://onjmin.github.io",
 	"https://www.youtube.com",
@@ -48,9 +55,9 @@ const FRAME_ORIGINS = [
 	"https://platform.twitter.com",
 ];
 
-/** 強制する CSP。frame-ancestors はこれまでどおり。 */
+/** 強制する CSP。frame-ancestors はこれまでどおり。form-action はフォームの送り先を自オリジンに限る。 */
 export const ENFORCED_CSP =
-	"frame-ancestors 'self'; object-src 'none'; base-uri 'self'";
+	"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 /** 本番想定の全体ポリシー（Report-Only で出す）。`dev` は next dev の HMR が eval を使うぶん。 */
 export function buildReportOnlyCsp(opts: { dev: boolean }): string {

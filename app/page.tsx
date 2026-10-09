@@ -22,7 +22,7 @@ import RightSidebar from "@/components/layout/RightSidebar";
 import ScrollJumpControls from "@/components/layout/ScrollJumpControls";
 import ToastContainer from "@/components/ui/ToastContainer";
 import TopTabs, { type FeedSubMode } from "@/components/layout/TopTabs";
-import { api } from "@/lib/api";
+import { api, apiErrorMessage } from "@/lib/api";
 import { usePostActions } from "@/lib/hooks/usePostActions";
 import { pollInterval, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
 import {
@@ -1689,6 +1689,12 @@ export default function App() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// 作品の編集の保存に失敗したら理由を出す（以前は catch {} で黙って閉じ、編集が消えたように見えた）。
+	// lib/post/game-mv-client.ts の update* は日本語の文言（「…の更新に失敗しました: 403」）で投げる
+	const showSaveEditedError = (e: unknown, fallback: string) => {
+		showToast("error", e instanceof Error && e.message ? e.message : fallback);
+	};
+
 	// manifest はブラウザから直接R2へ上げ、DBにはURLだけ渡す（docs/NEON_EGRESS.md）。
 	// updateGame/updateMv（lib/post/game-mv-client.ts）がアップロード→PATCH→旧manifestの
 	// 削除まで面倒を見る。ここで直接 fetch(PATCH) して生の manifest を送ると、
@@ -1700,7 +1706,9 @@ export default function App() {
 		if (!playingGame?.gameId) return;
 		try {
 			await updateGame(playingGame.gameId, { title: meta.title, manifest });
-		} catch {}
+		} catch (e) {
+			showSaveEditedError(e, "ゲームの更新に失敗しました");
+		}
 		closeScreen();
 		setPlayingGame(null);
 		setPostGameDanmaku([]);
@@ -1720,7 +1728,9 @@ export default function App() {
 				title: data.title,
 				manifest: data.manifest,
 			});
-		} catch {}
+		} catch (e) {
+			showSaveEditedError(e, "MVの更新に失敗しました");
+		}
 		closeScreen();
 		setPlayingMv(null);
 		if (editingPost) {
@@ -1738,7 +1748,9 @@ export default function App() {
 				title: data.title,
 				manifest: data.manifest,
 			});
-		} catch {}
+		} catch (e) {
+			showSaveEditedError(e, "かけあい動画の更新に失敗しました");
+		}
 		closeScreen();
 		setPlayingTalk(null);
 		if (editingPost) {
@@ -1764,7 +1776,9 @@ export default function App() {
 				title: data.title,
 				manifest: data.manifest,
 			});
-		} catch {}
+		} catch (e) {
+			showSaveEditedError(e, "音MADの更新に失敗しました");
+		}
 		closeScreen();
 		setPlayingOtomad(null);
 		if (editingPost) {
@@ -2592,7 +2606,7 @@ export default function App() {
 										nextImageSrc === null ? "" : nextImageSrc,
 									);
 									fetchPosts();
-								} catch {
+								} catch (e) {
 									setPosts((prev) =>
 										prev.map((p) =>
 											p.id !== targetId
@@ -2604,7 +2618,10 @@ export default function App() {
 													},
 										),
 									);
-									showToast("error", "編集の保存に失敗しました");
+									showToast(
+										"error",
+										apiErrorMessage(e, "編集の保存に失敗しました"),
+									);
 								}
 							}}
 							capabilities={{

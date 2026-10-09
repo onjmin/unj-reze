@@ -43,22 +43,33 @@ export function getClientIp(headers: Headers): string {
 	return normalizeIp(rawIp);
 }
 
-/** レート制限のキー用。IPv6 は利用者1人に /64 がまるごと割り当てられるのが普通で、
- * アドレスをそのままキーにすると末尾を変えるだけで無限に枠を取り直せる。
- * なので IPv6 は先頭 /64（4グループ）に丸める。IPv4 はそのまま。 */
-export function rateLimitKeyFromIp(ip: string): string {
-	if (!ip.includes(":")) return ip;
+/** IPv6 の先頭 `count` グループを、"::" の省略を展開し先頭ゼロを落とした形で返す。
+ * 同じネットワークが表記ゆれ（"2001:db8::" と "2001:0db8:0:0::"）で別キーにならないようにするため。 */
+function ipv6PrefixGroups(ip: string, count: number): string[] {
 	const [head, tail] = ip.split("::");
 	const headGroups = head ? head.split(":") : [];
-	// "::" で省略されたゼロのグループを補ってから先頭4つを取る
+	// "::" で省略されたゼロのグループを補ってから先頭 count 個を取る
 	const tailGroups = tail ? tail.split(":") : [];
 	const missing =
 		tail === undefined
 			? 0
 			: Math.max(0, 8 - headGroups.length - tailGroups.length);
 	const groups = [...headGroups, ...Array(missing).fill("0"), ...tailGroups];
-	return `${groups
-		.slice(0, 4)
-		.map((g) => g.replace(/^0+(?=.)/, ""))
-		.join(":")}::/64`;
+	return groups.slice(0, count).map((g) => g.replace(/^0+(?=.)/, ""));
+}
+
+/** レート制限のキー用。IPv6 は利用者1人に /64 がまるごと割り当てられるのが普通で、
+ * アドレスをそのままキーにすると末尾を変えるだけで無限に枠を取り直せる。
+ * なので IPv6 は先頭 /64（4グループ）に丸める。IPv4 はそのまま。 */
+export function rateLimitKeyFromIp(ip: string): string {
+	if (!ip.includes(":")) return ip;
+	return `${ipv6PrefixGroups(ip, 4).join(":")}::/64`;
+}
+
+/** レート制限の2段目（/48）のキー。/48 や /56 を持つ利用者は /64 をいくらでも乗り換えられるので、
+ * /64 の枠とは別に、上限の大きい /48 の枠でも数える（unj の ipPrefixKey と同じ考え方）。
+ * IPv4 には相当する段が無いので null（呼び出し側はこの段を飛ばす）。 */
+export function rateLimitKey48FromIp(ip: string): string | null {
+	if (!ip.includes(":")) return null;
+	return `${ipv6PrefixGroups(ip, 3).join(":")}::/48`;
 }

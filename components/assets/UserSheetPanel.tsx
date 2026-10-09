@@ -1351,7 +1351,7 @@ function SheetGrid({
 						<div
 							className="w-full h-full overflow-hidden"
 							style={{
-								backgroundImage: `url(${sheet.url})`,
+								backgroundImage: `url(${JSON.stringify(sheet.url)})`,
 								backgroundSize: `${size.cols * 100}% ${size.rows * 100}%`,
 								backgroundPosition: `${size.cols > 1 ? (c.col / (size.cols - 1)) * 100 : 0}% ${size.rows > 1 ? (c.row / (size.rows - 1)) * 100 : 0}%`,
 								imageRendering: "pixelated",

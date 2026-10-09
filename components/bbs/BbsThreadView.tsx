@@ -781,6 +781,8 @@ export default function BbsThreadView({
 								<button
 									onClick={(e) => {
 										const rect = e.currentTarget.getBoundingClientRect();
+										// slug は reze 利用者の書き込みにだけ付く。無い（unj 純正）ときは
+										// UserActionMenu がプロフィール・フォロー・DM 等を出さない。表示名で補わないこと。
 										setSelectedUser({
 											displayName: p.displayName,
 											slug: p.slug || undefined,

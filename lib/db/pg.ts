@@ -14,6 +14,11 @@
  * ## ユーザー識別子
  * 「slug」は廃止。AnonymousUser.id と .slug は両方とも String(users.id)。
  * リレーションは全て users.id（数値）で行う。
+ * ただし投稿（DbPost）の slug / userId を埋めるのは reze 利用者の投稿だけ
+ * （isRezeAuthorRow）。users は unj と共有で、unj 純正の書き込みにまで生の users.id を
+ * 付けて返すと、フィードを見るだけで unj 利用者を人単位で名寄せでき、id の総当たりで
+ * 全期間の書き込みを集められる（unj が日替わりの鍵付き ID で隠しているものが reze 経由で破れる）。
+ * unj 由来・システム用（users.id=1）の投稿は slug / userId が undefined で、bbsId（cc_user_id）だけ残す。
  *
  * ## content_type の変換
  * unj の content_type は単一値（画像/DTM/テキスト/…のいずれか1つ）。
@@ -33,19 +38,29 @@
  * @neondatabase/serverless の HTTP fetch 経路は呼び出しごとに独立して
  * 自動コミットされ、`BEGIN`/`COMMIT` を挟んでも実際には1つの実トランザクションに
  * ならない（元の reze 実装が使っていた `getPool().connect()` も同じ制約を持つ
- * フェイクの Pool だった）。真のトランザクションが要る箇所は作らず、
- * SERIAL 採番（threads.id / res.id）はDB任せにして競合класを消し、
+ * フェイクの Pool だった）。逆に言えば「1つの SQL 文」は必ず1つのトランザクションで、
+ * まとめて成功するかまとめて失敗する（ローカルの pg.Pool でも同じ）。
+ * 原子性が要る箇所は複数の文に分けず、CTE（WITH ... INSERT/UPDATE）で1文にする。
+ * SERIAL 採番（threads.id / res.id）はDB任せにして競合を消し、
  * res.num のような手計算が要る値は UNIQUE 制約 + リトライで守る。
+ * レスの採番は unj（src/server/api/res.ts）と同じくスレの行を FOR UPDATE で
+ * ロックしてから取る（addReply）。unj と reze が同じスレに同時に書いても、ロックで順番に並ぶ。
+ * 1文の中では res のスナップショットがロック待ちの前のままなので、番号はロックで取り直した
+ * threads.res_count（unj も reze も res を入れたトランザクションの中で最大のレス番号に揃える）と
+ * MAX(num) の大きい方 + 1 にする。
  */
 import { neon } from "@neondatabase/serverless";
 import type { Pool } from "pg";
 import { genBbsId } from "@/lib/bbs/cc-id";
+import { sanitizeBbsUserName } from "@/lib/bbs/user-name";
 import { extractChordsFromContent } from "@/lib/mml/chord";
 import type { Message, Trend } from "./mock-db";
-import { extractMmlFromContent } from "@/lib/mml/mml";
+import { extractMmlFromContent, replaceMmlWithMarker } from "@/lib/mml/mml";
 import { ensureMmlExternalized } from "@/lib/mml/mml-payload";
-import { isThreadFull, RES_LIMIT } from "@/lib/bbs/thread-limits";
+import { isUploaderAvailable } from "@/lib/uploader";
+import { RES_LIMIT } from "@/lib/bbs/thread-limits";
 import { formatRelativeTime } from "@/lib/time";
+import { ORIGIN_TYPE_OPTIONS } from "@/lib/types";
 import type {
 	AnonymousUser,
 	FollowUser,
@@ -165,7 +180,7 @@ async function q<T = any>(
 const raw = (sql: string): { raw: string } => ({ raw: sql });
 const val = (v: SqlParam): { param: SqlParam } => ({ param: v });
 type InsertEntry = [column: string, value: { raw: string } | { param: SqlParam }];
-function buildInsert(table: string, entries: InsertEntry[]) {
+function buildInsertParts(entries: InsertEntry[]) {
 	const cols: string[] = [];
 	const placeholders: string[] = [];
 	const params: SqlParam[] = [];
@@ -178,8 +193,29 @@ function buildInsert(table: string, entries: InsertEntry[]) {
 			placeholders.push(`$${params.length}`);
 		}
 	}
+	return { cols, placeholders, params };
+}
+function buildInsert(table: string, entries: InsertEntry[]) {
+	const { cols, placeholders, params } = buildInsertParts(entries);
 	return {
 		text: `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`,
+		params,
+	};
+}
+/**
+ * buildInsert の `INSERT ... SELECT <値> <fromAndWhere>` 版。値の行を条件付きで入れたいとき
+ * （addReply: ロックしたスレの行が上限内のときだけ入れる）に使う。カラムと値を1箇所から
+ * 作る理由は buildInsert と同じ。fromAndWhere は entries 側で決まる $N（先頭の entry の $1 など）
+ * だけを参照できる。同じ文の別の箇所で値を足すときは、返る params の後ろに積んで番号を続けること。
+ */
+function buildInsertSelect(
+	table: string,
+	entries: InsertEntry[],
+	fromAndWhere: string,
+) {
+	const { cols, placeholders, params } = buildInsertParts(entries);
+	return {
+		text: `INSERT INTO ${table} (${cols.join(", ")}) SELECT ${placeholders.join(", ")} ${fromAndWhere}`,
 		params,
 	};
 }
@@ -249,6 +285,65 @@ interface DisplayContent {
 	mmlUrl?: string;
 }
 
+/**
+ * 絶対 URL で、スキームが protocols のどれかなら元の文字列をそのまま返す（それ以外は undefined）。
+ * content_url / content_data_url は unj と共有の列で、reze の編集や古い行・unj 側の書き込みから
+ * `javascript:` や相対パス（`/api/auth/...` のような自サイトの URL）が入りうる。
+ * それを <img src> や fetch にそのまま渡すと、閲覧者のブラウザに任意の自サイト GET を踏ませたり
+ * スクリプト URL を描かせたりできるので、表示用に取り出す時点で落とす。
+ * new URL は基準 URL なしで呼ぶ（相対パスは例外になる）。正規化した href ではなく元の文字列を
+ * 返すのは、表示や削除トークンの照合で URL の見た目を変えないため。
+ */
+function absoluteUrlOf(
+	raw: unknown,
+	protocols: readonly string[],
+): string | undefined {
+	if (typeof raw !== "string" || raw === "") return undefined;
+	// 大半の行はここで決まる。URL の組み立て（CPU）は http(s) らしいものにだけ払う
+	if (!/^https?:\/\//i.test(raw)) return undefined;
+	try {
+		return protocols.includes(new URL(raw).protocol) ? raw : undefined;
+	} catch {
+		return undefined;
+	}
+}
+const HTTP_PROTOCOLS = ["http:", "https:"] as const;
+const HTTPS_ONLY = ["https:"] as const;
+
+/**
+ * ローカル開発のファイル置き場（lib/storage/s3.ts）が返す相対パス `/uploads/<時刻>-<乱数>.<拡張子>`。
+ * 相対パスの中でこれだけは通す（uploader なしのローカル開発で画像投稿が消えないように）。
+ * 形を画像ファイル名に限っているので、`/api/...` のような自サイトの API には向けられない。
+ * 通すのは uploader が無いときだけ（ルートの isAcceptableNewImageSrc と同じ条件）。本番の共有行に
+ * 相対パスを入れると、unj（URL は http(s) だけの前提）の画面で unj 自身のパスとして読まれる。
+ */
+const LOCAL_UPLOAD_PATH_RE = /^\/uploads\/[\w-]+\.(?:png|jpe?g|gif|webp)$/;
+
+/** 添付画像（content_url）として扱ってよい URL。絶対 http(s) か、ローカル開発の置き場のパス */
+function imageUrlOf(raw: unknown): string | undefined {
+	if (
+		!isUploaderAvailable &&
+		typeof raw === "string" &&
+		LOCAL_UPLOAD_PATH_RE.test(raw)
+	)
+		return raw;
+	return absoluteUrlOf(raw, HTTP_PROTOCOLS);
+}
+
+/**
+ * 昔の行に残っている data: の画像（uploader 導入前、Workers で lib/storage/s3.ts の uploadImage が
+ * ファイルに書けずに data URL をそのまま返していた頃のもの）。<img src> の data: 画像はスクリプトを
+ * 動かせないので、表示（deriveDisplay）だけは通す。新しく保存する側（deriveInsertContent）と、
+ * 選んだ画像を投稿に再利用するメディア検索では通さない（ルートが data: を弾くので使い回せない）。
+ * SVG は含めない。
+ */
+const DATA_IMAGE_URL_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,/i;
+function displayImageUrlOf(raw: unknown): string | undefined {
+	const url = imageUrlOf(raw);
+	if (url) return url;
+	return typeof raw === "string" && DATA_IMAGE_URL_RE.test(raw) ? raw : undefined;
+}
+
 /** row（content_type/content_text/content_url/content_data_url）→ reze の表示フィールド */
 function deriveDisplay(row: any): DisplayContent {
 	const t = Number(row.content_type);
@@ -261,14 +356,15 @@ function deriveDisplay(row: any): DisplayContent {
 		return {
 			content: text,
 			hasImage: true,
-			imageSrc: row.content_url || undefined,
+			imageSrc: displayImageUrlOf(row.content_url),
 		};
 	}
 	if (t === CT.Dtm) {
+		// MML はクライアントが fetch して読む。R2 / uploader の URL は常に https なので http は通さない
 		return {
 			content: text,
 			hasMml: true,
-			mmlUrl: row.content_data_url || undefined,
+			mmlUrl: absoluteUrlOf(row.content_data_url, HTTPS_ONLY),
 		};
 	}
 	if (t === CT.Text || t === CT.Chord) {
@@ -304,11 +400,15 @@ function deriveInsertContent(data: {
 			mmlDeleteHash: data.mmlUrl ? data.mmlDeleteHash || null : null,
 		};
 	}
-	if (data.hasImage && data.imageSrc) {
+	// 画像として保存するのは表示側（deriveDisplay）が描ける URL だけ。それ以外（相対パス・
+	// javascript: など）を content_type=Image で共有行に入れると、unj の EmbedPart は
+	// ホワイトリストを見ずにそのまま <img> にする。落とした場合は下の本文だけの扱いになる。
+	const imageSrc = data.hasImage ? imageUrlOf(data.imageSrc) : undefined;
+	if (imageSrc) {
 		return {
 			contentType: CT.Image,
 			contentText: content,
-			contentUrl: data.imageSrc,
+			contentUrl: imageSrc,
 			contentDataUrl: "",
 			mmlDeleteId: null,
 			mmlDeleteHash: null,
@@ -338,6 +438,45 @@ function deriveInsertContent(data: {
 }
 
 /**
+ * threads.latest_res（unj の板一覧に出る最新レスの抜粋）。本文の最初の空でない行を64字まで。
+ * createPost / addReply 共通。
+ */
+function latestResPreview(content: string | undefined): string {
+	return (
+		(content || "")
+			.split("\n")
+			.find((l) => l.trim())
+			?.slice(0, 64) || ""
+	);
+}
+
+/** 1件のレスから送るメンション通知の上限。@ を大量に並べた1レスで通知を撒けないように */
+const MAX_MENTIONS_PER_REPLY = 5;
+/** users.id（SERIAL = int4）の上限。超える数字を ::int[] に渡すと 22003 で文ごと失敗する */
+const MAX_INT4 = 2147483647;
+
+/**
+ * 本文の `@<数字>` からメンション先の users.id を取り出す（重複なし・最大 MAX_MENTIONS_PER_REPLY 件）。
+ * 投稿者本人とスレ主（返信の通知が別に届く）は除く。11桁以上の数字の先頭だけを拾って別人に
+ * 届かないよう、数字の途中で切れる一致は取らない。
+ */
+function mentionTargetsOf(
+	content: string | undefined,
+	authorId: number,
+	threadOwnerId: number,
+): number[] {
+	const ids = new Set<number>();
+	for (const m of (content || "").matchAll(/@(\d{1,10})(?!\d)/g)) {
+		const id = Number(m[1]);
+		if (id < 1 || id > MAX_INT4 || id === authorId || id === threadOwnerId)
+			continue;
+		ids.add(id);
+		if (ids.size >= MAX_MENTIONS_PER_REPLY) break;
+	}
+	return Array.from(ids);
+}
+
+/**
  * 削除確定した行から、消すべきR2オブジェクト（MML）の削除トークンを取り出す。
  * content_type===Dtm のときだけ content_data_url がR2実体を指す（deriveDisplay と同じ判定）。
  * deletePost（投稿/レス削除）が使う。ゲーム/MVの manifest は orphanedManifestRefsOf が別に扱う
@@ -360,6 +499,29 @@ function imageDeleteRefOf(row: {
 		};
 	}
 	return {};
+}
+
+/**
+ * 権利表記（origin_type）として保存してよい値か。共有の threads/res 行に入り unj の readThread でも
+ * 毎回読まれるので、ルートの検査に加えてここでも ORIGIN_TYPE_OPTIONS の値に限る（多層防御）。
+ */
+const ORIGIN_TYPE_VALUES = new Set<string>(ORIGIN_TYPE_OPTIONS.map((o) => o.value));
+function validOriginType(v: unknown): OriginType | null {
+	return typeof v === "string" && ORIGIN_TYPE_VALUES.has(v)
+		? (v as OriginType)
+		: null;
+}
+
+/**
+ * ドット絵メタ（dot_w/dot_h/anim_frames/anim_fps）の値。範囲は PATCH の parseDotMeta
+ * （app/api/posts/[id]/route.ts）と同じ。列は SMALLINT なので、範囲外や NaN をそのまま渡すと
+ * 22003/22P02 で 500 になる。作成時は範囲外を null（メタ無し）に落とす。
+ */
+const DOT_META_MAX = { dotW: 512, dotH: 512, animFrames: 256, animFps: 60 } as const;
+function dotMetaValue(v: unknown, max: number): number | null {
+	return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= max
+		? v
+		: null;
 }
 
 /** 挿入する行が画像投稿のときだけトークンを保存する（MML優先の分岐で画像が落ちた時は捨てる） */
@@ -403,6 +565,100 @@ const MAX_SEARCH_QUERY_LENGTH = 100;
 function escapeLike(term: string): string {
 	return term.replace(/[!%_]/g, "!$&");
 }
+
+/**
+ * 利用者にそのまま見せてよい失敗。ルートは `expose === true` のときだけ e.message を返し、
+ * それ以外の例外（Postgres のエラー文など）は一般的な 500 にする。
+ */
+function userError(message: string, status: number): Error {
+	return Object.assign(new Error(message), { expose: true as const, status });
+}
+
+/**
+ * 削除した投稿（スレの OP・レスとも論理削除）の本文。deletePost が書き、editPost はこの本文で
+ * 添付の無い行を「削除済み」とみなして編集させない（削除で R2 の実体を消したあとに書き戻させない）。
+ */
+const DELETED_POST_TEXT = "(削除されました)";
+
+/**
+ * スレの content_types_bitmask に照らして、保存する content_type を決める（unj の規則に合わせる）。
+ * - NULL は制限なし（unj の既定値は 1 で、NULL は列を足す前の行だけ）
+ * - コード進行（#コード進行）が許されていないスレではテキストとして保存する。unj も本文の
+ *   マーカーで Chord に切り替えるのは許されているスレだけで、それ以外はテキストのまま送る
+ *   （unj src/client/pages/ThreadPage.svelte）。
+ * - それ以外の許されていない種別は投げる（C1 400）
+ * 純粋な関数なので、R2 への書き込みより前の判定にも、保存する値の決定にも同じものを使う。
+ */
+function threadContentType(bitmask: unknown, contentType: number): number {
+	if (bitmask == null) return contentType;
+	const bm = Number(bitmask);
+	const t = contentType === CT.Chord && (bm & CT.Chord) === 0 ? CT.Text : contentType;
+	if ((bm & t) === 0) {
+		throw userError("このスレッドでは、この種類の投稿はできません", 400);
+	}
+	return t;
+}
+
+/** レスの書き込みを止めるスレ規則（unj src/server/api/res.ts と同じ）。違反なら C1 を投げる */
+function assertReplyAllowed(
+	thread: { bals_res_num?: unknown; varsan?: unknown },
+	isOwner: boolean,
+): void {
+	if (Number(thread.bals_res_num ?? 0) !== 0) {
+		throw userError("このスレッドは終了しています", 403);
+	}
+	// unj は !バルサン中でも忍法帖 LV8 以上なら書けるが、reze の利用者には忍法帖のレベルが
+	// 無いのでスレ主だけにする
+	if (thread.varsan && !isOwner) {
+		throw userError("このスレッドは書き込みが制限されています（!バルサン）", 403);
+	}
+}
+
+/** スレの書き込み上限。unj の res_limit と RES_LIMIT（num は SMALLINT、lib/bbs/thread-limits.ts）の小さい方 */
+function replyLimitOf(thread: { res_limit?: unknown }): number {
+	return Math.min(Number(thread.res_limit ?? RES_LIMIT) || RES_LIMIT, RES_LIMIT);
+}
+
+const threadFullError = (limit: number) =>
+	userError(`このスレッドは上限（${limit}レス）に達しています`, 409);
+
+/** レスの採番が 23505 で衝突したときの待ち時間（ms）。同時に投げた側どうしが同じ瞬間にやり直さないよう揺らす */
+const sleepBeforeRetry = () =>
+	new Promise<void>((resolve) =>
+		setTimeout(resolve, 20 + Math.floor(Math.random() * 80)),
+	);
+
+/**
+ * auth_tokens の行を reze のセッションとして受け付けてよいかの SQL 条件（`alias` は auth_tokens の別名）。
+ *
+ * unj は4日ごとに発行し直すトークン（`署名.userId.期限` のドット区切り3つ）を毎回 kind='unj'
+ * （列の既定値）で auth_tokens に積み、そのうち直近4件だけを有効にしている（unj auth.ts の
+ * reloginQuery）。reze がトークンの新しさを見ずに照会すると、unj が無効にした古いトークンでも
+ * その unj 利用者として振る舞えてしまう（他人の投稿の編集・削除、DM・通知の閲覧）。
+ * reze が unj の利用者として振る舞う必要は無いので、unj 形式のトークンは新旧を問わず受け付けない。
+ *
+ * 締め出さないもの: UUID（ドットなし）のまま既定値 kind='unj' で入った昔の reze セッション、
+ * `bbscgi:<IPv4>`（ドット3つ＝4つに分かれる。kind='reze'）。
+ * 正規表現のドットは `\.` ではなく `[.]` で書く（バックスラッシュは JS のテンプレート文字列と
+ * SQL の文字列リテラルで二重にエスケープが要り、standard_conforming_strings の設定次第で
+ * 意味まで変わる。escapeLike の `ESCAPE '!'` と同じ理由）。
+ */
+const rezeTokenOk = (alias = "t") =>
+	`NOT (${alias}.kind = 'unj' AND ${alias}.token ~ '^[^.]+[.][^.]+[.][^.]+$')`;
+
+/** DM 本文の上限（文字数）。app/api/messages の MAX_DM_LENGTH と同じ値 */
+const MAX_MESSAGE_LENGTH = 5000;
+/**
+ * messages を読むときの列。rowToMessage が使う分だけにし、本文は MAX_MESSAGE_LENGTH で頭打ちにする
+ * （上限を入れる前に保存された巨大な DM が、読み出しのたびに転送量を食わないように）。
+ */
+const MESSAGE_COLUMNS = `id, sender_user_id, recipient_user_id, LEFT(text, ${MAX_MESSAGE_LENGTH}) AS text, created_at`;
+
+/** 推しリストの件数の上限（1人あたり）。一覧は LIMIT もこの値で引く */
+const MAX_OSHI_ITEMS = 100;
+
+/** 1人が1日に送れる通報の件数（reportContent） */
+const MAX_REPORTS_PER_DAY = 50;
 
 /** 移行トークンの有効期限（分）。発行から過ぎたものは引き換えできない */
 const MIGRATION_TOKEN_TTL_MINUTES = 30;
@@ -527,8 +783,51 @@ async function orphanedManifestRefsOf(
 // ============================================================================
 // row → DbPost
 // ============================================================================
+
+/**
+ * システム用の users.id。unj の次スレ立て（src/server/mylib/next-thread.ts）や管理画面の
+ * スレ立て・書き込み（src/server/admin/thread/*）はこの id の名義で書く。人ではないので
+ * プロフィール・DM・フォローの対象にせず、users.display_name も表示に使わない。
+ */
+const SYSTEM_USER_ID = 1;
+
+/**
+ * この行（threads/res に AUTHOR_SELECT を足したもの）の投稿者が reze の利用者か。
+ * 判定は users.display_name が NULL でないこと:
+ * - unj は display_name を一度も書かない（unj の auth.ts は `INSERT INTO users (ip, ninja_pokemon)` だけ）
+ * - reze はどの作成経路（getOrCreateAnonymousUser。bbs.cgi の `bbscgi:` も含む）でも必ず書く
+ * ほかの印は使えない: origin_type 'fal_1_3' は unj の既定値だが reze の OriginType にもある。
+ * ip '0.0.0.0' は reze の書き込みだけでなく unj のシステム投稿にも使われている。
+ *
+ * **呼び出し側の行には必ず author_display_name を載せること**（AUTHOR_SELECT か、createPost /
+ * addReply のように明示的に代入）。載せ忘れると reze 利用者でも slug が付かず、
+ * プロフィールへの導線が黙って消える。
+ */
+function isRezeAuthorRow(row: any): boolean {
+	return (
+		row.author_display_name != null && Number(row.user_id) !== SYSTEM_USER_ID
+	);
+}
+
+/**
+ * フォロー・ブロック・ミュートの相手にしてよい users.id か（`param` は `$2::int` などの SQL 式）。
+ * isRezeAuthorRow と同じ基準で、unj だけの利用者と SYSTEM_USER_ID は対象にしない。
+ * 投稿に slug を出さなくても、API に任意の id を渡してミュート/ブロックし「どの投稿が消えるか」を
+ * 見れば、unj 利用者の投稿を users.id で名寄せできてしまう（スレ・日をまたいだ追跡）ため。
+ */
+const rezeTargetSql = (param: string) =>
+	`EXISTS (SELECT 1 FROM users WHERE id = ${param} AND display_name IS NOT NULL AND id <> ${SYSTEM_USER_ID})`;
+
 function resolveDisplayName(row: any): string {
-	const raw = (row.author_display_name || row.cc_user_name || "").trim();
+	// reze 利用者の表示名は users.display_name。保存時にも通しているが、それより前に保存された
+	// 名前もあるので表示時にも unj の名前エスケープと不可視文字の除去を掛ける。
+	// cc_user_name は通さない（unj が書いた本物のキャップ・トリップを潰してしまう）。
+	// システム用 id の display_name は使わない（次スレなどに特定の名前が出てしまう）。
+	const rezeName =
+		row.author_display_name && Number(row.user_id) !== SYSTEM_USER_ID
+			? sanitizeBbsUserName(row.author_display_name)
+			: "";
+	const raw = (rezeName || row.cc_user_name || "").trim();
 	if (raw && raw !== "名無し") return raw;
 	if (row.cc_user_id) return `名無し${row.cc_user_id}`;
 	return "名無し";
@@ -537,11 +836,13 @@ function resolveDisplayName(row: any): string {
 function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 	const postId = threadToPostId(Number(row.id));
 	const disp = deriveDisplay(row);
+	// unj 由来・システム用の投稿者には生の users.id を出さない（ファイル先頭「ユーザー識別子」）
+	const authorKey = isRezeAuthorRow(row) ? String(row.user_id) : undefined;
 	return {
 		id: postId,
 		displayName: resolveDisplayName(row),
-		slug: String(row.user_id),
-		userId: String(row.user_id),
+		slug: authorKey,
+		userId: authorKey,
 		bbsId: row.cc_user_id || undefined,
 		datKey:
 			row.dat_key != null
@@ -602,11 +903,13 @@ function resRowToPost(row: any): DbPost {
 	const postId = resToPostId(Number(row.id));
 	const threadPostId = threadToPostId(Number(row.thread_id));
 	const disp = deriveDisplay(row);
+	// threadRowToPost と同じく reze 利用者の投稿だけに users.id を付ける
+	const authorKey = isRezeAuthorRow(row) ? String(row.user_id) : undefined;
 	return {
 		id: postId,
 		displayName: resolveDisplayName(row),
-		slug: String(row.user_id),
-		userId: String(row.user_id),
+		slug: authorKey,
+		userId: authorKey,
 		bbsId: row.cc_user_id || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
@@ -716,7 +1019,8 @@ function clearHiddenCache() {
 function toUid(userId: string | null | undefined): number | null {
 	if (userId == null || userId === "") return null;
 	const n = Number(userId);
-	return Number.isInteger(n) && n > 0 ? n : null;
+	// users.id などの SERIAL は int4。超える値（"99999999999" や "1e10"）を渡すと 22003 の 500 になる
+	return Number.isInteger(n) && n > 0 && n <= 2147483647 ? n : null;
 }
 
 async function getHiddenUserIds(viewerId?: string): Promise<Set<number>> {
@@ -863,8 +1167,15 @@ async function finalizeOneForViewer(
 	return (await finalizeForViewer([post], viewerId))[0];
 }
 
-/** games 一覧・ランキングから鍵アカの作品を外す条件（listAllGames / listTopGames）。 */
-const PUBLIC_CREATOR_SQL = `(creator_user_id IS NULL OR creator_user_id NOT IN (SELECT id FROM users WHERE is_private))`;
+/**
+ * games 一覧・ランキング・live の候補から鍵アカの作品を外す条件（listAllGames / listTopGames /
+ * getLiveGameInfo）。`alias` は games の別名（JOIN するクエリ用）。
+ */
+const publicCreatorSql = (alias?: string) => {
+	const col = alias ? `${alias}.creator_user_id` : "creator_user_id";
+	return `(${col} IS NULL OR ${col} NOT IN (SELECT id FROM users WHERE is_private))`;
+};
+const PUBLIC_CREATOR_SQL = publicCreatorSql();
 
 /** post_reposts.post_kind。threads と res は id 空間が別なので種別で分ける。 */
 const REPOST_KIND_THREAD = 0;
@@ -1013,6 +1324,8 @@ export const pgStore: DataStore = {
 			const resId = postIdToResId(id);
 			// レス自身の投稿者に加えて、スレ主が鍵アカでスレごと見えない場合も null
 			// （getReplies と同じ扱い。レス単体のURLからスレの中身を覗けないように）。
+			// 削除済みのスレ（unj の !timer・強制削除）と板1以外のスレのレスも出さない。
+			// reze が扱う板は板1だけで、ここを素通しにするとレス単体の URL から読めてしまう。
 			const params: any[] = [resId];
 			const visible = authorVisibleSql("r.user_id", params, viewerUid);
 			const threadVisible = authorVisibleSql(
@@ -1024,7 +1337,8 @@ export const pgStore: DataStore = {
 			const { rows } = await q(
 				`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
            JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id
-          WHERE r.id = $1 AND ${visible} AND ${threadVisible}`,
+          WHERE r.id = $1 AND t.deleted_at IS NULL AND t.board_id = 1
+            AND ${visible} AND ${threadVisible}`,
 				params,
 			);
 			if (rows.length === 0) return null;
@@ -1052,7 +1366,7 @@ export const pgStore: DataStore = {
 		const params: any[] = [threadId];
 		const visible = authorVisibleSql("t.user_id", params, viewerUid);
 		const { rows } = await q(
-			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL AND ${visible}`,
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL AND t.board_id = 1 AND ${visible}`,
 			params,
 		);
 		if (rows.length === 0) return null;
@@ -1064,18 +1378,42 @@ export const pgStore: DataStore = {
 	},
 
 	async getPostByDatKey(datKey: number, userId?: string) {
-		// 旧データ(dat_key未採番)も引けるよう、NULLならcreated_atから都度算出して比較する。
 		// 専ブラ（dat / bbs.cgi）は viewer 無しで呼ぶので鍵アカのスレは見つからない扱い。
+		// 板1以外・削除済みのスレも出さない（reze が扱う板は板1だけ）。
+		//
+		// 以前は `COALESCE(dat_key, FLOOR(EXTRACT(EPOCH FROM created_at)))= $1` の1文だったが、
+		// 式の比較はどのインデックスにも乗らず、存在しない key を投げるだけで threads を
+		// 全件走査させられた。2段に分けてそれぞれインデックスに乗せる:
+		// 1) reze が採番した dat_key（unq_threads_dat_key）
+		// 2) dat_key 未採番の行（unj のスレは dat_key を書かない）は created_at の範囲
+		//    （idx_threads_created_at）。created_at は TIMESTAMP（タイムゾーンなし）で、
+		//    その EXTRACT(EPOCH) はタイムゾーンを見ない素朴な 1970-01-01 からの秒数なので、
+		//    `epoch + k秒 <= created_at < epoch + (k+1)秒` は FLOOR(...) = k とちょうど同じ条件になる。
+		// dat の URL（/^(\d+)\.dat$/）や bbs.cgi の key は利用者が自由に書ける。BIGINT に入らない値・
+		// 小数は 22P02、年 10000 を超える秒数は 2) の timestamp 計算が 22008 になり、どちらも 500 に
+		// なっていた。そんなスレは存在しないので、問い合わせる前に「見つからない」で返す。
+		if (!Number.isSafeInteger(datKey) || datKey <= 0) return null;
 		const viewerUid = toUid(userId);
-		const params: any[] = [datKey];
-		const visible = authorVisibleSql("t.user_id", params, viewerUid);
-		const { rows } = await q(
-			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-         WHERE t.deleted_at IS NULL
-           AND COALESCE(t.dat_key, FLOOR(EXTRACT(EPOCH FROM t.created_at))::BIGINT) = $1
-           AND ${visible}`,
-			params,
-		);
+		const datKeyQuery = async (where: string) => {
+			const params: any[] = [datKey];
+			const visible = authorVisibleSql("t.user_id", params, viewerUid);
+			const { rows } = await q(
+				`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+         WHERE ${where} AND t.deleted_at IS NULL AND t.board_id = 1 AND ${visible}
+         LIMIT 1`,
+				params,
+			);
+			return rows;
+		};
+		let rows = await datKeyQuery(`t.dat_key = $1`);
+		// 253402300800 = 10000-01-01T00:00:00Z の秒数。created_at はこれより先にならない
+		if (rows.length === 0 && datKey < 253402300800) {
+			rows = await datKeyQuery(
+				`t.dat_key IS NULL
+           AND t.created_at >= TIMESTAMP 'epoch' + ($1::bigint) * INTERVAL '1 second'
+           AND t.created_at < TIMESTAMP 'epoch' + ($1::bigint + 1) * INTERVAL '1 second'`,
+			);
+		}
 		if (rows.length === 0) return null;
 		const threadId = Number(rows[0].id);
 		const post = threadRowToPost(rows[0]);
@@ -1094,6 +1432,13 @@ export const pgStore: DataStore = {
 				"createPost には解決済みの投稿者(slug=users.id)が必要です",
 			);
 		}
+		// 投稿者の行は INSERT の前に引く。鍵アカなら latest_res（unj の板一覧に本文の抜粋として
+		// 出る列）を空にするため（addReply と同じ扱い）。返す行の表示名・アイコンにもこれを使う。
+		const { rows: userRows } = await q(
+			`SELECT display_name, avatar_url, is_private FROM users WHERE id = $1`,
+			[authorId],
+		);
+		const authorIsPrivate = !!userRows[0]?.is_private;
 		// dat_key は手計算(UNIQUE)なので、同一秒の同時スレ立てで衝突したらリトライする
 		// （lib/db/pg.ts addReply の num 採番と同じ方式）。
 		let row: any = null;
@@ -1121,12 +1466,7 @@ export const pgStore: DataStore = {
 					["res_count", val(1)],
 					[
 						"latest_res",
-						val(
-							(mmlResolved.content || "")
-								.split("\n")
-								.find((l) => l.trim())
-								?.slice(0, 64) || "",
-						),
+						val(authorIsPrivate ? "" : latestResPreview(mmlResolved.content)),
 					],
 					["latest_res_at", raw("CURRENT_TIMESTAMP")],
 					["title", val("")],
@@ -1139,7 +1479,9 @@ export const pgStore: DataStore = {
 					// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
 					// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
 					["cc_user_id", val(genBbsId(authorId, 1))],
-					["cc_user_name", val(data.displayName || "名無し")],
+					// unj で ★（キャップ）◆（トリップ）に見えないよう unj と同じ名前エスケープを掛ける
+					// （cc_bitmask は DEFAULT_CC_BITMASK 固定で、名前表示(4)を含む）
+					["cc_user_name", val(sanitizeBbsUserName(data.displayName || "名無し"))],
 					["cc_user_avatar", val(0)],
 					["avatar_color", val(data.avatarColor ?? null)],
 					["content_text", val(c.contentText)],
@@ -1167,7 +1509,8 @@ export const pgStore: DataStore = {
 								data.mvId ||
 								data.talkId ||
 								data.otomadId ||
-								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
+								// 画像は実際に画像として保存されるときだけ（deriveInsertContent が落とした URL は数えない）
+								(c.contentType === CT.Image && data.imageIsDrawn) ||
 								c.contentType === CT.Dtm
 							),
 						),
@@ -1176,11 +1519,12 @@ export const pgStore: DataStore = {
 					["mv_id", val(data.mvId ?? null)],
 					["talk_id", val(data.talkId ?? null)],
 					["otomad_id", val(data.otomadId ?? null)],
-					["origin_type", val(data.originType ?? null)],
-					["dot_w", val(data.dotW ?? null)],
-					["dot_h", val(data.dotH ?? null)],
-					["anim_frames", val(data.animFrames ?? null)],
-					["anim_fps", val(data.animFps ?? null)],
+					// 権利表記・ドット絵メタはルートでも検査しているが、共有行に入る値なのでここでも絞る
+					["origin_type", val(validOriginType(data.originType))],
+					["dot_w", val(dotMetaValue(data.dotW, DOT_META_MAX.dotW))],
+					["dot_h", val(dotMetaValue(data.dotH, DOT_META_MAX.dotH))],
+					["anim_frames", val(dotMetaValue(data.animFrames, DOT_META_MAX.animFrames))],
+					["anim_fps", val(dotMetaValue(data.animFps, DOT_META_MAX.animFps))],
 					["walk_preset", val(data.walkPreset ?? null)],
 				]);
 				const { rows } = await q(`${insertSql} RETURNING *`, insertParams);
@@ -1189,20 +1533,18 @@ export const pgStore: DataStore = {
 				if (e?.code !== "23505" || attempt === 4) throw e;
 			}
 		}
-		const { rows: userRows } = await q(
-			`SELECT display_name, avatar_url, is_private FROM users WHERE id = $1`,
-			[authorId],
-		);
+		// isRezeAuthorRow（slug を付けるか）と表示名はこの値で決まる。AUTHOR_SELECT の代わり
 		row.author_display_name = userRows[0]?.display_name;
 		row.author_avatar_url = userRows[0]?.avatar_url;
 		// 呼び出し側（app/api/posts/route.ts）が鍵アカの投稿をリアルタイム配信しない判定に使う
-		row.author_is_private = userRows[0]?.is_private;
+		row.author_is_private = authorIsPrivate;
 		return threadRowToPost(row, []);
 	},
 
 	async likePost(id: number, userId: string) {
 		const post = await voteOnPost(id, "good_count", userId);
-		await notifyPostAction(id, userId, "like");
+		// 見えない投稿（鍵アカ・削除済み・他板）には加算も通知もしない
+		if (post) await notifyPostAction(id, userId, "like");
 		return post;
 	},
 	async dislikePost(id: number, userId: string) {
@@ -1212,16 +1554,23 @@ export const pgStore: DataStore = {
 	async heartPost(id: number, userId: string, count = 1) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
+		// 先に押した本人の視点で見えるかを確かめる（voteOnPost と同じ理由）。
+		// viewer 無しで引くと鍵アカの投稿が null（＝404）になる
+		const post = await pgStore.getPost(id, userId, { withReplies: false });
+		if (!post) return null;
 		// 上限はルート側（app/api/posts/[id]/route.ts MAX_HEARTS_PER_REQUEST）で切る。
-		// ここでは負数・小数で hearts_total を減らせないことだけ保証する。
+		// ここでは負数・小数で hearts_total を減らせないことと、INTEGER の上限で
+		// 22003（以後その投稿へのハートが全部 500）にならないことだけ保証する。
 		const n = Math.max(1, Math.floor(Number(count) || 1));
-		await q(
-			`UPDATE ${table} SET hearts_total = hearts_total + $1 WHERE id = $2`,
+		const { rows } = await q<{ n: number }>(
+			`UPDATE ${table} SET hearts_total = LEAST(hearts_total::bigint + $1, 2147483647)
+        WHERE id = $2 RETURNING hearts_total AS n`,
 			[n, rawId],
 		);
 		await notifyPostAction(id, userId, "heart");
-		// 押した本人の視点で返す。viewer 無しで引くと鍵アカの投稿が null（＝404）になる
-		return pgStore.getPost(id, userId, { withReplies: false });
+		// 読み直さずに加算後の値だけ差し替える（hide_reactions で伏せている数は伏せたまま）
+		if (rows[0] && !post.reactionsHidden) post.heartsTotal = Number(rows[0].n);
+		return post;
 	},
 
 	/**
@@ -1296,6 +1645,7 @@ export const pgStore: DataStore = {
 		}
 		// 鍵アカのレスは除外（窓を切る前に落とす）。スレ主が鍵アカで見えないスレは
 		// レスも丸ごと返さない（相関しない EXISTS なので1回だけ評価される）。
+		// 削除済みのスレ（unj の !timer・強制削除）と板1以外のスレも同じく丸ごと返さない。
 		// threads.res_count は除外ぶんも数えたまま＝「N件の返信」は見えない分を含む。
 		// 番号（num）は欠番になる（削除と同じ見え方）。
 		const viewerUid = toUid(userId);
@@ -1306,7 +1656,8 @@ export const pgStore: DataStore = {
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
        WHERE r.thread_id = $1${cursorWhere} AND ${visible}
          AND EXISTS (SELECT 1 FROM threads t LEFT JOIN users tu ON tu.id = t.user_id
-                      WHERE t.id = $1 AND ${threadVisible})
+                      WHERE t.id = $1 AND t.deleted_at IS NULL AND t.board_id = 1
+                        AND ${threadVisible})
        ORDER BY r.num DESC LIMIT $${params.length}`,
 			params,
 		);
@@ -1342,6 +1693,7 @@ export const pgStore: DataStore = {
 					).rows[0]?.thread_id,
 				)
 			: postIdToThreadId(postId);
+		if (!Number.isFinite(threadId)) return null;
 		const authorId = data.slug ? Number(data.slug) : null;
 		if (authorId == null || !Number.isFinite(authorId)) {
 			throw new Error("addReply には解決済みの投稿者(slug=users.id)が必要です");
@@ -1349,27 +1701,49 @@ export const pgStore: DataStore = {
 
 		// 鍵アカのスレには、スレ主本人とスレ主がフォローしている人しか書き込めない
 		// （見えないスレに返信できると、返信の通知や res_count から存在が漏れる）。
-		const threadParams: any[] = [threadId];
-		const threadVisible = authorVisibleSql(
-			"t.user_id",
-			threadParams,
-			authorId,
+		// reze が書けるのは板1の生きているスレだけ（unj の他の板・削除済みのスレには書かせない）。
+		// unj のスレ規則（!バルス・!バルサン・投稿種別・ID/名前の表示・強制sage）もここで読む。
+		// 書けなかったとき（下の INSERT が0行）に理由を確かめるためにもう一度読むので関数にする。
+		const readThread = async () => {
+			const threadParams: any[] = [threadId];
+			const threadVisible = authorVisibleSql(
+				"t.user_id",
+				threadParams,
+				authorId,
+			);
+			const { rows } = await q(
+				`SELECT t.id, t.user_id, t.board_id, t.res_limit, t.res_count, t.bals_res_num, t.varsan, t.sage,
+               t.content_types_bitmask, t.cc_bitmask, COALESCE(u.is_private, FALSE) AS owner_is_private
+          FROM threads t LEFT JOIN users u ON u.id = t.user_id
+         WHERE t.id = $1 AND t.deleted_at IS NULL AND t.board_id = 1 AND ${threadVisible}`,
+				threadParams,
+			);
+			return rows[0] ?? null;
+		};
+		const thread = await readThread();
+		if (!thread) return null;
+		const isOwner = authorId === Number(thread.user_id);
+
+		// unj（src/server/api/res.ts）と同じスレ規則。reze から書けば素通りできてしまわないように。
+		// 判定は MML の外部化（R2 への書き込み）より前に済ませる（弾く書き込みのために R2 へ上げると、
+		// 削除トークンも返せない孤児が残る）。外部化しても content_type は変わらない
+		// （生MMLが残っていても URL に置き換わっても Dtm）ので、ここで決まる種別で足りる。
+		// 同じ条件は下の INSERT でもロックした行に対して見直す（外部化の間に !バルス された場合など）。
+		assertReplyAllowed(thread, isOwner);
+		threadContentType(
+			thread.content_types_bitmask,
+			deriveInsertContent(data).contentType,
 		);
-		const { rows: threadRows } = await q(
-			`SELECT t.id, t.user_id, t.res_count FROM threads t LEFT JOIN users u ON u.id = t.user_id
-        WHERE t.id = $1 AND t.deleted_at IS NULL AND ${threadVisible}`,
-			threadParams,
-		);
-		if (threadRows.length === 0) return null;
-		const thread = threadRows[0];
+		const resLimit = replyLimitOf(thread);
+		// 埋まっているスレも外部化の前に弾く（res_count は unj と同じく最大のレス番号）。
+		// 正式な判定は下の INSERT（同時に書かれた分はそちらで止まる）
+		if (Number(thread.res_count ?? 1) >= resLimit) throw threadFullError(resLimit);
+
 		const { rows: userRows } = await q(
 			`SELECT display_name, avatar_url, is_private FROM users WHERE id = $1`,
 			[authorId],
 		);
 		const authorIsPrivate = !!userRows[0]?.is_private;
-		if (isThreadFull(Number(thread.res_count ?? 1))) {
-			throw new Error(`このスレッドは上限（${RES_LIMIT}レス）に達しています`);
-		}
 
 		let parentNum = 1;
 		if (
@@ -1388,118 +1762,216 @@ export const pgStore: DataStore = {
 
 		const mmlResolved = await ensureMmlExternalized(data.content, data);
 		const c = deriveInsertContent({ ...data, ...mmlResolved });
-		// num はSERIALではなく手計算(UNIQUE(thread_id,num))なので、競合時はリトライする
+		// 保存する種別（コード進行が許されていないスレではテキスト）。同じ判定を上で通っているので、
+		// ここで投げることはない
+		const contentType = threadContentType(
+			thread.content_types_bitmask,
+			c.contentType,
+		);
+		// ID・名前の表示はスレの cc_bitmask に従う（unj cc.ts の makeCcUserId / makeCcUserName と同じ判定:
+		// 1|2 なら ID、4 なら名前）。NULL は reze 発スレの既定値と同じ扱い。
+		const ccBitmask =
+			thread.cc_bitmask != null ? Number(thread.cc_bitmask) : DEFAULT_CC_BITMASK;
+		// 強制sageのスレではレスも sage にし、スレを上げない（latest_res_at を進めない）
+		const sage = !!thread.sage;
+		// num はSERIALではなく手計算(UNIQUE(thread_id,num))。unj と同じくスレの行を FOR UPDATE で
+		// ロックしてから番号を取り、スレ規則と上限の判定・res の INSERT・threads の更新を1文で行う
+		// （neon の HTTP 経路は1文＝1トランザクション。ファイル先頭「トランザクションについて」）。
+		// 1文なので、ロックを待ったあとも res を読むサブクエリのスナップショットは古いまま
+		// （待っている間に入ったレスが見えない）。一方 FOR UPDATE で取った threads の行は、待ったあとの
+		// 最新版になる（READ COMMITTED の再評価）。unj も reze も、res を入れたトランザクションの中で
+		// res_count を最大のレス番号に揃えるので、番号は GREATEST(t.res_count, MAX(num)) + 1 で取る。
+		// res_count を揃えない書き込みとはそれでもぶつかりうる（23505）ので、少し待って文ごとやり直す。
 		let inserted: any = null;
-		for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
+		for (let attempt = 0; attempt < 5; attempt++) {
 			try {
-				// thread_id は必ず先頭のentry = $1 にする（"num"の相関サブクエリが
-				// thread_id=$1 を直接参照しているため）。
+				// thread_id は必ず先頭のentry = $1 にする（"num"の相関サブクエリと、
+				// ロックする CTE の WHERE が thread_id=$1 を直接参照しているため）。
 				const threadIdEntry: InsertEntry = ["thread_id", val(threadId)];
-				const { text: insertSql, params: insertParams } = buildInsert("res", [
-					threadIdEntry,
-					["num", raw("(SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1)")],
-					["created_at", raw("CURRENT_TIMESTAMP")],
-					["ip", raw("'0.0.0.0'::inet")],
-					["is_owner", val(authorId === Number(thread.user_id))],
-					["sage", raw("FALSE")],
-					["user_id", val(authorId)],
-					// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
-					["cc_user_id", val(genBbsId(authorId, 1))],
-					["cc_user_name", val(data.displayName || "名無し")],
-					["cc_user_avatar", val(0)],
-					["avatar_color", val(data.avatarColor ?? null)],
-					["content_text", val(c.contentText)],
-					["content_url", val(c.contentUrl)],
-					["content_type", val(c.contentType)],
-					["content_data_url", val(c.contentDataUrl)],
-					["mml_delete_id", val(c.mmlDeleteId)],
-					["mml_delete_hash", val(c.mmlDeleteHash)],
-					["image_delete_id", val(imageTokensForInsert(c.contentUrl, data)[0])],
-					["image_delete_hash", val(imageTokensForInsert(c.contentUrl, data)[1])],
-					// createPost と同じ理由でhasImage/MMLも起点にする。
-					// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
+				// このスレの最大のレス番号（採番と上限の判定で共通）。t はロックした threads の行
+				const maxNumSql =
+					"GREATEST(t.res_count, (SELECT COALESCE(MAX(num),1) FROM res WHERE thread_id=$1))";
+				const { text: insertSql, params } = buildInsertSelect(
+					"res",
 					[
-						"has_collab_button",
-						val(
-							!!(
-								data.gameId ||
-								data.mvId ||
-								data.talkId ||
-								data.otomadId ||
-								(data.hasImage && data.imageSrc && data.imageIsDrawn) ||
-								c.contentType === CT.Dtm
+						threadIdEntry,
+						["num", raw(`${maxNumSql}+1`)],
+						["created_at", raw("CURRENT_TIMESTAMP")],
+						["ip", raw("'0.0.0.0'::inet")],
+						["is_owner", val(isOwner)],
+						["sage", val(sage)],
+						["user_id", val(authorId)],
+						// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
+						["cc_user_id", val((ccBitmask & 3) !== 0 ? genBbsId(authorId, 1) : "")],
+						// 名前は unj の名前エスケープを掛けてから（★◆ を偽装させない）
+						[
+							"cc_user_name",
+							val(
+								(ccBitmask & 4) !== 0
+									? sanitizeBbsUserName(data.displayName || "名無し")
+									: "",
 							),
-						),
+						],
+						["cc_user_avatar", val(0)],
+						["avatar_color", val(data.avatarColor ?? null)],
+						["content_text", val(c.contentText)],
+						["content_url", val(c.contentUrl)],
+						["content_type", val(contentType)],
+						["content_data_url", val(c.contentDataUrl)],
+						["mml_delete_id", val(c.mmlDeleteId)],
+						["mml_delete_hash", val(c.mmlDeleteHash)],
+						["image_delete_id", val(imageTokensForInsert(c.contentUrl, data)[0])],
+						["image_delete_hash", val(imageTokensForInsert(c.contentUrl, data)[1])],
+						// createPost と同じ理由でhasImage/MMLも起点にする。
+						// 画像はimageIsDrawn（お絵かき/ドット絵編集由来）のときだけ対象。
+						[
+							"has_collab_button",
+							val(
+								!!(
+									data.gameId ||
+									data.mvId ||
+									data.talkId ||
+									data.otomadId ||
+									(c.contentType === CT.Image && data.imageIsDrawn) ||
+									c.contentType === CT.Dtm
+								),
+							),
+						],
+						["game_id", val(data.gameId ?? null)],
+						["mv_id", val(data.mvId ?? null)],
+						["talk_id", val(data.talkId ?? null)],
+						["otomad_id", val(data.otomadId ?? null)],
+						["parent_num", val(parentNum)],
+						// createPost と同じく共有行に入る値を絞る
+						["origin_type", val(validOriginType(data.originType))],
+						["dot_w", val(dotMetaValue(data.dotW, DOT_META_MAX.dotW))],
+						["dot_h", val(dotMetaValue(data.dotH, DOT_META_MAX.dotH))],
+						["anim_frames", val(dotMetaValue(data.animFrames, DOT_META_MAX.animFrames))],
+						["anim_fps", val(dotMetaValue(data.animFps, DOT_META_MAX.animFps))],
+						["walk_preset", val(data.walkPreset ?? null)],
 					],
-					["game_id", val(data.gameId ?? null)],
-					["mv_id", val(data.mvId ?? null)],
-					["talk_id", val(data.talkId ?? null)],
-					["otomad_id", val(data.otomadId ?? null)],
-					["parent_num", val(parentNum)],
-					["origin_type", val(data.originType ?? null)],
-					["dot_w", val(data.dotW ?? null)],
-					["dot_h", val(data.dotH ?? null)],
-					["anim_frames", val(data.animFrames ?? null)],
-					["anim_fps", val(data.animFps ?? null)],
-					["walk_preset", val(data.walkPreset ?? null)],
-				]);
+					// 上限は unj の res_limit と RES_LIMIT の小さい方（num は SMALLINT、
+					// lib/bbs/thread-limits.ts）。ロックした行が無い（下の条件を満たさない）か上限なら0行
+					`FROM t WHERE ${maxNumSql} < LEAST(COALESCE(t.res_limit, ${RES_LIMIT}), ${RES_LIMIT})`,
+				);
 				// 上のコメント通り thread_id が $1 になっていることを保証する
-				if (insertParams[0] !== threadId) {
+				if (params[0] !== threadId) {
 					throw new Error(
 						"addReply: thread_id が $1 ではありません（num の相関サブクエリが壊れます）",
 					);
 				}
-				const { rows } = await q(`${insertSql} RETURNING *`, insertParams);
-				inserted = rows[0];
+				// ロックする行の条件。上で確かめたスレ規則（!バルス・!バルサン・種別・鍵アカのスレ）を、
+				// ロックした最新の行でもう一度見る（MML の外部化の間に unj で !バルス されていても書かない）
+				params.push(authorId);
+				const authorParam = `$${params.length}`;
+				params.push(contentType);
+				const typeParam = `$${params.length}`;
+				const lockVisible = authorVisibleSql("th.user_id", params, authorId);
+				// res_count は unj と同じく「最大のレス番号」（unj は res_count=num）。
+				// ±1 で数えると、レスの削除や unj 側の書き込みとずれていく。
+				const threadSets = ["res_count = GREATEST(threads.res_count, ins.num)"];
+				// latest_res は unj 側の一覧に本文の抜粋として出るので、鍵アカのレスでは書き換えない
+				if (!authorIsPrivate) {
+					params.push(latestResPreview(data.content));
+					threadSets.push(`latest_res = $${params.length}`);
+				}
+				if (!sage) threadSets.push("latest_res_at = CURRENT_TIMESTAMP");
+				const { rows } = await q(
+					`WITH t AS (
+             SELECT th.id, th.res_limit, th.res_count
+               FROM threads th LEFT JOIN users u ON u.id = th.user_id
+              WHERE th.id = $1 AND th.deleted_at IS NULL AND th.board_id = 1
+                AND th.bals_res_num = 0 AND (NOT th.varsan OR th.user_id = ${authorParam})
+                AND (th.content_types_bitmask IS NULL OR (th.content_types_bitmask & ${typeParam}) <> 0)
+                AND ${lockVisible}
+              FOR UPDATE OF th
+           ), ins AS (
+             ${insertSql}
+             RETURNING *
+           ), upd AS (
+             UPDATE threads SET ${threadSets.join(", ")}
+               FROM ins WHERE threads.id = ins.thread_id
+             RETURNING threads.id
+           )
+           SELECT ins.* FROM ins`,
+					params,
+				);
+				inserted = rows[0] ?? null;
+				break;
 			} catch (e: any) {
 				if (e?.code !== "23505" || attempt === 4) throw e;
+				await sleepBeforeRetry();
 			}
 		}
-
-		// latest_res は unj 側の一覧に本文の抜粋として出るので、鍵アカのレスでは
-		// 書き換えない（age＝latest_res_at だけ進める）。
-		if (authorIsPrivate) {
-			await q(
-				`UPDATE threads SET res_count = res_count + 1, latest_res_at = CURRENT_TIMESTAMP WHERE id = $1`,
-				[threadId],
-			);
-		} else {
-			await q(
-				`UPDATE threads SET res_count = res_count + 1, latest_res = $1, latest_res_at = CURRENT_TIMESTAMP WHERE id = $2`,
-				[
-					(data.content || "")
-						.split("\n")
-						.find((l) => l.trim())
-						?.slice(0, 64) || "",
-					threadId,
-				],
-			);
+		if (!inserted) {
+			// 0行＝ロックした時点で書けなくなっていた。理由を読み直して返す: スレが消えた・板が変わった・
+			// 見えなくなったなら null、!バルス・!バルサン・種別なら 403/400、どれでもなければ上限（409）
+			const latest = await readThread();
+			if (!latest) return null;
+			assertReplyAllowed(latest, isOwner);
+			threadContentType(latest.content_types_bitmask, contentType);
+			throw threadFullError(replyLimitOf(latest));
 		}
 
-		// 通知（返信先の投稿者へ）。自分自身への返信は通知しない
-		if (Number(thread.user_id) !== authorId) {
-			await q(
-				`INSERT INTO notifications (type, actor_user_id, target_user_id, thread_id, res_num)
-         VALUES ('reply', $1, $2, $3, $4)`,
-				[authorId, thread.user_id, threadId, inserted.num],
-			);
-		}
-		// @メンション通知。content 中の @<数値ID> を宛先として解釈する
-		const mentions = [...(data.content || "").matchAll(/@(\d+)/g)].map((m) =>
-			Number(m[1]),
-		);
-		for (const mentionedId of new Set(mentions)) {
-			if (mentionedId === authorId || mentionedId === Number(thread.user_id))
-				continue;
-			const exists = await q(`SELECT 1 FROM users WHERE id = $1`, [
-				mentionedId,
-			]);
-			if (exists.rows.length) {
+		// ここから下はレスを保存した後。通知の失敗で 500 を返すと、利用者が再送して
+		// 同じレスが二重に入るので、失敗はログだけにする。
+		// 宛先は reze の利用者（display_name あり）だけで、システム用 id とブロック関係
+		// （どちら向きでも）の相手には送らない。
+		const blockFree = `NOT EXISTS (SELECT 1 FROM user_blocks b
+          WHERE (b.blocker_user_id = u.id AND b.blocked_user_id = $1)
+             OR (b.blocker_user_id = $1 AND b.blocked_user_id = u.id))`;
+		// 宛先がこのレスを読めること（getPost / getReplies と同じ可視性）。読めない相手に通知すると、
+		// 投稿者・スレ・レスの存在が漏れる（通知を開いても getPost は null）。
+		// 鍵アカの投稿者のレスは、投稿者がフォローしている相手にしか見えない。
+		const replyVisible = authorIsPrivate
+			? ` AND EXISTS (SELECT 1 FROM user_follows af WHERE af.follower_user_id = $1 AND af.followed_user_id = u.id)`
+			: "";
+		// 通知（返信先の投稿者へ）。自分自身への返信は通知しない。スレ主は自分のスレを常に読める
+		if (!isOwner) {
+			try {
 				await q(
 					`INSERT INTO notifications (type, actor_user_id, target_user_id, thread_id, res_num)
-           VALUES ('mention', $1, $2, $3, $4)`,
-					[authorId, mentionedId, threadId, inserted.num],
+           SELECT 'reply', $1, u.id, $3, $4 FROM users u
+            WHERE u.id = $2 AND u.display_name IS NOT NULL AND u.id <> ${SYSTEM_USER_ID}
+              AND ${blockFree}${replyVisible}`,
+					[authorId, Number(thread.user_id), threadId, inserted.num],
 				);
+			} catch (e) {
+				console.warn("[addReply] 返信の通知に失敗しました（レスは保存済み）", e);
+			}
+		}
+		// @メンション通知。content 中の @<数値ID> を宛先として解釈する。
+		// 1文の INSERT ... SELECT にまとめる（1件ずつ SELECT と INSERT を流すと、@ を並べるだけで
+		// Workers のサブリクエスト上限まで DB を叩かせられた）。
+		const mentionIds = mentionTargetsOf(
+			data.content,
+			authorId,
+			Number(thread.user_id),
+		);
+		if (mentionIds.length > 0) {
+			try {
+				const mentionParams: SqlParam[] = [
+					authorId,
+					mentionIds,
+					threadId,
+					inserted.num,
+				];
+				// 鍵アカのスレのレスは、スレ主がフォローしている相手にしか見えない（スレ主はメンションの
+				// 宛先から外してある）。使わない $N を渡すと型が決まらず文ごと失敗するので、要るときだけ足す
+				let threadVisibleToTarget = "";
+				if (thread.owner_is_private) {
+					mentionParams.push(Number(thread.user_id));
+					threadVisibleToTarget = ` AND EXISTS (SELECT 1 FROM user_follows tf WHERE tf.follower_user_id = $${mentionParams.length} AND tf.followed_user_id = u.id)`;
+				}
+				await q(
+					`INSERT INTO notifications (type, actor_user_id, target_user_id, thread_id, res_num)
+           SELECT 'mention', $1, u.id, $3, $4 FROM users u
+            WHERE u.id = ANY($2::int[]) AND u.display_name IS NOT NULL AND u.id <> ${SYSTEM_USER_ID}
+              AND ${blockFree}${replyVisible}${threadVisibleToTarget}`,
+					mentionParams,
+				);
+			} catch (e) {
+				console.warn("[addReply] メンションの通知に失敗しました（レスは保存済み）", e);
 			}
 		}
 
@@ -1527,14 +1999,36 @@ export const pgStore: DataStore = {
 		dotMeta?: DotMetaEdit,
 		imageRef?: ImageDeleteRef,
 	) {
-		const table = isReplyPostId(id) ? "res" : "threads";
-		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
+		const isReply = isReplyPostId(id);
+		const table = isReply ? "res" : "threads";
+		const rawId = isReply ? postIdToResId(id) : postIdToThreadId(id);
+		// 編集できるのは板1の生きているスレとそのレスだけ（reze が扱う板は板1だけ。
+		// unj の他の板や削除済みのスレの行を reze から書き換えさせない）。
+		// is_deleted は deletePost が残したプレースホルダか（本文は大きくなりうるので SQL 側で比べる）
+		const deletedSql = (a: string) =>
+			`(${a}.content_type = ${CT.Text} AND ${a}.content_url = '' AND ${a}.content_text = $2) AS is_deleted`;
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash FROM ${table} WHERE id = $1`,
-			[rawId],
+			isReply
+				? `SELECT r.user_id, r.content_type, r.content_url, r.content_data_url, r.mml_delete_id, r.mml_delete_hash, r.image_delete_id, r.image_delete_hash,
+                  ${deletedSql("r")}, t.bals_res_num, t.content_types_bitmask
+             FROM res r JOIN threads t ON t.id = r.thread_id
+            WHERE r.id = $1 AND t.board_id = 1 AND t.deleted_at IS NULL`
+				: `SELECT t.user_id, t.content_type, t.content_url, t.content_data_url, t.mml_delete_id, t.mml_delete_hash, t.image_delete_id, t.image_delete_hash,
+                  ${deletedSql("t")}
+             FROM threads t WHERE t.id = $1 AND t.board_id = 1 AND t.deleted_at IS NULL`,
+			[rawId, DELETED_POST_TEXT],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return null;
 		const prevRow = rows[0];
+		// 削除済み（プレースホルダ）は書き戻させない。削除で返した削除トークンでクライアントが R2 の
+		// 実体を消したあとに中身を戻せると、番号を保ったままの行が「削除した」はずの内容を指し直す
+		// （通知や >>N アンカーもそのまま生き返る）
+		if (prevRow.is_deleted) return null;
+		// !バルス で終わったスレのレスは書き換えさせない（unj にレスの編集は無く、終わったスレは凍結。
+		// reze から書けば素通りできてしまわないように）。削除はできる
+		if (isReply && Number(prevRow.bals_res_num ?? 0) !== 0) {
+			throw userError("このスレッドは終了しています", 403);
+		}
 
 		const sets: string[] = [];
 		const vals: any[] = [];
@@ -1591,10 +2085,42 @@ export const pgStore: DataStore = {
 		// 再編集しても content が丸ごと再送されてくるので、ここで毎回マーカーの
 		// 有無を確認し、見つかれば都度SQLを流さなくても再編集のタイミングで
 		// content_type/content_data_url を修復する。
+		const hasInlineMml = extractMmlFromContent(content) !== null;
+		const rewritesMml = mml !== undefined || hasInlineMml;
+		// 保存済みの添付画像の再送（本文だけ直した編集でもモーダルは imageSrc を送り直す）は、添付に
+		// 触れない本文だけの編集として扱う。新規保存の規則（deriveInsertContent）に掛け直すと、規則より
+		// 前の行（data: の画像など）の画像や、unj のお絵描き（1024）の種別が編集のたびに落ちる。
+		// 表示でも描かない URL（javascript: など）は保たない（下の分岐で落とす）。
+		const keepsImage =
+			typeof imageSrc === "string" &&
+			imageSrc === (prevRow.content_url || "") &&
+			displayImageUrlOf(imageSrc) !== undefined &&
+			(Number(prevRow.content_type) === CT.Image ||
+				Number(prevRow.content_type) === CT.Oekaki);
+		const rewritesImage = !rewritesMml && imageSrc !== undefined && !keepsImage;
+		// 種別が変わるレスの編集はスレの content_types_bitmask に従う（addReply と同じ規則。テキストで
+		// 書いてから画像や MML に書き換えれば素通りできてしまわないように）。種別が変わらない編集は
+		// 見ない（書いたあとにスレの設定が変わっても、本文の誤字直しはできるように）。スレの OP は
+		// 自分のスレなので見ない（unj のスレ主は reze から編集できない）。
+		const typeFor = (planned: number) =>
+			isReply && planned !== Number(prevRow.content_type)
+				? threadContentType(prevRow.content_types_bitmask, planned)
+				: planned;
+		// 判定は MML の外部化（R2 への書き込み）より前に済ませる（弾く編集のために R2 へ上げない）。
+		// 外部化しても種別は変わらない（生MMLが残っても URL に置き換わっても Dtm）
+		if (rewritesMml || rewritesImage) {
+			typeFor(
+				deriveInsertContent({
+					content,
+					mmlUrl: mml?.mmlUrl,
+					hasImage: !!imageSrc,
+					imageSrc,
+				}).contentType,
+			);
+		}
 		const mmlResolved = await ensureMmlExternalized(content, mml);
 		const needsMmlRewrite = !!mmlResolved.mmlUrl;
-		const hasInlineMml = extractMmlFromContent(content) !== null;
-		if (mml !== undefined || needsMmlRewrite || hasInlineMml) {
+		if (rewritesMml || needsMmlRewrite) {
 			const c = deriveInsertContent({
 				content: mmlResolved.content,
 				mmlUrl: mmlResolved.mmlUrl,
@@ -1605,7 +2131,7 @@ export const pgStore: DataStore = {
 			});
 			push("content_text", c.contentText);
 			push("content_url", c.contentUrl);
-			push("content_type", c.contentType);
+			push("content_type", typeFor(c.contentType));
 			push("content_data_url", c.contentDataUrl);
 			push("mml_delete_id", c.mmlDeleteId);
 			push("mml_delete_hash", c.mmlDeleteHash);
@@ -1614,9 +2140,10 @@ export const pgStore: DataStore = {
 			// MML編集（この分岐）も画像編集（下の分岐）と同じくコラボの起点にする。
 			// c.contentType===CT.Dtm を見落とすとMML埋め込みだけ「コラボ」ボタンが
 			// 一度も出ないまま導線が死ぬ（createPost/addReplyと同じ罠）。
-			if (imageSrc || c.contentType === CT.Dtm)
+			// 画像は deriveInsertContent が画像として残したときだけ（不正な URL は落ちている）
+			if (c.contentType === CT.Image || c.contentType === CT.Dtm)
 				push("has_collab_button", true);
-		} else if (imageSrc !== undefined) {
+		} else if (rewritesImage) {
 			const c = deriveInsertContent({
 				content,
 				hasImage: !!imageSrc,
@@ -1624,7 +2151,7 @@ export const pgStore: DataStore = {
 			});
 			push("content_text", c.contentText);
 			push("content_url", c.contentUrl);
-			push("content_type", c.contentType);
+			push("content_type", typeFor(c.contentType));
 			push("content_data_url", c.contentDataUrl);
 			push("mml_delete_id", c.mmlDeleteId);
 			push("mml_delete_hash", c.mmlDeleteHash);
@@ -1632,20 +2159,37 @@ export const pgStore: DataStore = {
 			setImageTokensIfReplaced(c.contentUrl);
 			// 画像を新たに足した／差し替えた編集はコラボの起点にする。createPost/addReply
 			// と同じ理由（お絵描き投稿は自動的にコラボ可能にする設計）。
-			if (imageSrc) push("has_collab_button", true);
+			if (c.contentType === CT.Image) push("has_collab_button", true);
 		} else {
-			// 添付には触れない、本文だけの編集。既存の content_type/URL は保つ
+			// 添付には触れない、本文だけの編集（同じ画像の再送を含む）。既存の content_type/URL は保つ
 			push("content_text", content);
 		}
-		if (originType !== undefined) push("origin_type", originType);
+		// null は「権利表記を外す」。ORIGIN_TYPE_OPTIONS に無い値は書かない（既存値を保つ。
+		// ルートも検査しているが、共有行に任意の文字列を入れさせない多層防御）
+		if (
+			originType !== undefined &&
+			(originType === null || validOriginType(originType) !== null)
+		)
+			push("origin_type", originType);
 		// ドット絵素材メタの後付け編集。キーが渡された列だけ更新する（省略キーは既存値を保つ、
 		// 値がnullならその列だけクリア）。これを設定した画像は SpriteImage のアニメ/歩行グラ
 		// 再生対象になる＝一般の画像投稿を後からドット絵素材化する唯一の導線。
+		// 範囲外の値（ルートの parseDotMeta が弾くはずのもの）は書かない（SMALLINT の 22003 を避ける）。
 		if (dotMeta) {
-			if ("dotW" in dotMeta) push("dot_w", dotMeta.dotW ?? null);
-			if ("dotH" in dotMeta) push("dot_h", dotMeta.dotH ?? null);
-			if ("animFrames" in dotMeta) push("anim_frames", dotMeta.animFrames ?? null);
-			if ("animFps" in dotMeta) push("anim_fps", dotMeta.animFps ?? null);
+			const pushDot = (
+				col: string,
+				v: number | null | undefined,
+				max: number,
+			) => {
+				if (v == null) push(col, null);
+				else if (dotMetaValue(v, max) !== null) push(col, v);
+			};
+			if ("dotW" in dotMeta) pushDot("dot_w", dotMeta.dotW, DOT_META_MAX.dotW);
+			if ("dotH" in dotMeta) pushDot("dot_h", dotMeta.dotH, DOT_META_MAX.dotH);
+			if ("animFrames" in dotMeta)
+				pushDot("anim_frames", dotMeta.animFrames, DOT_META_MAX.animFrames);
+			if ("animFps" in dotMeta)
+				pushDot("anim_fps", dotMeta.animFps, DOT_META_MAX.animFps);
 			if ("walkPreset" in dotMeta) push("walk_preset", dotMeta.walkPreset ?? null);
 		}
 		push("is_edited", true);
@@ -1673,20 +2217,31 @@ export const pgStore: DataStore = {
 	async deletePost(id: number, userId: string) {
 		if (isReplyPostId(id)) {
 			const resId = postIdToResId(id);
+			// 消せるのは板1のスレのレスだけ（editPost と同じ）
 			const { rows } = await q(
-				`SELECT thread_id, user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash, game_id, mv_id, talk_id, otomad_id FROM res WHERE id = $1`,
+				`SELECT r.thread_id, r.user_id, r.content_type, r.content_url, r.content_data_url, r.mml_delete_id, r.mml_delete_hash, r.image_delete_id, r.image_delete_hash, r.game_id, r.mv_id, r.talk_id, r.otomad_id
+           FROM res r JOIN threads t ON t.id = r.thread_id
+          WHERE r.id = $1 AND t.board_id = 1`,
 				[resId],
 			);
 			if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
 			const row = rows[0];
-			await q(`DELETE FROM res WHERE id = $1`, [resId]);
+			// レスもスレの OP と同じく論理削除（本文を「(削除されました)」に差し替えて添付を全部外す）。
+			// 物理削除すると MAX(num)+1 の採番が消えた番号を再利用し、通知・!age・>>N アンカー・
+			// 専ブラの dat のバイト位置が別のレスを指すようになる。res_count（=最大のレス番号）も減らさない。
 			await q(
-				`UPDATE threads SET res_count = GREATEST(res_count - 1, 1) WHERE id = $1`,
-				[row.thread_id],
+				`UPDATE res SET content_text = $1, content_url = '', content_type = $2,
+         content_data_url = '', mml_delete_id = NULL, mml_delete_hash = NULL,
+         image_delete_id = NULL, image_delete_hash = NULL,
+         game_id = NULL, mv_id = NULL, talk_id = NULL, otomad_id = NULL, dot_w = NULL, dot_h = NULL,
+         anim_frames = NULL, anim_fps = NULL, walk_preset = NULL
+       WHERE id = $3`,
+				[DELETED_POST_TEXT, CT.Text, resId],
 			);
-			// レスは物理削除（=完全に取り消し不能）なので、この時点でMML/ゲーム・MVの
-			// R2オブジェクトを消しても復元不能事故にはならない
-			// （editPostのpreviousMmlと同じトークンの流儀）。
+			// 本文・添付は二度と戻らないので、この時点でMML/画像/ゲーム・MVのR2オブジェクトを
+			// 消しても復元不能事故にはならない（editPostのpreviousMmlと同じトークンの流儀）。
+			// トークンは書き換える前に読んだ行から返す。orphanedManifestRefsOf は game_id 等を
+			// 外した後に呼ぶ（このレス自身の参照を「まだ使われている」と数えないように）。
 			return {
 				threadId: threadToPostId(Number(row.thread_id)),
 				...mmlDeleteRefOf(row),
@@ -1696,7 +2251,7 @@ export const pgStore: DataStore = {
 		}
 		const threadId = postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash, game_id, mv_id, talk_id, otomad_id, res_count FROM threads WHERE id = $1`,
+			`SELECT user_id, content_type, content_url, content_data_url, mml_delete_id, mml_delete_hash, image_delete_id, image_delete_hash, game_id, mv_id, talk_id, otomad_id, res_count FROM threads WHERE id = $1 AND board_id = 1`,
 			[threadId],
 		);
 		if (rows.length === 0 || String(rows[0].user_id) !== userId) return false;
@@ -1705,8 +2260,9 @@ export const pgStore: DataStore = {
 		// deleted_at を立てて丸ごと隠すと、以後どのクエリも t.deleted_at IS NULL で
 		// 除外するため、その返信は物理削除もされないまま「DB上は存在し件数にも数えられるが、
 		// フィード/ハッシュタグ/最新レスのどこからも二度と辿れない」迷子状態になる
-		// （返信=物理削除・スレ=論理削除という非対称性が原因。実際にこれで
-		// 表示不能になった返信を踏んだ）。mock.ts（MockDb.deletePost）は元々これを避けて
+		// （当時の返信=物理削除・スレ=論理削除という非対称性が原因。実際にこれで
+		// 表示不能になった返信を踏んだ。今は返信もプレースホルダ化する論理削除なので、
+		// 返信が1件でも付いたスレは消しても生き続ける）。mock.ts（MockDb.deletePost）は元々これを避けて
 		// 「子を持つ親はプレースホルダ化」する実装だったので、pg側もそれに合わせる：
 		// deleted_at は立てず、本文だけ「(削除されました)」に差し替えて画像/MML/ゲーム/MV/
 		// ドット絵メタを全部クリアする。スレ自体は生き続けるので返信は今まで通り辿れる。
@@ -1718,7 +2274,7 @@ export const pgStore: DataStore = {
          game_id = NULL, mv_id = NULL, talk_id = NULL, otomad_id = NULL, dot_w = NULL, dot_h = NULL,
          anim_frames = NULL, anim_fps = NULL, walk_preset = NULL
        WHERE id = $3`,
-				["(削除されました)", CT.Text, threadId],
+				[DELETED_POST_TEXT, CT.Text, threadId],
 			);
 			// 本文/添付は消えるが行自体とres_countは残るので、消えたR2実体だけ道連れにする
 			// （deleted_atパスと同じ「DB確定後にR2を消す」順序、他投稿から参照が残っていれば
@@ -1764,7 +2320,8 @@ export const pgStore: DataStore = {
 		before?: string,
 	) {
 		const uid = toUid(slug);
-		if (!uid) return [];
+		// システム用 id（次スレ・管理画面の書き込み）は人ではないのでプロフィールを持たない
+		if (!uid || uid === SYSTEM_USER_ID) return [];
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const beforeDate =
 			before && !Number.isNaN(Date.parse(before))
@@ -1773,22 +2330,31 @@ export const pgStore: DataStore = {
 
 		// 鍵アカのプロフィールは、本人と本人がフォローしている人以外には投稿0件
 		// （ヘッダー＝名前・アイコン・自己紹介は見せる。app/api/users/[id] が isPrivate を返す）。
+		// 出すのは reze 利用者（display_name あり）の、板1の、生きているスレとそのレスだけ。
+		// users は unj と共有なので、ここを素通しにすると id を総当たりするだけで unj 利用者の
+		// 全期間・全板の書き込みを人単位で集められる（ファイル先頭「ユーザー識別子」）。
+		// レスはスレ主の可視性（鍵アカのスレ）も見る（getReplies と同じ）。
 		const viewerUid = toUid(userId);
 		const tParams: any[] = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
 		const tVisible = authorVisibleSql("t.user_id", tParams, viewerUid);
+		const tScope = `t.board_id = 1 AND t.deleted_at IS NULL AND u.display_name IS NOT NULL`;
 		const tQuery = beforeDate
 			? `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND t.created_at < $2 AND ${tVisible} ORDER BY t.created_at DESC, t.id DESC LIMIT $3`
+       WHERE t.user_id = $1 AND ${tScope} AND t.created_at < $2 AND ${tVisible} ORDER BY t.created_at DESC, t.id DESC LIMIT $3`
 			: `SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = $1 AND t.deleted_at IS NULL AND ${tVisible} ORDER BY t.id DESC LIMIT $2`;
+       WHERE t.user_id = $1 AND ${tScope} AND ${tVisible} ORDER BY t.id DESC LIMIT $2`;
 
 		const rParams: any[] = beforeDate ? [uid, beforeDate, safeLimit] : [uid, safeLimit];
 		const rVisible = authorVisibleSql("r.user_id", rParams, viewerUid);
+		const rThreadVisible = authorVisibleSql("t.user_id", rParams, viewerUid, "tu");
+		const rFrom = `FROM res r LEFT JOIN users u ON u.id = r.user_id
+       JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id`;
+		const rScope = `t.board_id = 1 AND t.deleted_at IS NULL AND u.display_name IS NOT NULL AND ${rThreadVisible}`;
 		const rQuery = beforeDate
-			? `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.user_id = $1 AND r.created_at < $2 AND ${rVisible} ORDER BY r.created_at DESC, r.id DESC LIMIT $3`
-			: `SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.user_id = $1 AND ${rVisible} ORDER BY r.id DESC LIMIT $2`;
+			? `SELECT r.*, ${AUTHOR_SELECT} ${rFrom}
+       WHERE r.user_id = $1 AND ${rScope} AND r.created_at < $2 AND ${rVisible} ORDER BY r.created_at DESC, r.id DESC LIMIT $3`
+			: `SELECT r.*, ${AUTHOR_SELECT} ${rFrom}
+       WHERE r.user_id = $1 AND ${rScope} AND ${rVisible} ORDER BY r.id DESC LIMIT $2`;
 
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(tQuery, tParams),
@@ -1805,12 +2371,16 @@ export const pgStore: DataStore = {
 	},
 
 	async getUserDisplayName(slug: string) {
-		const uid = Number(slug);
-		if (!Number.isFinite(uid)) return undefined;
+		// reze 利用者でない（display_name が NULL の unj 利用者・システム用 id・存在しない id）なら
+		// undefined。/api/users/[id] と DM の宛先検査はこれで「reze 利用者か」を見分ける。
+		// Number() だと "1.5" が通って integer 列で 22P02 の 500 になるので toUid を通す。
+		const uid = toUid(slug);
+		if (uid === null || uid === SYSTEM_USER_ID) return undefined;
 		const { rows } = await q(`SELECT display_name FROM users WHERE id = $1`, [
 			uid,
 		]);
-		return rows[0]?.display_name ?? undefined;
+		const name = rows[0]?.display_name;
+		return name == null ? undefined : sanitizeBbsUserName(name);
 	},
 
 	async getLikedPosts() {
@@ -1853,7 +2423,8 @@ export const pgStore: DataStore = {
 				actorSlug:
 					r.actor_user_id != null ? String(r.actor_user_id) : undefined,
 				targetSlug: String(r.target_user_id),
-				user: r.actor_name || "名無し",
+				// users.display_name 由来なので resolveDisplayName と同じく不可視文字・★◆ を潰す
+				user: sanitizeBbsUserName(r.actor_name || ""),
 				action: formatNotificationAction(r.type),
 				target: r.thread_title || "",
 				type: r.type,
@@ -1903,8 +2474,10 @@ export const pgStore: DataStore = {
 	async getMessages(userId?: string) {
 		const uid = toUid(userId);
 		if (uid === null) return [];
+		// 本文は MAX_MESSAGE_LENGTH で頭打ちにして読む。上限を入れる前に保存された巨大な DM を
+		// GET の繰り返しで読ませて共有 Neon の転送量を焼かれないように（列も rowToMessage が使う分だけ）
 		const { rows } = await q(
-			`SELECT * FROM messages WHERE sender_user_id = $1 OR recipient_user_id = $1 ORDER BY created_at DESC LIMIT 100`,
+			`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE sender_user_id = $1 OR recipient_user_id = $1 ORDER BY created_at DESC LIMIT 100`,
 			[uid],
 		);
 		return rows.map(rowToMessage);
@@ -1914,9 +2487,9 @@ export const pgStore: DataStore = {
 		const pid = toUid(partnerId);
 		if (uid === null || pid === null) return [];
 		const { rows } = await q(
-			`SELECT * FROM messages WHERE (sender_user_id=$1 AND recipient_user_id=$2) OR (sender_user_id=$2 AND recipient_user_id=$1)
+			`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE (sender_user_id=$1 AND recipient_user_id=$2) OR (sender_user_id=$2 AND recipient_user_id=$1)
        ORDER BY created_at DESC LIMIT $3`,
-			[uid, pid, limit],
+			[uid, pid, Math.max(1, Math.min(Number(limit) || 100, 100))],
 		);
 		return rows.map(rowToMessage);
 	},
@@ -1943,10 +2516,44 @@ export const pgStore: DataStore = {
 		const recipientId = data.recipient ? toUid(data.recipient) : null;
 		if (data.recipient && recipientId === null)
 			throw new Error("invalid recipient");
-		const { rows } = await q(
-			`INSERT INTO messages (sender_user_id, recipient_user_id, text) VALUES ($1,$2,$3) RETURNING *`,
-			[senderId, recipientId, data.text],
-		);
+		// ルート（app/api/messages）も検査するが、DM は読み出しのたびに転送量になるので
+		// 保存する側でも型と長さを縛る。自分宛ては初回DM制限（getDmGate）が外れるので不可
+		if (
+			typeof data.text !== "string" ||
+			!data.text.trim() ||
+			data.text.length > MAX_MESSAGE_LENGTH
+		) {
+			throw userError(
+				`メッセージは1〜${MAX_MESSAGE_LENGTH}文字で入力してください`,
+				400,
+			);
+		}
+		if (recipientId !== null && recipientId === senderId) {
+			throw userError("自分にはDMを送れません", 400);
+		}
+		let rows: any[];
+		try {
+			// 初回DM制限（lib/social/dm-rules.ts canSendDm: 相手から返信があるか、まだ1通も送っていない）を
+			// INSERT と同じ1文でも見る。ルートの getDmGate と INSERT の間に同時に投げた分が全部
+			// 「sent=0」で通らないように（READ COMMITTED なので完全ではないが、すり抜けられる幅はずっと狭い。
+			// addOshiItem と同じ考え方）
+			({ rows } = await q(
+				`INSERT INTO messages (sender_user_id, recipient_user_id, text)
+         SELECT $1::int, $2::int, $3::text
+          WHERE $2::int IS NULL
+             OR EXISTS (SELECT 1 FROM messages WHERE sender_user_id = $2::int AND recipient_user_id = $1::int)
+             OR NOT EXISTS (SELECT 1 FROM messages WHERE sender_user_id = $1::int AND recipient_user_id = $2::int)
+         RETURNING ${MESSAGE_COLUMNS}`,
+				[senderId, recipientId, data.text],
+			));
+		} catch (e: any) {
+			// 23503 = 外部キー違反＝存在しない users.id 宛て。500 にせず利用者向けの 404 にする
+			if (e?.code === "23503") throw userError("宛先が見つかりません", 404);
+			throw e;
+		}
+		if (rows.length === 0) {
+			throw userError("相手から返信があるまで、送れるのは1通までです", 403);
+		}
 		// 配信は呼び出し側（app/api/messages/route.ts）が担う。そちらは
 		// chUser(sender)/chUser(recipient) 双方へ送る（送信者自身の他タブにも
 		// 即時反映するため）ので、ここでも publish すると mock には無いpg限定の
@@ -1958,15 +2565,21 @@ export const pgStore: DataStore = {
 		try {
 			// 鍵アカ・検索除外（is_private / hide_from_search）の投稿はトレンドに数えない。
 			// 該当ユーザーは少数なので NOT IN のハッシュ化サブプランで足りる。
+			// レスは板1の生きているスレのものだけ（他の板・削除済みのスレの本文を数えない）。
+			// 鍵アカのスレに付いたレスは閲覧者に見えないので、スレ主が鍵アカなら数えない。
 			const { rows } = await q(`
-        WITH excluded AS (SELECT id FROM users WHERE is_private OR hide_from_search)
+        WITH excluded AS (SELECT id FROM users WHERE is_private OR hide_from_search),
+             private_owners AS (SELECT id FROM users WHERE is_private)
         SELECT '#' || m[1] AS keyword, COUNT(*) AS count FROM (
           SELECT regexp_replace(content_text, 'https?://[^\\s]+|www\\.[^\\s]+', '', 'gi') AS cleaned
           FROM (
             SELECT content_text FROM threads WHERE board_id = 1 AND deleted_at IS NULL
               AND user_id NOT IN (SELECT id FROM excluded)
             UNION ALL
-            SELECT content_text FROM res WHERE user_id NOT IN (SELECT id FROM excluded)
+            SELECT r.content_text FROM res r JOIN threads t ON t.id = r.thread_id
+             WHERE t.board_id = 1 AND t.deleted_at IS NULL
+               AND r.user_id NOT IN (SELECT id FROM excluded)
+               AND t.user_id NOT IN (SELECT id FROM private_owners)
           ) c
         ) p, LATERAL regexp_matches(p.cleaned, '(?:^|\\s)#([^\\s#]+)', 'g') AS m
         WHERE m[1] !~ '^\\d+$'
@@ -1997,10 +2610,14 @@ export const pgStore: DataStore = {
        ORDER BY t.id DESC LIMIT $2`,
 			tParams,
 		);
+		// レスは板1の生きているスレのものだけ、スレ主が鍵アカで見えないスレのレスも出さない
+		// （getReplies と同じ。検索からスレの中身を覗けないように）
 		const rParams: any[] = [like, safeLimit];
-		const rFilter = `${authorVisibleSql("r.user_id", rParams, viewerUid)} AND ${searchableSql("r.user_id", rParams, viewerUid)}`;
+		const rFilter = `${authorVisibleSql("r.user_id", rParams, viewerUid)} AND ${searchableSql("r.user_id", rParams, viewerUid)}
+         AND t.board_id = 1 AND t.deleted_at IS NULL AND ${authorVisibleSql("t.user_id", rParams, viewerUid, "tu")}`;
 		const { rows: rRows } = await q(
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
+         JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id
        WHERE (r.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1 ESCAPE '!')
          AND ${rFilter}
        ORDER BY r.id DESC LIMIT $2`,
@@ -2027,15 +2644,19 @@ export const pgStore: DataStore = {
 		offset = 0,
 		before?: string,
 	) {
-		const safeLimit = Math.max(1, Math.min(limit, 50));
+		// 51 まで。ルート（app/api/media-search）は hasMore の判定に limit+1 件を要求するので、
+		// 50 で切ると hasMore が常に false になっていた
+		const safeLimit = Math.max(1, Math.min(limit, 51));
 		const beforeDate = before ? new Date(before) : null;
 		const cursor =
 			beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : null;
 		const safeOffset = cursor ? 0 : Math.max(0, offset);
+		// offset で深く遡らせない（1回で threads/res を各数百行読ませて転送量を焼けた）。
+		// 深く遡るのは before カーソルで行う（タイムラインのメディア欄はそちらを使う）
+		if (safeOffset > 100) return [];
 		// threads/res をマージしてから offset+limit 件目で切るため、各テーブルからは
 		// 「新しい順で offset+limit 件」だけ引けば十分（全件取得は egress を壊す）。
-		// offset は 200 件で頭打ちなので、深く遡るのは before カーソルで行う。
-		const fetchEach = Math.min(safeOffset + safeLimit, 200);
+		const fetchEach = Math.min(safeOffset + safeLimit, 151);
 		const contentType = kind === "image" ? CT.Image : CT.Dtm;
 		const trimmed = query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH);
 		const params: any[] = [contentType];
@@ -2051,28 +2672,45 @@ export const pgStore: DataStore = {
 			params.push(cursor.toISOString());
 			where += ` AND created_at < $${params.length}`;
 		}
-		params.push(fetchEach);
 		const scoped = (alias: string) =>
 			where.replace(
 				/\b(content_type|content_text|cc_user_name|created_at|user_id)\b/g,
 				`${alias}.$1`,
 			);
+		// レス側だけはスレ主の可視性（鍵アカのスレ）も見る。params を分けるのは、使わない $N が
+		// 混ざると Postgres が型を決められずに文ごと失敗するため。scoped() の置き換えの後に足す
+		// （置き換えに掛けると t.user_id が t.r.user_id に化ける）。
+		const rParams = [...params];
+		const rThreadVisible = authorVisibleSql("t.user_id", rParams, viewerUid, "tu");
+		params.push(fetchEach);
+		const tLimit = params.length;
+		rParams.push(fetchEach);
+		const rLimit = rParams.length;
+		// ピッカーに要るのは本文の見出しだけ。MML は data URL があれば本文は見出しで足り、
+		// 外部化されていない古い投稿だけ本文そのもの（インライン MML）が要る（ContentPicker）
+		const contentCol = (a: string) =>
+			kind === "image"
+				? `LEFT(${a}.content_text, 200) AS content_text`
+				: `CASE WHEN ${a}.content_data_url <> '' THEN LEFT(${a}.content_text, 200) ELSE ${a}.content_text END AS content_text`;
 
 		// thread と res は id 空間が別なので、両者を混ぜて並べるのは created_at で行う。
+		// どちらも板1・生きているスレのものだけ（reze が扱う板は板1だけ）。
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(
-				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, t.dot_w, t.dot_h, t.anim_frames, t.anim_fps, t.walk_preset, t.created_at, t.good_count, t.bad_count, t.res_count, ${AUTHOR_SELECT}
+				`SELECT t.id, t.user_id, ${contentCol("t")}, t.content_url, t.content_data_url, t.origin_type, t.dot_w, t.dot_h, t.anim_frames, t.anim_fps, t.walk_preset, t.created_at, t.good_count, t.bad_count, t.res_count, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
-          WHERE t.deleted_at IS NULL AND ${scoped("t")}
-          ORDER BY t.created_at DESC LIMIT $${params.length}`,
+          WHERE t.deleted_at IS NULL AND t.board_id = 1 AND ${scoped("t")}
+          ORDER BY t.created_at DESC LIMIT $${tLimit}`,
 				params,
 			),
 			q(
-				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, r.dot_w, r.dot_h, r.anim_frames, r.anim_fps, r.walk_preset, r.created_at, r.good_count, r.bad_count, ${AUTHOR_SELECT}
+				`SELECT r.id, r.thread_id, r.user_id, ${contentCol("r")}, r.content_url, r.content_data_url, r.origin_type, r.dot_w, r.dot_h, r.anim_frames, r.anim_fps, r.walk_preset, r.created_at, r.good_count, r.bad_count, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
+           JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id
           WHERE ${scoped("r")}
-          ORDER BY r.created_at DESC LIMIT $${params.length}`,
-				params,
+            AND t.deleted_at IS NULL AND t.board_id = 1 AND ${rThreadVisible}
+          ORDER BY r.created_at DESC LIMIT $${rLimit}`,
+				rParams,
 			),
 		]);
 		// hide_reactions の投稿者は本人以外に数を見せない（finalizeForViewer と同じ扱い）
@@ -2080,14 +2718,33 @@ export const pgStore: DataStore = {
 			r.author_hide_reactions && String(r.user_id) !== userId
 				? 0
 				: Number(n ?? 0);
+		// 表示名は reze 利用者の display_name だけ（resolveDisplayName と同じく名前エスケープを掛け、
+		// システム用 id の名前は出さない）
+		const mediaName = (r: any) =>
+			r.author_display_name && Number(r.user_id) !== SYSTEM_USER_ID
+				? sanitizeBbsUserName(r.author_display_name)
+				: "名無し";
+		// data URL がある MML 行の本文は上の SQL で 200 字に切ってある。そこにインラインの MML 行が
+		// 残っていると（クライアントが行をマーカーに差し替えずに mmlUrl だけ送った行など）、ピッカーは
+		// URL より本文の MML を優先するので、途中で切れた曲を丸ごとの曲として使ってしまう。
+		// 切った本文ではマーカー行をマーカーだけにして、曲は必ず mmlUrl から取らせる。
+		const mediaContent = (r: any): string => {
+			const text: string = r.content_text ?? "";
+			return kind === "mml" && r.content_data_url
+				? replaceMmlWithMarker(text)
+				: text;
+		};
 		const out: DbMediaSearchPost[] = [
 			...tRows.map(
 				(r): DbMediaSearchPost => ({
 					id: threadToPostId(Number(r.id)),
-					displayName: r.author_display_name || "名無し",
-					content: r.content_text ?? "",
-					imageSrc: r.content_url || undefined,
-					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					displayName: mediaName(r),
+					content: mediaContent(r),
+					imageSrc: imageUrlOf(r.content_url),
+					mmlUrl:
+						kind === "mml"
+							? absoluteUrlOf(r.content_data_url, HTTPS_ONLY)
+							: undefined,
 					dotW: r.dot_w != null ? Number(r.dot_w) : undefined,
 					dotH: r.dot_h != null ? Number(r.dot_h) : undefined,
 					animFrames: r.anim_frames != null ? Number(r.anim_frames) : undefined,
@@ -2104,10 +2761,13 @@ export const pgStore: DataStore = {
 			...rRows.map(
 				(r): DbMediaSearchPost => ({
 					id: resToPostId(Number(r.id)),
-					displayName: r.author_display_name || "名無し",
-					content: r.content_text ?? "",
-					imageSrc: r.content_url || undefined,
-					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					displayName: mediaName(r),
+					content: mediaContent(r),
+					imageSrc: imageUrlOf(r.content_url),
+					mmlUrl:
+						kind === "mml"
+							? absoluteUrlOf(r.content_data_url, HTTPS_ONLY)
+							: undefined,
 					dotW: r.dot_w != null ? Number(r.dot_w) : undefined,
 					dotH: r.dot_h != null ? Number(r.dot_h) : undefined,
 					animFrames: r.anim_frames != null ? Number(r.anim_frames) : undefined,
@@ -2158,49 +2818,85 @@ export const pgStore: DataStore = {
 	// 認証・プロフィール
 	// ==========================================================================
 	async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
-		const { rows: tokRows } = await q(
-			`SELECT u.* FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1 AND t.kind = 'reze' LIMIT 1`,
-			[sessionId],
-		);
-		if (tokRows.length) {
-			await q(
-				`UPDATE auth_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = $1`,
+		// 既存のセッションか。unj の署名トークンは reze のセッションとして扱わない（rezeTokenOk）。
+		// 以前は kind='reze' だけを見ていたので、既定値 kind='unj' のまま入った昔の reze セッションは
+		// 見つからず、トークンの INSERT が衝突して黙って捨てられたまま毎回新しいユーザーを作っていた
+		// （孤児の users 行が増え、本人は元のアカウントに戻れない）。
+		// reze_ok で「行はあるが使えないトークン」も同じ1回の照会で見分ける。
+		const lookup = async () => {
+			const { rows } = await q(
+				`SELECT u.*, ${rezeTokenOk("t")} AS reze_ok FROM auth_tokens t JOIN users u ON u.id = t.user_id
+          WHERE t.token = $1 LIMIT 1`,
 				[sessionId],
 			);
-			return userRowToAnonymousUser(tokRows[0]);
+			return rows[0] as (Record<string, any> & { reze_ok: boolean }) | undefined;
+		};
+		const usableOrThrow = (row: { reze_ok: boolean }) => {
+			// unj のトークン（他人の unj アカウント）。孤児を作らず、利用者向けの 400 にする
+			if (!row.reze_ok) throw userError("このセッションIDは使えません", 400);
+		};
+		const existing = await lookup();
+		if (existing) {
+			usableOrThrow(existing);
+			// unj が書いた行には触らない（ここに来るのは rezeTokenOk を満たす行だけだが念のため同じ条件）
+			await q(
+				`UPDATE auth_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = $1 AND ${rezeTokenOk("auth_tokens")}`,
+				[sessionId],
+			);
+			return userRowToAnonymousUser(existing);
 		}
 		// 新規ユーザー。unj同様、表示名は「名無し」+ ランダム3文字
 		const suffix = Math.random().toString(36).slice(2, 5);
 		const displayName = `名無し${suffix}`;
+		const ipv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(ipAddress) ? ipAddress : null;
 		const { rows } = await q(
 			`INSERT INTO users (created_at, updated_at, last_seen_at, ip, display_name, avatar_color)
        VALUES (CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, COALESCE($1::inet,'0.0.0.0'::inet), $2, 'from-blue-500 to-indigo-600')
        RETURNING *`,
-			[
-				/^\d{1,3}(\.\d{1,3}){3}$/.test(ipAddress) ? ipAddress : null,
-				displayName,
-			],
+			[ipv4, displayName],
 		);
 		const user = rows[0];
-		await q(
+		const { rows: tokenRows } = await q(
 			`INSERT INTO auth_tokens (user_id, token, ip, kind) VALUES ($1,$2,COALESCE($3::inet,'0.0.0.0'::inet),'reze')
-       ON CONFLICT (token) DO NOTHING`,
-			[
-				user.id,
-				sessionId,
-				/^\d{1,3}(\.\d{1,3}){3}$/.test(ipAddress) ? ipAddress : null,
-			],
+       ON CONFLICT (token) DO NOTHING RETURNING id`,
+			[user.id, sessionId, ipv4],
 		);
+		if (tokenRows.length === 0) {
+			// 同じセッションIDでの同時作成に負けた。いま作ったユーザーは誰にも紐づかない孤児になるので
+			// 消して、先に入ったトークンの持ち主を返す
+			await q(`DELETE FROM users WHERE id = $1`, [user.id]);
+			const winner = await lookup();
+			if (!winner) {
+				throw userError(
+					"セッションの作成が混み合っています。もう一度お試しください",
+					409,
+				);
+			}
+			usableOrThrow(winner);
+			return userRowToAnonymousUser(winner);
+		}
 		return userRowToAnonymousUser(user);
 	},
 
+	/**
+	 * 照会だけ（作成しない）。unj の署名トークンは除外する（rezeTokenOk）。
+	 * `bbscgi:` のトークン（kind='reze'）は引ける。bbs.cgi が IPv6 の旧キーの利用者を探すのに使う。
+	 */
 	async getAnonymousUserBySession(sessionId: string) {
 		const { rows } = await q(
-			`SELECT u.* FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1 LIMIT 1`,
+			`SELECT u.* FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1 AND ${rezeTokenOk("t")} LIMIT 1`,
 			[sessionId],
 		);
 		if (!rows.length) return null;
 		return userRowToAnonymousUser(rows[0]);
+	},
+
+	async touchAnonymousSession(sessionId: string) {
+		// getOrCreateAnonymousUser の既存セッションの経路と同じ UPDATE だけ（SELECT を省く）
+		await q(
+			`UPDATE auth_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = $1 AND ${rezeTokenOk("auth_tokens")}`,
+			[sessionId],
+		);
 	},
 
 	async updateUserDisplayName(
@@ -2217,7 +2913,10 @@ export const pgStore: DataStore = {
 			vals.push(v);
 			sets.push(`${col} = $${vals.length}`);
 		};
-		if (displayName !== undefined) push("display_name", displayName);
+		// 表示名は unj の名前エスケープ（★◆■●【】）と不可視文字の除去を掛けてから保存する。
+		// そのまま cc_user_name に写ると unj でキャップ・トリップに見えるため（lib/bbs/user-name.ts）
+		if (displayName !== undefined)
+			push("display_name", sanitizeBbsUserName(displayName));
 		if (avatarUrl !== undefined) push("avatar_url", avatarUrl);
 		if (bio !== undefined) push("bio", bio);
 		if (sets.length === 0) return;
@@ -2246,8 +2945,9 @@ export const pgStore: DataStore = {
 	async listOshiItems(userSlug: string) {
 		const uid = toUid(userSlug);
 		if (uid === null) return [];
+		// 件数の上限を入れる前に溜まった分があっても、一覧で読むのは MAX_OSHI_ITEMS 件まで
 		const { rows } = await q(
-			`SELECT * FROM oshi_items WHERE owner_user_id = $1 ORDER BY position`,
+			`SELECT * FROM oshi_items WHERE owner_user_id = $1 ORDER BY position LIMIT ${MAX_OSHI_ITEMS}`,
 			[uid],
 		);
 		return rows.map(rowToOshiItem);
@@ -2255,28 +2955,35 @@ export const pgStore: DataStore = {
 	async addOshiItem(userSlug: string, data: AddOshiItemParams) {
 		const uid = toUid(userSlug);
 		if (uid === null) throw new Error("invalid userSlug");
-		const { rows: posRows } = await q(
-			`SELECT COALESCE(MAX(position),-1)+1 AS next_pos FROM oshi_items WHERE owner_user_id = $1`,
-			[uid],
-		);
-		const position = posRows[0].next_pos;
+		// iTunes の ID は BIGINT 列。NaN や小数をそのまま渡すと 22P02 で 500 になるので、
+		// 正の安全な整数以外は「無し」にする
+		const itunesId = (v: unknown) =>
+			typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : null;
+		// 件数の上限（上限なしだとプロフィールを開くたびの読み出しが際限なく膨らむ）と次の並び順を、
+		// INSERT と同じ1文で見る。数えてから別の文で入れると、同時に投げたぶんが全部上限の判定を
+		// すり抜けた（READ COMMITTED なので完全には防げないが、すり抜けられる幅はずっと狭い）
 		const { rows } = await q(
 			`INSERT INTO oshi_items (owner_user_id, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, preview_url, position)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+              (SELECT COALESCE(MAX(position),-1)+1 FROM oshi_items WHERE owner_user_id = $1)
+        WHERE (SELECT COUNT(*) FROM oshi_items WHERE owner_user_id = $1) < ${MAX_OSHI_ITEMS}
+       RETURNING *`,
 			[
 				uid,
 				data.kind,
-				data.trackId ?? null,
-				data.collectionId ?? null,
-				data.artistId ?? null,
+				itunesId(data.trackId),
+				itunesId(data.collectionId),
+				itunesId(data.artistId),
 				data.title,
 				data.subtitle ?? null,
 				data.artworkUrl ?? null,
 				data.viewUrl ?? null,
 				data.previewUrl ?? null,
-				position,
 			],
 		);
+		if (rows.length === 0) {
+			throw userError(`推しリストは${MAX_OSHI_ITEMS}件までです`, 400);
+		}
 		return rowToOshiItem(rows[0]);
 	},
 	async removeOshiItem(userSlug: string, id: number) {
@@ -2363,11 +3070,18 @@ export const pgStore: DataStore = {
 		// 引き換える側のセッションはページを開いた時点で新規ユーザーに紐づいている
 		// （getOrCreateAnonymousUser）。DO NOTHING だとその紐づけが残って引き換えが空振りする
 		// ので、既存の行を移行元のユーザーへ付け替える（mock の sessionToUser.set と同じ）。
-		await q(
+		// ただし unj の署名トークンの行（unj が書いた行）は付け替えない（rezeTokenOk）。
+		// 付け替えを許すと、reze から unj の行の user_id を書き換えられ、unj が無効にした
+		// トークンを reze のセッションとして生き返らせる経路にもなる。
+		// 更新されなければ 0 行で、引き換えは失敗（移行トークンは上で消費済み）。
+		const { rows: bound } = await q(
 			`INSERT INTO auth_tokens (user_id, token, kind) VALUES ($1,$2,'reze')
-       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, last_used_at = CURRENT_TIMESTAMP`,
+       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, last_used_at = CURRENT_TIMESTAMP
+       WHERE ${rezeTokenOk("auth_tokens")}
+       RETURNING user_id`,
 			[userId, newSessionId],
 		);
+		if (bound.length === 0) return null;
 		return userRowToAnonymousUser(userRows[0]);
 	},
 
@@ -2380,14 +3094,14 @@ export const pgStore: DataStore = {
 		const to = toUid(followedId);
 		if (from === null || to === null) return;
 		await q(
-			`INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+			`INSERT INTO user_follows (follower_user_id, followed_user_id) SELECT $1::int, $2::int WHERE ${rezeTargetSql("$2::int")} ON CONFLICT DO NOTHING`,
 			[from, to],
 		);
 		// 未読の同一フォロー通知が既にあれば増やさない（フォロー解除→再フォロー連打での重複対策）
 		await q(
 			`INSERT INTO notifications (type, actor_user_id, target_user_id)
        SELECT 'follow', $1, $2
-       WHERE NOT EXISTS (
+       WHERE ${rezeTargetSql("$2::int")} AND NOT EXISTS (
          SELECT 1 FROM notifications
           WHERE type = 'follow' AND actor_user_id = $1 AND target_user_id = $2 AND read = FALSE
        )`,
@@ -2457,7 +3171,7 @@ export const pgStore: DataStore = {
 		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
-			`INSERT INTO user_blocks (blocker_user_id, blocked_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+			`INSERT INTO user_blocks (blocker_user_id, blocked_user_id) SELECT $1::int, $2::int WHERE ${rezeTargetSql("$2::int")} ON CONFLICT DO NOTHING`,
 			[from, to],
 		);
 	},
@@ -2487,7 +3201,7 @@ export const pgStore: DataStore = {
 		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
-			`INSERT INTO user_mutes (muter_user_id, muted_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+			`INSERT INTO user_mutes (muter_user_id, muted_user_id) SELECT $1::int, $2::int WHERE ${rezeTargetSql("$2::int")} ON CONFLICT DO NOTHING`,
 			[from, to],
 		);
 	},
@@ -2512,14 +3226,17 @@ export const pgStore: DataStore = {
 	},
 
 	async reportContent(data: ReportParams) {
+		// 同じ人の同じ対象への通報は1件だけ、1人1日 MAX_REPORTS_PER_DAY 件まで（連打で reports を
+		// 膨らませない）。弾いても呼び出し側は成功として返すので、ここは黙って何もしない
+		const reporter = toUid(data.reporterSlug);
 		await q(
-			`INSERT INTO reports (reporter_user_id, target_type, target_id, reason) VALUES ($1,$2,$3,$4)`,
-			[
-				Number(data.reporterSlug) || null,
-				data.targetType,
-				data.targetId,
-				data.reason,
-			],
+			`INSERT INTO reports (reporter_user_id, target_type, target_id, reason)
+       SELECT $1::int, $2::text, $3::text, $4::text
+        WHERE $1::int IS NULL
+           OR (NOT EXISTS (SELECT 1 FROM reports WHERE reporter_user_id = $1::int AND target_type = $2::text AND target_id = $3::text)
+               AND (SELECT COUNT(*) FROM reports WHERE reporter_user_id = $1::int
+                     AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 day') < ${MAX_REPORTS_PER_DAY})`,
+			[reporter, data.targetType, data.targetId, data.reason],
 		);
 	},
 
@@ -2786,7 +3503,8 @@ export const pgStore: DataStore = {
 				data.countPlay === false ? 0 : 1,
 				data.cleared ? 1 : 0,
 				score,
-				data.displayName || "名無し",
+				// ハイスコア欄に出る名前。表示名と同じく不可視文字・★◆ を潰す
+				sanitizeBbsUserName(data.displayName || "名無し"),
 			],
 		);
 		return rows.length ? rowToGame(rows[0]) : null;
@@ -2834,14 +3552,18 @@ export const pgStore: DataStore = {
 			const lastSlot = new Date(Date.now() - 3600_000)
 				.toISOString()
 				.slice(0, 13);
+			// 鍵アカが作ったゲームは投票の勝者・抽選・候補のどれにも出さない（listAllGames と同じ。
+			// 投稿が見えないのに作品だけ「今の注目ゲーム」として全員に出ると存在が漏れる）
 			const { rows: vote } = await q(
-				`SELECT game_id, COUNT(*) AS cnt FROM game_votes WHERE hour_slot=$1 GROUP BY game_id ORDER BY cnt DESC LIMIT 1`,
+				`SELECT v.game_id, COUNT(*) AS cnt FROM game_votes v JOIN games g ON g.id = v.game_id
+          WHERE v.hour_slot=$1 AND ${publicCreatorSql("g")}
+          GROUP BY v.game_id ORDER BY cnt DESC LIMIT 1`,
 				[lastSlot],
 			);
 			if (vote.length) gameId = Number(vote[0].game_id);
 			else {
 				const { rows: rnd } = await q(
-					`SELECT id FROM games ORDER BY RANDOM() LIMIT 1`,
+					`SELECT id FROM games WHERE ${PUBLIC_CREATOR_SQL} ORDER BY RANDOM() LIMIT 1`,
 				);
 				if (rnd.length) gameId = Number(rnd[0].id);
 			}
@@ -2854,16 +3576,21 @@ export const pgStore: DataStore = {
 		let gameTitle = "";
 		let gamePreset = "";
 		if (gameId) {
-			const { rows } = await q(`SELECT preset, title FROM games WHERE id=$1`, [
-				gameId,
-			]);
+			// 枠が決まったあと（この変更より前に決まった枠や、作者が後から鍵アカにした場合）でも、
+			// 鍵アカの作品は出さない。その枠は「今のゲーム無し」として返す（投稿 id も題名も返さない）
+			const { rows } = await q(
+				`SELECT preset, title FROM games WHERE id=$1 AND ${PUBLIC_CREATOR_SQL}`,
+				[gameId],
+			);
 			if (rows.length) {
 				gameTitle = rows[0].title;
 				gamePreset = rows[0].preset;
+			} else {
+				gameId = null;
 			}
 		}
 		const { rows: all } = await q(
-			`SELECT id, preset, title, created_at FROM games ORDER BY id DESC LIMIT 30`,
+			`SELECT id, preset, title, created_at FROM games WHERE ${PUBLIC_CREATOR_SQL} ORDER BY id DESC LIMIT 30`,
 		);
 		const { rows: vc } = await q(
 			`SELECT game_id, COUNT(*) AS cnt FROM game_votes WHERE hour_slot=$1 GROUP BY game_id`,
@@ -2933,11 +3660,23 @@ async function voteOnPost(
 ): Promise<DbPost | null> {
 	const table = isReplyPostId(id) ? "res" : "threads";
 	const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
-	await q(`UPDATE ${table} SET ${column} = ${column} + 1 WHERE id = $1`, [
-		rawId,
-	]);
-	// 押した本人の視点で返す（鍵アカの投稿を viewer 無しで引くと null＝404 になる）
-	return pgStore.getPost(id, actorId, { withReplies: false });
+	// 先に押した本人の視点で見えるかを確かめる。id を直接指定すれば鍵アカ・削除済み・他板の
+	// 投稿にも加算・通知できていた（見えない投稿の存在確認にもなる）。
+	// viewer 無しで引くと鍵アカの投稿が null＝404 になるので本人の視点で引く。
+	const post = await pgStore.getPost(id, actorId, { withReplies: false });
+	if (!post) return null;
+	// good_count/bad_count は SMALLINT。32767 を超える加算は 22003 になり、以後その投稿への
+	// いいねが unj・reze の両方で失敗し続けるので頭打ちにする。
+	const { rows } = await q<{ n: number }>(
+		`UPDATE ${table} SET ${column} = LEAST(${column} + 1, 32767) WHERE id = $1 RETURNING ${column} AS n`,
+		[rawId],
+	);
+	// 読み直さずに加算後の値だけ差し替える（hide_reactions で伏せている数は伏せたまま）
+	if (rows[0] && !post.reactionsHidden) {
+		if (column === "good_count") post.likes = Number(rows[0].n);
+		else post.dislikes = Number(rows[0].n);
+	}
+	return post;
 }
 
 // like/heart/repost の相手に通知する。自分の投稿への自作自演と、未読の同一通知の
@@ -2960,13 +3699,16 @@ async function notifyPostAction(
 	const row = rows[0];
 	if (!row || row.user_id == null) return;
 	const targetUid = Number(row.user_id);
-	if (targetUid === actorUid) return;
+	if (targetUid === actorUid || targetUid === SYSTEM_USER_ID) return;
 	const threadId = Number(row.thread_id);
 	const resNum = isReply ? Number(row.num) : null;
+	// 宛先は reze の利用者（display_name あり）だけ。unj だけの利用者は reze の通知を読む手段が無く
+	// （unj のトークンは reze のセッションにならない: rezeTokenOk）、共有 DB に読まれない行が溜まるだけ。
 	await q(
 		`INSERT INTO notifications (type, actor_user_id, target_user_id, thread_id, res_num)
      SELECT $1, $2, $3, $4, $5
-     WHERE NOT EXISTS (
+     WHERE EXISTS (SELECT 1 FROM users WHERE id = $3 AND display_name IS NOT NULL)
+       AND NOT EXISTS (
        SELECT 1 FROM notifications
         WHERE type = $1 AND actor_user_id = $2 AND target_user_id = $3
           AND thread_id = $4 AND res_num IS NOT DISTINCT FROM $5 AND read = FALSE
@@ -2978,7 +3720,8 @@ async function notifyPostAction(
 function userRowToAnonymousUser(row: any): AnonymousUser {
 	return {
 		id: String(row.id),
-		displayName: row.display_name || "名無し",
+		// 保存時にも通しているが、それより前に保存された表示名があるので読み出しでも通す
+		displayName: sanitizeBbsUserName(row.display_name || ""),
 		slug: String(row.id),
 		avatarColor: row.avatar_color || "from-blue-500 to-indigo-600",
 		avatarUrl: row.avatar_url ?? undefined,
@@ -3098,7 +3841,7 @@ async function rowsToFollowUsers(
 	return rows.map((r) => ({
 		userId: String(r.id),
 		slug: String(r.id),
-		displayName: r.display_name || "名無し",
+		displayName: sanitizeBbsUserName(r.display_name || ""),
 		avatarUrl: r.avatar_url ?? undefined,
 		isFollowing: vid != null ? followingSet.has(Number(r.id)) : undefined,
 		isSelf: vid != null ? vid === Number(r.id) : undefined,

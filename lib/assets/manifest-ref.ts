@@ -147,10 +147,53 @@ export function parseImageDeleteRef(
 	return { imageDeleteId: id, imageDeleteHash: hash };
 }
 
-/** サムネ用の背景参照。解決済み http(s) URL だけ通す */
+/**
+ * サムネ用の背景参照。解決済み http(s) URL だけ通す。
+ *
+ * 背景 URL は一覧を開いた閲覧者のブラウザが `<img>` で読みに行く。以前は先頭の
+ * `https?://` だけを見ていたので、自サイトの `/api/auth/...`（GET でセッションを作り
+ * Set-Cookie していた）を指させて、一覧を見ただけの全員を攻撃者のセッションに
+ * 切り替えることができた（R1）。auth 側の GET はもう Cookie を書かないが、多層防御として
+ * URL として解釈し直し、ユーザー名・パスワード付きと `/api/auth/` 配下は弾く。
+ *
+ * 戻り値は入力そのままではなく、解釈し直した URL（href）を CSS の `url('...')` から
+ * はみ出せない形にしたもの。サムネは components/game/GameBox.tsx などで CSS の
+ * `backgroundImage: url(...)` に埋め込まれる（今は JSON.stringify で引用しているが、以前は
+ * `url('${...}')` だった。多層防御として保存側でも崩す）。new URL は `'` `(` `)` をパスに残すので、
+ * 入力をそのまま返すと `https://evil.example/x'),url('/api/auth/...` のような値で
+ * 検査済みの URL とは別の自サイトの URL を CSS に読ませられた。
+ */
 export function parseBgRef(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
-	if (!/^https?:\/\//.test(value)) return undefined;
 	if (value.length > 2048) return undefined;
-	return value;
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return undefined;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+	if (url.username || url.password) return undefined;
+	if (isAuthApiPath(url.pathname)) return undefined;
+	// `"` 空白・改行・制御文字は new URL がエンコード／除去済み。残る CSS の区切り文字と
+	// エスケープ文字（\ はクエリ・フラグメントに残りうる）をパーセントエンコードする
+	const safe = url.href.replace(
+		/['()\\]/g,
+		(c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+	);
+	return safe.length <= 2048 ? safe : undefined;
+}
+
+/**
+ * `/api/auth/` 配下か。`%61` などのパーセントエンコード・大文字小文字・`//` の重ねで
+ * 判定をすり抜けられないよう、正しい `%XX` だけをデコードして正規化してから比べる。
+ * 壊れた `%` 列（`/100%.png` など）はそのまま文字として残す。decodeURIComponent は
+ * そこで例外になり、正当な外部の背景 URL まで弾いてしまうため使わない。
+ */
+function isAuthApiPath(pathname: string): boolean {
+	const decoded = pathname.replace(/%[0-9a-f]{2}/gi, (m) =>
+		String.fromCharCode(Number.parseInt(m.slice(1), 16)),
+	);
+	const normalized = decoded.replace(/[\\/]+/g, "/").toLowerCase();
+	return normalized === "/api/auth" || normalized.startsWith("/api/auth/");
 }

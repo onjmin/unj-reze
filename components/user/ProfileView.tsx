@@ -27,7 +27,8 @@ import {
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiErrorMessage } from "@/lib/api";
+import { isDeletedPlaceholder } from "@/lib/post/deleted-placeholder";
 import { avatarSeedOf, getAvatarInfo } from "@/lib/social/avatar";
 import { extractChordsFromContent } from "@/lib/mml/chord";
 import { collabHref } from "@/lib/social/collab-link";
@@ -91,6 +92,20 @@ interface ProfileViewProps {
 	onModerationChange?: () => void;
 }
 
+/**
+ * /api/users/<id> の 404 か。reze 利用者以外（unj 純正・システムユーザー・存在しない id）は
+ * 404 になる。fetcher（lib/api.ts）は本文の error か `HTTP <status>` を投げるので両方を見る。
+ */
+function isNotFoundError(err: unknown): boolean {
+	if (!err || typeof err !== "object") return false;
+	if ((err as { status?: unknown }).status === 404) return true;
+	const message = (err as { message?: unknown }).message;
+	return (
+		typeof message === "string" &&
+		/\b404\b|not[\s_-]?found|見つかりません/i.test(message)
+	);
+}
+
 /* ─── Per-post three-dot menu (self-contained to isolate state per item) ─── */
 function ProfilePostMenu({
 	post,
@@ -135,8 +150,13 @@ function ProfilePostMenu({
 
 	const pAuthorId = avatarSeedOf(post);
 	const pAvatarInfo = getAvatarInfo(pAuthorId, post.displayName);
-	const targetSlug = post.slug || post.displayName;
-	const isSelfPost = !!currentUserSlug && currentUserSlug === targetSlug;
+	// slug の無い投稿者（unj 純正・システムユーザー）はサーバーが users.id を出さない＝プロフィールなし。
+	// 表示名で代用すると別人を指しうるので、フォロー・ミュート・ブロックは出さない。
+	const targetSlug = post.slug || "";
+	const hasProfile = !!targetSlug;
+	const isSelfPost = hasProfile && currentUserSlug === targetSlug;
+	// 削除済みのプレースホルダは編集（PATCH）が 404 になるので、編集・権利表記の導線を出さない
+	const canEdit = isSelfPost && !isDeletedPlaceholder(post);
 
 	useEffect(() => {
 		if (!menuOpen) return;
@@ -198,8 +218,8 @@ function ProfilePostMenu({
 				);
 				onModerationChange?.();
 				router.refresh();
-			} catch {
-				showToast("error", "投稿の編集に失敗しました");
+			} catch (e) {
+				showToast("error", apiErrorMessage(e, "投稿の編集に失敗しました"));
 			}
 		},
 		[
@@ -233,8 +253,8 @@ function ProfilePostMenu({
 					value ?? null,
 				);
 				onModerationChange?.();
-			} catch {
-				showToast("error", "権利表記の更新に失敗しました");
+			} catch (e) {
+				showToast("error", apiErrorMessage(e, "権利表記の更新に失敗しました"));
 			}
 		},
 		[currentUserDisplayName, post.id, post.content, onModerationChange],
@@ -273,7 +293,7 @@ function ProfilePostMenu({
 		async (e: React.MouseEvent) => {
 			e.stopPropagation();
 			setMenuOpen(false);
-			if (!currentUserSlug) return;
+			if (!currentUserSlug || !targetSlug) return;
 			try {
 				if (blocked) {
 					await api.block.unblock(currentUserSlug, targetSlug);
@@ -294,7 +314,7 @@ function ProfilePostMenu({
 		async (e: React.MouseEvent) => {
 			e.stopPropagation();
 			setMenuOpen(false);
-			if (!currentUserSlug) return;
+			if (!currentUserSlug || !targetSlug) return;
 			try {
 				if (muted) {
 					await api.mute.unmute(currentUserSlug, targetSlug);
@@ -363,7 +383,7 @@ function ProfilePostMenu({
 							<Copy size={12} className="shrink-0" />
 							<span>テキストをコピー</span>
 						</button>
-						{isSelfPost && (
+						{canEdit && (
 							<button
 								role="menuitem"
 								onClick={handleMenuEdit}
@@ -373,7 +393,7 @@ function ProfilePostMenu({
 								<span>ポストを編集</span>
 							</button>
 						)}
-						{isSelfPost && (
+						{canEdit && (
 							<button
 								role="menuitem"
 								onClick={handleMenuOriginType}
@@ -393,7 +413,7 @@ function ProfilePostMenu({
 								<span>ポストを削除</span>
 							</button>
 						)}
-						{!isSelfPost && (
+						{!isSelfPost && hasProfile && (
 							<button
 								role="menuitem"
 								onClick={handleMenuFollow}
@@ -407,7 +427,7 @@ function ProfilePostMenu({
 								</span>
 							</button>
 						)}
-						{!isSelfPost && (
+						{!isSelfPost && hasProfile && (
 							<button
 								role="menuitem"
 								onClick={handleMenuMute}
@@ -421,7 +441,7 @@ function ProfilePostMenu({
 								</span>
 							</button>
 						)}
-						{!isSelfPost && (
+						{!isSelfPost && hasProfile && (
 							<button
 								role="menuitem"
 								onClick={handleMenuBlock}
@@ -525,6 +545,7 @@ function ProfilePostMenu({
 						<textarea
 							value={reportReason}
 							onChange={(e) => setReportReason(e.target.value)}
+							maxLength={1000}
 							placeholder="理由の詳細…"
 							rows={3}
 							className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
@@ -616,6 +637,9 @@ export default function ProfileView({
 	// 鍵アカウント（users.is_private）か。投稿一覧はサーバー側で絞られているので、
 	// ここではヘッダーの 🔒 と「投稿が見えない理由」の表示にだけ使う。
 	const [isPrivateAccount, setIsPrivateAccount] = useState(false);
+	// 404 だった slug。slug ごとに持つので、別のプロフィールへ移ったときに引きずらない。
+	const [notFoundSlug, setNotFoundSlug] = useState<string | null>(null);
+	const isNotFound = notFoundSlug !== null && notFoundSlug === slug;
 	const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 	const [editBio, setEditBio] = useState("");
 	const [isSaving, setIsSaving] = useState(false);
@@ -734,19 +758,15 @@ export default function ProfileView({
 			onProfileUpdate?.(avatarInfo.username, res.url);
 
 			const updatePost = (p: Post): Post => {
-				const isUserPost =
-					p.slug === currentUser?.slug ||
-					p.displayName === currentUser?.displayName ||
-					p.displayName === avatarInfo.username;
+				// 自分の投稿かは slug だけで決める。表示名は一意でない（同名の他人・slug の無い
+				// unj 純正の書き込みまで差し替えてしまう）。
+				const isUserPost = !!p.slug && p.slug === currentUser?.slug;
 				return {
 					...p,
 					avatarUrl: isUserPost ? res.url : p.avatarUrl,
 					replies:
 						p.replies?.map((r) => {
-							const isUserReply =
-								r.slug === currentUser?.slug ||
-								r.displayName === currentUser?.displayName ||
-								r.displayName === avatarInfo.username;
+							const isUserReply = !!r.slug && r.slug === currentUser?.slug;
 							return {
 								...r,
 								avatarUrl: isUserReply ? res.url : r.avatarUrl,
@@ -822,7 +842,7 @@ export default function ProfileView({
 
 	// Update localStorage cache whenever profile data is updated
 	useEffect(() => {
-		if (!slug || typeof localStorage === "undefined") return;
+		if (!slug || isNotFound || typeof localStorage === "undefined") return;
 		if (
 			myPosts.length > 0 ||
 			bio ||
@@ -848,6 +868,7 @@ export default function ProfileView({
 		}
 	}, [
 		slug,
+		isNotFound,
 		myPosts,
 		avatarUrl,
 		bio,
@@ -868,8 +889,16 @@ export default function ProfileView({
 				setIsPrivateAccount(!!data.isPrivate);
 				if (data.displayName) setProfileDisplayName(data.displayName);
 			})
-			.catch(() => {
+			.catch((err) => {
 				setHasMorePosts(false);
+				if (isNotFoundError(err)) {
+					// 以前のキャッシュ（404 になる前に積んだ投稿一覧など）を出し続けない。
+					setNotFoundSlug(slug);
+					setMyPosts([]);
+					try {
+						localStorage.removeItem(`unj_cached_profile_${slug}`);
+					} catch {}
+				}
 			})
 			.finally(() => setLoading(false));
 
@@ -1149,6 +1178,19 @@ export default function ProfileView({
 	// 名前かアイコンだけでも判っていればヘッダーを先に出す（投稿一覧だけが読み込み表示になる）。
 	// 何も判らないときだけ、従来どおり全面の読み込み表示にする。
 	const hasHeaderData = !!(profileDisplayName || avatarUrl || bio);
+
+	if (isNotFound) {
+		return (
+			<div className="flex flex-col h-full items-center justify-center p-12 text-center">
+				<div className="text-sm font-bold text-gray-300">
+					ユーザーが見つかりません
+				</div>
+				<div className="text-xs text-gray-500 mt-1">
+					削除されたか、プロフィールの無いユーザーです
+				</div>
+			</div>
+		);
+	}
 
 	if (
 		loading &&
@@ -1439,17 +1481,19 @@ export default function ProfileView({
 										<div
 											onClick={(e) => {
 												e.stopPropagation();
-												cacheProfileSeed({
-													slug: p.slug || undefined,
-													displayName: p.displayName,
-													avatarUrl: p.avatarUrl,
-												});
+												// slug の無い投稿者（unj 純正）はプロフィールなし。メニューは @メンションだけになる。
+												if (p.slug) {
+													cacheProfileSeed({
+														slug: p.slug,
+														displayName: p.displayName,
+														avatarUrl: p.avatarUrl,
+													});
+												}
+												// 表示名の一致では自分扱いしない（同名の他人のメニューが出せなくなる）。
 												const isSelfPost =
-													currentUser &&
-													(p.slug === currentUser.slug ||
-														p.displayName === currentUser.displayName);
+													!!p.slug && p.slug === currentUser?.slug;
 												if (isSelfPost) {
-													router.push(`/user/${p.slug || p.displayName}`);
+													router.push(`/user/${p.slug}`);
 												} else {
 													const rect = e.currentTarget.getBoundingClientRect();
 													setAvatarMenuPos({ x: rect.left, y: rect.bottom });
@@ -1648,21 +1692,20 @@ export default function ProfileView({
 													<Repeat size={14} />
 													<span className="text-[11px]">{p.reactionsHidden ? "" : p.reposts || ""}</span>
 												</button>
-												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														const targetSlug = p.slug || p.displayName;
-														if (targetSlug) {
+												{p.slug && (
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
 															router.push(
-																`/messages/${encodeURIComponent(targetSlug)}`,
+																`/messages/${encodeURIComponent(p.slug || "")}`,
 															);
-														}
-													}}
-													className="flex items-center hover:text-blue-400 transition-colors"
-													title="DMを送る"
-												>
-													<Mail size={14} />
-												</button>
+														}}
+														className="flex items-center hover:text-blue-400 transition-colors"
+														title="DMを送る"
+													>
+														<Mail size={14} />
+													</button>
+												)}
 												<button
 													onClick={(e) => {
 														e.stopPropagation();

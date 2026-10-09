@@ -18,13 +18,6 @@ export interface FingerprintSignals {
 	platform: string | null;
 }
 
-export interface VerifyRequestBody {
-	turnstileToken: string | null;
-	fingerprint: FingerprintSignals | null;
-	/** 呼び出し元が識別しやすいようにするための任意ラベル（例: "post.create"） */
-	action?: string;
-}
-
 export interface ScoreResult {
 	/** 0(安全)〜100(ほぼ確実にボット/不正) */
 	score: number;

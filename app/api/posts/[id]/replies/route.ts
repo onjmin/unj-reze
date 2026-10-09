@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-	isClientSessionId,
 	resolveOrCreateSessionUser,
 	resolveViewerId,
 } from "@/lib/auth/session-server";
@@ -16,8 +15,12 @@ import { decodeId, encodePost } from "@/lib/sqids";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
 import {
 	contentError,
+	errorResponse,
 	isAcceptableNewImageSrc,
+	isAcceptableOriginType,
+	parseCreateDotMeta,
 	sanitizeAvatarColor,
+	sanitizeContentText,
 } from "../../../_lib/post-input";
 import { workOwnershipError } from "../../../_lib/work-owner";
 
@@ -27,41 +30,48 @@ export async function GET(
 	_request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> },
 ) {
-	const { id } = await params;
-	const decodedId = decodeId(id);
-	if (decodedId === null) {
-		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+	try {
+		const { id } = await params;
+		const decodedId = decodeId(id);
+		if (decodedId === null) {
+			return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+		}
+		const sp = new URL(_request.url).searchParams;
+		const claimedUserId = sp.get("userId");
+		// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
+		// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
+		const userId = await resolveViewerId(_request, claimedUserId);
+		// 既定は「直近 REPLIES_PAGE_SIZE 件」。スレ全件は返さない（docs/NEON_EGRESS.md）。
+		// before=<レス番号> で、その番号より古い側の直近 limit 件＝上スクロールの追加読み込み。
+		// 未指定は Number(null) === 0 になるので、パラメータの有無を先に見る
+		// （0 を limit として通すと1件しか返さない）。
+		const rawLimit = Number(sp.get("limit") ?? Number.NaN);
+		const limit =
+			Number.isFinite(rawLimit) && rawLimit > 0
+				? Math.min(rawLimit, REPLIES_PAGE_MAX)
+				: REPLIES_PAGE_SIZE;
+		const rawBefore = Number(sp.get("before") ?? Number.NaN);
+		// >>1 はOPなので、それ以前は存在しない
+		const beforeNum =
+			Number.isFinite(rawBefore) && rawBefore > 1 ? rawBefore : undefined;
+		return await withEdgeCache(
+			_request,
+			// パーソナライズは裏取りできた viewer があるときだけ（app/api/posts/route.ts の GET と同じ理由。
+			// でたらめな ?userId= でキャッシュを素通りさせない）
+			{ sMaxAge: 5, personalized: !!userId },
+			async () => {
+				const replies = await db.getReplies(decodedId, userId, {
+					limit,
+					beforeNum,
+				});
+				await attachEmbedInfo(replies);
+				return NextResponse.json(replies.map(encodePost));
+			},
+		);
+	} catch (e) {
+		// Postgres のエラーメッセージを利用者に返さない（app/api/_lib/post-input.ts errorResponse）
+		return errorResponse("[GET /api/posts/[id]/replies]", e);
 	}
-	const sp = new URL(_request.url).searchParams;
-	const claimedUserId = sp.get("userId");
-	// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
-	// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
-	const userId = await resolveViewerId(_request, claimedUserId);
-	// 既定は「直近 REPLIES_PAGE_SIZE 件」。スレ全件は返さない（docs/NEON_EGRESS.md）。
-	// before=<レス番号> で、その番号より古い側の直近 limit 件＝上スクロールの追加読み込み。
-	// 未指定は Number(null) === 0 になるので、パラメータの有無を先に見る
-	// （0 を limit として通すと1件しか返さない）。
-	const rawLimit = Number(sp.get("limit") ?? Number.NaN);
-	const limit =
-		Number.isFinite(rawLimit) && rawLimit > 0
-			? Math.min(rawLimit, REPLIES_PAGE_MAX)
-			: REPLIES_PAGE_SIZE;
-	const rawBefore = Number(sp.get("before") ?? Number.NaN);
-	// >>1 はOPなので、それ以前は存在しない
-	const beforeNum =
-		Number.isFinite(rawBefore) && rawBefore > 1 ? rawBefore : undefined;
-	return await withEdgeCache(
-		_request,
-		{ sMaxAge: 5, personalized: !!claimedUserId },
-		async () => {
-			const replies = await db.getReplies(decodedId, userId, {
-				limit,
-				beforeNum,
-			});
-			await attachEmbedInfo(replies);
-			return NextResponse.json(replies.map(encodePost));
-		},
-	);
 }
 
 export async function POST(
@@ -76,7 +86,7 @@ export async function POST(
 		}
 		const body = await request.json();
 		const {
-			content,
+			content: rawContent,
 			parentPostId,
 			hasImage,
 			imageSrc,
@@ -87,14 +97,15 @@ export async function POST(
 			mvId,
 			talkId,
 			otomadId,
-			dotW,
-			dotH,
-			animFrames,
-			animFps,
+			// dotW/dotH/animFrames/animFps は parseCreateDotMeta(body) で読む
 			walkPreset,
 			originType,
 			sessionId,
 		} = body;
+
+		// 不可視・bidi・制御文字は保存前に除去する（unj のスレにそのまま出るレスなので。post-input.ts）。
+		// 「本文が空か」の判定も除去後の値で行う。以降の検証・保存はすべてこの値を使うこと。
+		const content = sanitizeContentText(rawContent);
 
 		if (
 			!content &&
@@ -117,6 +128,15 @@ export async function POST(
 		}
 		if (!isAcceptableNewImageSrc(imageSrc)) {
 			return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
+		}
+		// ドット絵メタは PATCH と同じ範囲に収める（列は SMALLINT。NaN・文字列は 400、範囲外の数値は丸める／捨てる）
+		const dotMeta = parseCreateDotMeta(body);
+		if (dotMeta === "invalid") {
+			return NextResponse.json({ error: "Invalid dotMeta" }, { status: 400 });
+		}
+		// 権利表記は選択肢の値だけ（任意の文字列を共有の行に置かせない）
+		if (!isAcceptableOriginType(originType)) {
+			return NextResponse.json({ error: "Invalid originType" }, { status: 400 });
 		}
 
 		// 作品IDは /api/posts と同じく decodeId で読む（旧sqids形式のIDも通すため）
@@ -175,14 +195,11 @@ export async function POST(
 			mvId: decodedWorkIds.mvId,
 			talkId: decodedWorkIds.talkId,
 			otomadId: decodedWorkIds.otomadId,
-			dotW: dotW ? Number(dotW) : undefined,
-			dotH: dotH ? Number(dotH) : undefined,
-			animFrames: animFrames ? Number(animFrames) : undefined,
-			animFps: animFps ? Number(animFps) : undefined,
+			...dotMeta,
 			walkPreset: sanitizeWalkPreset(walkPreset),
 			...mmlRef,
 			...parseImageDeleteRef(body, imageSrc),
-			originType,
+			originType: originType ?? undefined,
 		});
 		if (!reply) {
 			return NextResponse.json({ error: "Post not found" }, { status: 404 });
@@ -201,22 +218,13 @@ export async function POST(
 			]);
 		}
 
-		const response = NextResponse.json(encoded, { status: 201 });
-		const resolvedSessionId =
-			request.cookies.get("unj_reze_session")?.value ||
-			(isClientSessionId(sessionId) ? sessionId : undefined);
-		if (resolvedSessionId) {
-			response.cookies.set("unj_reze_session", resolvedSessionId, {
-				httpOnly: false,
-				sameSite: "lax",
-				path: "/",
-				maxAge: 60 * 60 * 24 * 365,
-			});
-		}
-		return response;
+		// セッション Cookie はサーバーから書かない（クライアントの lib/session.ts が自分で書く）。
+		// 以前は本文の sessionId をそのまま Set-Cookie していたので、他人に攻撃者の sessionId で
+		// 返信させるだけでその人のブラウザを攻撃者のセッションに固定できた（R1）。
+		return NextResponse.json(encoded, { status: 201 });
 	} catch (e) {
-		console.error("[POST /api/posts/[id]/replies]", e);
-		const message = e instanceof Error ? e.message : String(e);
-		return NextResponse.json({ error: message }, { status: 500 });
+		// スレ満杯・バルス・投稿種別（db.addReply）、セッション無し・登録枠
+		// （resolveOrCreateSessionUser）は expose 付きで、その文言と status をそのまま返す
+		return errorResponse("[POST /api/posts/[id]/replies]", e);
 	}
 }

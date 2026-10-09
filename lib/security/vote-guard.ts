@@ -10,9 +10,14 @@
  * DBに投票行を持たないので、フィード取得のたびに投票テーブルを引く必要がなくなり、
  * 転送量の面でも有利になる（docs/NEON_EGRESS.md）。
  *
- * 【重要】このモジュールはインメモリなので、複数インスタンスにスケールすると
- * インスタンスごとに1票ずつ入る。unj も同じ性質を持つ既知の割り切り。
- * 厳密さが要るようになったら KV（KV_PROVIDER）へ移すこと。
+ * 【重要】インメモリの Set は Cloudflare Workers ではほぼ効かない。Workers は isolate を
+ * 次々に立ち上げ・捨てるうえ、リクエストごとに別の isolate に振られうるので、同じ人の
+ * 2回目の投票が「初めて」に見える（unj の常駐 Node プロセスとは前提が違う）。
+ * そのため書き込み側は {@link claimOnce}（Rate Limiting バインディング DEDUPE_LIMITER、
+ * 1回/60秒）も併せて通す。バインディングはロケーション単位の近似カウンタなので
+ * 「60秒以内の連打・スクリプトでの連投」を止める役で、厳密な1人1票ではない
+ * （厳密にするには投票行の表が要る＝スキーマ変更、別作業）。
+ * インメモリ側は、同じ isolate に当たったときの即時判定と表示（getVoteState）用に残す。
  */
 
 const DELIMITER = "###";
@@ -64,6 +69,58 @@ export function tryVote(
 /** ハートも同じ扱い。1投稿につき1回まで */
 export function tryHeart(actorId: string, postId: number): boolean {
 	return mark(hearted, actorId, postId);
+}
+
+/** Workers Rate Limiting バインディングの最小限の型（@cloudflare/workers-types を入れていないため自前） */
+interface DedupeLimiterBinding {
+	limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+/**
+ * wrangler.json の DEDUPE_LIMITER（{ limit: 1, period: 60 }）。無い環境（next dev や
+ * バインディング追加前のデプロイ）では undefined。middleware.ts と同じく動的 import で取る
+ * （Workers 外で静的 import すると落ちるため）。
+ */
+async function getDedupeLimiter(): Promise<DedupeLimiterBinding | undefined> {
+	try {
+		const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+		const { env } = (await getCloudflareContext({ async: true })) as {
+			env?: { DEDUPE_LIMITER?: unknown };
+		};
+		const binding = env?.DEDUPE_LIMITER;
+		return binding &&
+			typeof (binding as { limit?: unknown }).limit === "function"
+			? (binding as DedupeLimiterBinding)
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * (kind, actorId, postId) を 60 秒に1回だけ通す（isolate をまたいで効く重複防止）。
+ * `false` なら重複（呼び出し側はカウンタを触らないこと）。
+ *
+ * バインディングが無い・呼び出しに失敗したときは `true`（fail-open）。いいねが押せなく
+ * なるより、重複が通る方がまし（インメモリの tryVote / tryHeart は別途効いている）。
+ */
+export async function claimOnce(
+	kind: "vote" | "heart",
+	actorId: string,
+	postId: number,
+): Promise<boolean> {
+	if (!actorId) return true;
+	const limiter = await getDedupeLimiter();
+	if (!limiter) return true;
+	try {
+		const { success } = await limiter.limit({
+			key: `${kind}:${actorId}:${postId}`,
+		});
+		return success;
+	} catch (err) {
+		console.warn("[vote-guard] DEDUPE_LIMITER failed, failing open", err);
+		return true;
+	}
 }
 
 /**

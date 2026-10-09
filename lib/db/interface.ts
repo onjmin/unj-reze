@@ -250,6 +250,18 @@ export const REPLIES_PAGE_SIZE = 20;
  */
 export const REPLIES_PAGE_MAX = 50;
 
+/**
+ * 共通の約束:
+ * - 投稿（DbPost）の `slug` / `userId`（= String(users.id)）は reze 利用者の投稿にだけ付く。
+ *   unj 純正の投稿者（users.display_name が NULL）とシステム用の users.id=1 の投稿では undefined で、
+ *   `bbsId`（cc_user_id）だけが残る。UI はこれが無い投稿にプロフィール・DM・フォロー等を出さない
+ *   （生の users.id を出すと unj 利用者を名寄せできてしまう。lib/db/pg.ts 先頭「ユーザー識別子」）。
+ * - 利用者に見せてよい失敗は `Object.assign(new Error("<日本語の文言>"), { expose: true, status })`
+ *   で投げる。ルートは `expose === true` のときだけ message と status を返し、それ以外は一般的な 500 にする。
+ * - reze が扱う板は board_id=1 だけ。読み取り・返信・編集・削除のどれも板1以外のスレ（とそのレス）は
+ *   「無い」扱い。削除済み（deleted_at あり）のスレとそのレスも、読み取り・返信・編集では「無い」扱い
+ *   （削除だけは、自分の投稿なら消せる）。
+ */
 export interface DataStore {
 	/** `beforeId` はキーセットページング用のカーソル（そのIDより古いスレッドを返す）。 */
 	getPosts(
@@ -270,6 +282,10 @@ export interface DataStore {
 	 */
 	getPostByDatKey(datKey: number, userId?: string): Promise<DbPost | null>;
 	createPost(data: CreatePostParams): Promise<DbPost>;
+	/**
+	 * いいね / だめね / ハート。userId の視点で見えない投稿（鍵アカ・削除済み・板1以外）には
+	 * 加算も通知もせず null。数は列の上限（SMALLINT / INTEGER）で頭打ち。
+	 */
 	likePost(id: number, userId: string): Promise<DbPost | null>;
 	dislikePost(id: number, userId: string): Promise<DbPost | null>;
 	heartPost(id: number, userId: string, count?: number): Promise<DbPost | null>;
@@ -291,7 +307,20 @@ export interface DataStore {
 		userId?: string,
 		options?: GetRepliesOptions,
 	): Promise<DbPost[]>;
+	/**
+	 * 返信する。スレが見えない・無い（鍵アカ・削除済み・板1以外）なら null。
+	 * unj のスレ規則に反するときは expose 付きのエラーを投げる:
+	 * !バルス済み（403）、!バルサン中でスレ主以外（403）、スレの投稿種別（content_types_bitmask）に
+	 * 無い種類（400）、レス数の上限（409）。ID・名前の表示（cc_bitmask）と強制sage にも従う。
+	 * コード進行（#コード進行）が許されていないスレではテキストとして保存する（unj と同じ）。
+	 * レス番号は unj と同じくスレの行をロックして採る（res_count = 最大のレス番号）。
+	 */
 	addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
+	/**
+	 * 投稿/レスを編集する。所有者不一致・存在しない・見えない（板1以外・削除済みのスレ）・
+	 * 削除済みのプレースホルダなら null。レスは !バルス済みのスレなら expose 付きの 403、
+	 * 種別が変わる編集（画像・MML の追加など）がスレの content_types_bitmask に無ければ 400。
+	 */
 	editPost(
 		id: number,
 		userId: string,
@@ -304,13 +333,16 @@ export interface DataStore {
 		imageRef?: ImageDeleteRef,
 	): Promise<DbPost | null>;
 	/**
-	 * 投稿/レスを削除する。所有者不一致・存在しないIDは false。
-	 * レスは常に物理削除。スレ（OP）は生きた返信（repliesCount > 0）が無ければ
+	 * 投稿/レスを削除する。所有者不一致・存在しないID・板1以外は false。
+	 * レスは本文を「(削除されました)」のプレースホルダに差し替え、添付をすべて外す論理削除
+	 * （行と番号は残し、res_count も減らさない。物理削除すると MAX(num)+1 の採番が番号を
+	 * 再利用し、通知・>>N・専ブラの dat のバイト位置が別のレスを指してしまう）。
+	 * スレ（OP）は生きた返信（repliesCount > 0）が無ければ
 	 * 論理削除（deleted_at）、あれば本文を「(削除されました)」のプレースホルダに
 	 * 差し替えるだけで行自体とdeleted_at=NULLは残す——スレを丸ごと論理削除すると
-	 * 以後どのクエリも deleted_at IS NULL で除外するため、返信は物理削除されない
-	 * まま「DB上は存在し件数にも数えられるが、フィード/ハッシュタグ/最新レスの
-	 * どこからも二度と辿れない」迷子状態になってしまう（返信は物理削除・スレは
+	 * 以後どのクエリも deleted_at IS NULL で除外するため、返信は
+	 * 「DB上は存在し件数にも数えられるが、フィード/ハッシュタグ/最新レスの
+	 * どこからも二度と辿れない」迷子状態になってしまう（当時の返信は物理削除・スレは
 	 * 論理削除という非対称性が原因、実際にこれで表示不能になった返信を踏んだ）。
 	 * 成功時は消えたMML/添付画像/ゲーム・MV manifestの削除トークン（無ければ空オブジェクト）を返す。
 	 * 画像は他人のゲーム/MV/かけあい動画が URL で借りていることがあるが、DBからは見えない。
@@ -321,8 +353,8 @@ export interface DataStore {
 	 * （editPostのpreviousMmlと同じ「DB確定後に消す」順序）。
 	 *
 	 * threadId（属するスレッドのpostId）も併せて返す。呼び出し側はリアルタイム配信の
-	 * チャンネル名（chThread）にこれを使う。削除後は getPost で引けない（レス=物理削除、
-	 * スレ=論理削除）ので、事前に getPost を撃つ代わりにここで返す — 事前取得だと
+	 * チャンネル名（chThread）にこれを使う。削除後のスレは getPost で引けない（論理削除）し、
+	 * レスもプレースホルダになっているので、事前に getPost を撃つ代わりにここで返す — 事前取得だと
 	 * スレ配下の全レスを読むうえ、所有者チェック前なので他人のスレへのDELETE試行だけで
 	 * 無駄な全件読み出しを誘発できてしまう（docs/NEON_EGRESS.md）。
 	 */
@@ -354,6 +386,11 @@ export interface DataStore {
 		limit?: number,
 		before?: string,
 	): Promise<DbPost[]>;
+	/**
+	 * reze 利用者の表示名。reze 利用者でない（display_name が NULL の unj 利用者・システム用の
+	 * users.id=1・存在しない id）なら undefined。/api/users/[id] と DM の宛先検査はこれで
+	 * 「reze 利用者か」を見分ける。
+	 */
 	getUserDisplayName(slug: string): Promise<string | undefined>;
 	getLikedPosts(userId: string, limit?: number): Promise<DbPost[]>;
 	getDislikedPosts(userId: string, limit?: number): Promise<DbPost[]>;
@@ -375,6 +412,10 @@ export interface DataStore {
 		userId: string,
 		partnerId: string,
 	): Promise<{ sent: number; received: number }>;
+	/**
+	 * DM を保存する。本文が空・5000字超・自分宛ては expose 付きの 400、存在しない宛先は 404。
+	 * 読み出し（getMessages / getConversation）の本文も 5000 字で頭打ち。
+	 */
 	addMessage(data: MessageParams): Promise<Message>;
 	getTrends(): Promise<Trend[]>;
 	searchPosts(
@@ -387,6 +428,8 @@ export interface DataStore {
 	 * スレッド構造・返信は一切引かない（docs/NEON_EGRESS.md）。新しい順（created_at）。
 	 * `before`（ISO）を渡すとそれより古いものを limit 件返し、offset は無視する
 	 * （タイムラインのメディア欄が過去へ遡るためのカーソル。offset は浅い所しか引けない）。
+	 * limit は 51 まで（ルートが hasMore の判定に limit+1 を要求するため）、offset が 100 を
+	 * 超えると空配列。本文（content）は見出しの 200 字まで（外部化されていない MML だけ全文）。
 	 */
 	searchMedia(
 		kind: "image" | "mml",
@@ -401,6 +444,12 @@ export interface DataStore {
 		userId?: string,
 		limit?: number,
 	): Promise<DbPost[]>;
+	/**
+	 * セッションIDの本人を引き、無ければ作る。unj の署名トークン（`署名.userId.期限`、kind='unj'）は
+	 * reze のセッションとして扱わず、expose 付きの 400 を投げる（他人の unj アカウントにならない・
+	 * 孤児ユーザーも作らない）。同じIDでの同時作成に負けたときは先に入った持ち主を返し、
+	 * それも引けなければ expose 付きの 409。
+	 */
 	getOrCreateAnonymousUser(
 		sessionId: string,
 		ipAddress: string,
@@ -408,11 +457,20 @@ export interface DataStore {
 	/**
 	 * セッションIDから本人を引く。**作成はしない**（未知のセッションは null）。
 	 * 書き込み系APIの本人確認に使うので、ここで作ってしまうと「名乗れば通る」に戻る。
+	 * unj の署名トークンは引かない（unj が無効にした古いトークンで unj 利用者になれないように）。
+	 * サーバー内部の `bbscgi:` トークン（kind='reze'）は引ける（bbs.cgi の旧キーでの照会に使う）。
 	 */
 	getAnonymousUserBySession(sessionId: string): Promise<AnonymousUser | null>;
 	/**
+	 * 既存セッションの auth_tokens.last_used_at だけを更新する（UPDATE 1文。照会も作成もしない）。
+	 * getAnonymousUserBySession で見つけた後の「使用中」の印に使う。unj の署名トークンの行には触らない。
+	 */
+	touchAnonymousSession(sessionId: string): Promise<void>;
+	/**
 	 * プロフィールを更新する。`displayName` を省略すればアイコン/自己紹介だけを更新できる。
 	 * slug は所有者キーなので、このメソッドでは**絶対に**書き換えない。
+	 * 表示名は unj の名前エスケープ（★◆■●【】）と不可視文字の除去を掛けて保存する
+	 * （lib/bbs/user-name.ts sanitizeBbsUserName）。
 	 */
 	updateUserDisplayName(
 		userId: string,
@@ -422,7 +480,9 @@ export interface DataStore {
 	): Promise<void>;
 	getUserAvatarUrl(slug: string): Promise<string | undefined>;
 	getUserBio(slug: string): Promise<string | undefined>;
+	/** 推しリスト。読むのは先頭 100 件まで。 */
 	listOshiItems(userSlug: string): Promise<DbOshiItem[]>;
+	/** 1人 100 件まで（超えると expose 付きの 400）。iTunes の ID は正の安全な整数以外を無しにする。 */
 	addOshiItem(userSlug: string, data: AddOshiItemParams): Promise<DbOshiItem>;
 	removeOshiItem(userSlug: string, id: number): Promise<void>;
 	getUserSettings(
@@ -441,6 +501,10 @@ export interface DataStore {
 		}>,
 	): Promise<void>;
 	issueMigrationToken(userId: string): Promise<string>;
+	/**
+	 * 移行トークンを引き換え、newSessionId を移行元のユーザーに紐づける。
+	 * newSessionId が unj の署名トークンの行だった場合は付け替えずに null（unj が書いた行は触らない）。
+	 */
 	redeemMigrationToken(
 		token: string,
 		newSessionId: string,
@@ -512,6 +576,10 @@ export interface DataStore {
 	listTopGames(limit?: number): Promise<DbGameRecord[]>;
 	/** ゲームにひもづく最初の投稿ID（コメント欄への導線に使う） */
 	getPostIdByGameId(gameId: number): Promise<number | null>;
+	/**
+	 * 今の注目ゲームと次の候補。鍵アカが作ったゲームは抽選・投票の勝者・候補に出さない。
+	 * `ipAddress` は投票者のキー（IPv6 は /64 に丸めたもの。voteGame と同じキーを渡すこと）。
+	 */
 	getLiveGameInfo(
 		ipAddress: string,
 	): Promise<{

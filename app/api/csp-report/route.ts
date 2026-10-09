@@ -10,11 +10,19 @@ import { NextRequest } from "next/server";
 //
 // 誰でも POST できる口なので、本文は 16KB で打ち切り、URL はオリジン／パスだけに丸めて出す
 // （クエリに他人のセッション等が載っていてもログへ残さない）。レート制限は middleware の csp 枠。
+// 出すのは1リクエスト 3 行まで（ブラウザは 1 ページの違反をまとめて送るが、要約を読むには十分）。
+// 20 行だと 1 リクエストでログを大量に流せた。値の改行・制御文字は取り除く（`\n[csp-violation] ...`
+// を混ぜて偽の行を作らせない）。
 
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 16 * 1024;
-const MAX_REPORTS_PER_REQUEST = 20;
+const MAX_REPORTS_PER_REQUEST = 3;
+
+/** ログの1行を偽造させないよう、制御文字（改行・CR・ESC など）を取り除く */
+function stripControl(s: string): string {
+	return s.replace(/[\u0000-\u001f\u007f]/g, "");
+}
 
 interface CspSummary {
 	directive: string;
@@ -30,10 +38,11 @@ function originOnly(raw: unknown): string {
 	try {
 		const u = new URL(raw);
 		if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "wss:")
-			return u.origin;
-		return `${u.protocol}`; // data: / blob: など
+			return stripControl(u.origin);
+		return stripControl(`${u.protocol}`); // data: / blob: など
 	} catch {
-		return raw.slice(0, 40);
+		// URL でない値（"inline" など）はそのまま出すので、ここが一番偽造に使われやすい
+		return stripControl(raw.slice(0, 40));
 	}
 }
 
@@ -41,14 +50,14 @@ function originOnly(raw: unknown): string {
 function pathOnly(raw: unknown): string {
 	if (typeof raw !== "string" || !raw) return "-";
 	try {
-		return new URL(raw).pathname.slice(0, 120);
+		return stripControl(new URL(raw).pathname.slice(0, 120));
 	} catch {
 		return "-";
 	}
 }
 
 function str(v: unknown): string {
-	return typeof v === "string" ? v.slice(0, 80) : "";
+	return typeof v === "string" ? stripControl(v.slice(0, 80)) : "";
 }
 
 function summarize(r: Record<string, unknown>): CspSummary {

@@ -101,11 +101,14 @@ export async function generateMetadata({
 			0,
 			100,
 		) || `${post.displayName}による投稿です。`;
-	const image = post.hasGame
+	const rawImage = post.hasGame
 		? post.gameThumbnail
 		: post.hasImage
 			? post.imageSrc
 			: undefined;
+	// 昔の行は画像を base64 の data: URL のまま持つ。og:image に入れても HTML が膨らむだけで
+	// クローラは読まないので、http(s) の URL だけを使う
+	const image = rawImage && /^https?:\/\//i.test(rawImage) ? rawImage : undefined;
 
 	return {
 		title,

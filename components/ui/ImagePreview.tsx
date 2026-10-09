@@ -303,7 +303,7 @@ export default function ImagePreview({
 							aspectRatio: cellRatio ?? 1,
 							width: `min(90vw, calc(90vh * ${cellRatio ?? 1}))`,
 							height: "auto",
-							backgroundImage: `url(${src})`,
+							backgroundImage: `url(${JSON.stringify(src)})`,
 							backgroundSize: `${frames * 100}% ${rows * 100}%`,
 							backgroundPosition: `0% ${yPos}%`,
 							backgroundRepeat: "no-repeat",

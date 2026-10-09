@@ -237,7 +237,7 @@ function MvSpriteButton({
 					style={{
 						width: sprite.cellW * sprite.frames * zoom,
 						height: sprite.cellH * (sprite.rows ?? 1) * zoom,
-						backgroundImage: `url(${sprite.url})`,
+						backgroundImage: `url(${JSON.stringify(sprite.url)})`,
 						backgroundSize: "100% 100%",
 						imageRendering: "pixelated",
 						transform: `translate(0px, ${-row * sprite.cellH * zoom}px)`,
@@ -503,7 +503,7 @@ function LocalTileGrid({
 							<div
 								className="w-full h-full overflow-hidden"
 								style={{
-									backgroundImage: `url(${sheet.url})`,
+									backgroundImage: `url(${JSON.stringify(sheet.url)})`,
 									backgroundSize: `${sheet.cols * 100}% ${sheet.rows * 100}%`,
 									backgroundPosition: `${sheet.cols > 1 ? (col / (sheet.cols - 1)) * 100 : 0}% ${sheet.rows > 1 ? (row / (sheet.rows - 1)) * 100 : 0}%`,
 									imageRendering: "pixelated",

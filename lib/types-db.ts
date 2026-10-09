@@ -41,8 +41,13 @@ export interface DbMediaSearchPost {
 export interface DbPost {
 	id: number;
 	displayName: string;
+	/**
+	 * 投稿者のユーザーID（String(users.id)）。slug と userId は reze の利用者の投稿にだけ付く。
+	 * reze 以外の投稿者（users.display_name が NULL の unj 利用者）とシステム用の users.id=1 では
+	 * どちらも undefined で、bbsId だけが残る（lib/db/pg.ts isRezeAuthorRow）。
+	 */
 	slug?: string;
-	/** 投稿者のユーザーID（users.id） */
+	/** 投稿者のユーザーID（users.id）。slug と同じく reze の利用者の投稿だけ */
 	userId?: string;
 	/** 掲示板モードの「ID:」表示専用。slug(=生のuser_id)とは別に、日替わりしない
 	 *  安定ハッシュ値（lib/bbs/cc-id.ts:genBbsId）。無ければ getUserIdLabel が displayName から補う。 */

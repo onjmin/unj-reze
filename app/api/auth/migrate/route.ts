@@ -1,15 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
 	isClientSessionId,
+	isSameOriginRequest,
 	resolveSessionUser,
 } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
+
+// 発行・引き換えとも同じオリジンのページからだけ受ける（lib/auth/session-server.ts
+// isSameOriginRequest）。他サイトから引き換えさせると、閲覧者のセッションを攻撃者の
+// アカウントへ付け替えられる（ログイン CSRF）。
 
 // 移行トークンの発行(過去の匿名アカウントを新セッションへ引き継ぐため)
 //
 // 引き換え側(PUT)は session_id を丸ごと差し替えるため、発行はアカウント乗っ取りと
 // 同じ重みを持つ。誰の分を発行するかは絶対に body で指定させず、セッション本人に限る。
 export async function POST(request: NextRequest) {
+	if (!isSameOriginRequest(request)) {
+		return NextResponse.json({ error: "forbidden" }, { status: 403 });
+	}
 	const { sessionId } = await request.json().catch(() => ({}));
 	const user = await resolveSessionUser(request, sessionId);
 	if (!user) {
@@ -20,7 +28,15 @@ export async function POST(request: NextRequest) {
 }
 
 // 移行トークンの引き換え(新セッションを既存アカウントに再バインド)
+//
+// Cookie はサーバーで書かない。クライアント（SettingsPanel）は自分の今のセッションID
+// （ensureSessionId）で引き換えてから再読み込みするので、Cookie も localStorage も既にその値。
+// サーバーが本文の sessionId で Set-Cookie すると、他人のブラウザの Cookie を任意の値に
+// 差し替える口になる（セッション固定）。
 export async function PUT(request: NextRequest) {
+	if (!isSameOriginRequest(request)) {
+		return NextResponse.json({ error: "forbidden" }, { status: 403 });
+	}
 	const { token, sessionId } = await request.json();
 	if (!token || !sessionId) {
 		return NextResponse.json(
@@ -40,12 +56,5 @@ export async function PUT(request: NextRequest) {
 			{ status: 404 },
 		);
 
-	const response = NextResponse.json(user);
-	response.cookies.set("unj_reze_session", sessionId, {
-		httpOnly: false,
-		sameSite: "lax",
-		path: "/",
-		maxAge: 60 * 60 * 24 * 365,
-	});
-	return response;
+	return NextResponse.json(user);
 }

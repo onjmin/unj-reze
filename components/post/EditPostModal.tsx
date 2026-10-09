@@ -394,7 +394,7 @@ export default function EditPostModal({
 											<input
 												type="number"
 												min={2}
-												max={200}
+												max={256}
 												value={animFrames}
 												onChange={(e) =>
 													setAnimFrames(

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+	getOrCreateSessionUserById,
 	isClientSessionId,
+	isExposedError,
+	isSameOriginRequest,
 	resolveSessionUser,
-	SESSION_COOKIE,
 } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { getClientIp } from "@/lib/ip";
@@ -12,52 +14,75 @@ import {
 	MAX_DISPLAY_NAME_LENGTH,
 } from "../../_lib/post-input";
 
-/**
- * セッションIDに対応する匿名ユーザーを返す（無ければ作る）。
- * `bbscgi:` で始まるIDなど、クライアントが名乗ってはいけないIDは弾く
- * （lib/auth/session-server.ts isClientSessionId）。
- */
-async function getOrCreate(request: NextRequest, sessionId: unknown) {
-	if (!sessionId) {
-		return NextResponse.json(
-			{ error: "sessionId is required" },
-			{ status: 400 },
-		);
-	}
-	if (!isClientSessionId(sessionId)) {
-		return NextResponse.json({ error: "invalid sessionId" }, { status: 400 });
-	}
+// セッション（Cookie `unj_reze_session`）はクライアントが lib/session.ts の ensureSessionId で
+// 自分で書く。サーバーはここで Set-Cookie しない。
+// 以前は GET ?sessionId=X / POST がサーバー側で Cookie を X に書き換えていたので、
+// 画像 URL などに自サイトのこの URL を仕込むだけで、閲覧者全員を攻撃者のセッション X に
+// 切り替えられた（セッション固定）。攻撃者は同じ X で DM・通知を読める。
 
-	const ipAddress = getClientIp(request.headers);
-	const user = await db.getOrCreateAnonymousUser(sessionId, ipAddress);
+const NO_STORE = { "Cache-Control": "private, no-store" };
 
-	const response = NextResponse.json(user);
-	response.headers.set("Cache-Control", "private, no-store");
-	response.cookies.set(SESSION_COOKIE, sessionId, {
-		httpOnly: false,
-		sameSite: "lax",
-		path: "/",
-		maxAge: 60 * 60 * 24 * 365,
-	});
-	return response;
+function jsonError(error: string, status: number) {
+	return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+function isJsonRequest(request: NextRequest): boolean {
+	const type = (request.headers.get("content-type") || "")
+		.split(";")[0]
+		.trim()
+		.toLowerCase();
+	return type === "application/json";
 }
 
 /**
- * 旧方式（`?sessionId=` をクエリで渡す）。セッションIDは秘密そのものなので、
- * クエリに載せるとアクセスログ・Referer・履歴に残る。クライアントは POST へ移した
- * （lib/api.ts auth.anonymous）。古いタブ・キャッシュされたJSのために当面残す。
+ * 廃止。セッションIDは秘密そのものなのでクエリに載せるとログ・Referer・履歴に残り、
+ * しかも GET は `<img src>` 1つで他人のブラウザに踏ませられる（上のコメント）。
+ * クライアントは POST に移行済み（lib/api.ts auth.anonymous）。古いタブ・キャッシュされた JS は
+ * ここで失敗し、useCurrentUser が黙って諦める（再読み込みで新しい JS になる）。
+ * ユーザーの作成も Cookie の書き込みも DB への問い合わせもしない。
  */
-export async function GET(request: NextRequest) {
-	return getOrCreate(request, new URL(request.url).searchParams.get("sessionId"));
+export async function GET() {
+	return jsonError(
+		"このエンドポイントは廃止されました。ページを再読み込みしてください",
+		410,
+	);
 }
 
-/** 本文 `{ sessionId }` で受ける（推奨） */
+/**
+ * 本文 `{ sessionId }` に対応する匿名ユーザーを返す（無ければ作る）。
+ * - 同じオリジンのページからだけ受ける（他サイトのフォーム・fetch によるログイン CSRF を防ぐ）
+ * - JSON だけ受ける（`<form>` は application/json を送れないので、CORS の事前確認なしに
+ *   他サイトから送れる形を締め出す）
+ * - `bbscgi:` で始まるIDなど、クライアントが名乗ってはいけないIDは弾く（isClientSessionId）
+ * - 新規作成は UUID 形式と登録枠に限る（getOrCreateSessionUserById）
+ */
 export async function POST(request: NextRequest) {
+	if (!isSameOriginRequest(request)) return jsonError("forbidden", 403);
+	if (!isJsonRequest(request)) {
+		return jsonError("Content-Type must be application/json", 415);
+	}
+
 	const body = await request.json().catch(() => ({}));
-	return getOrCreate(request, (body as { sessionId?: unknown })?.sessionId);
+	const sessionId = (body as { sessionId?: unknown } | null)?.sessionId;
+	if (!sessionId) return jsonError("sessionId is required", 400);
+	if (!isClientSessionId(sessionId)) return jsonError("invalid sessionId", 400);
+
+	try {
+		const user = await getOrCreateSessionUserById(
+			sessionId,
+			getClientIp(request.headers),
+		);
+		return NextResponse.json(user, { headers: NO_STORE });
+	} catch (err) {
+		if (isExposedError(err)) return jsonError(err.message, err.status);
+		throw err;
+	}
 }
 
 export async function PUT(request: NextRequest) {
+	// 他サイトからプロフィールを書き換えさせない（POST と同じ理由）
+	if (!isSameOriginRequest(request)) return jsonError("forbidden", 403);
+
 	const body = await request.json();
 	const { displayName, avatarUrl, bio, sessionId } = body;
 

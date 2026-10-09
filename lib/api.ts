@@ -87,7 +87,10 @@ async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
 	});
 	if (!res.ok) {
 		const err = await res.json().catch(() => ({ error: "Unknown error" }));
-		throw new Error(err.error || `HTTP ${res.status}`);
+		// status も載せる（呼び出し側が文言ではなく 404 / 429 などで分岐できるように）
+		throw Object.assign(new Error(err.error || `HTTP ${res.status}`), {
+			status: res.status,
+		});
 	}
 	return res.json();
 }
@@ -616,15 +619,36 @@ function imageTokensFor(imageSrc?: string) {
 	return (imageSrc && uploadedImageTokens.get(imageSrc)) || {};
 }
 
+/**
+ * 同じセッションIDの POST /api/auth/anonymous を1本にまとめる。1回のページ表示で
+ * useCurrentUser（部品ごと）・page.tsx・PostDetail・BbsThreadView などが同時に呼ぶので、
+ * まとめないと 2〜4 本飛び、初回訪問ではそのたびにサーバーの登録枠（SIGNUP_LIMITER）を減らし、
+ * 毎回 Neon を引く。成功した結果は少しのあいだ使い回し、失敗はすぐ忘れる（次の呼び出しでやり直す）。
+ */
+const anonymousInFlight = new Map<string, Promise<AnonymousUser>>();
+const ANONYMOUS_SHARE_MS = 5000;
+
+function sharedAnonymous(sessionId: string): Promise<AnonymousUser> {
+	const pending = anonymousInFlight.get(sessionId);
+	if (pending) return pending;
+	const p = fetcher<AnonymousUser>("/auth/anonymous", {
+		method: "POST",
+		body: JSON.stringify({ sessionId }),
+	});
+	anonymousInFlight.set(sessionId, p);
+	const forget = () => {
+		if (anonymousInFlight.get(sessionId) === p)
+			anonymousInFlight.delete(sessionId);
+	};
+	p.then(() => setTimeout(forget, ANONYMOUS_SHARE_MS), forget);
+	return p;
+}
+
 const liveApi = {
 	auth: {
 		// セッションIDは秘密なのでクエリ（GET ?sessionId=）ではなく本文で送る。
-		// サーバーは互換のため GET も受け付ける（app/api/auth/anonymous/route.ts）。
-		anonymous: (sessionId: string) =>
-			fetcher<AnonymousUser>("/auth/anonymous", {
-				method: "POST",
-				body: JSON.stringify({ sessionId }),
-			}),
+		// サーバーは POST だけを受け付ける（GET は 410。app/api/auth/anonymous/route.ts）。
+		anonymous: (sessionId: string) => sharedAnonymous(sessionId),
 		/**
 		 * プロフィール更新。`displayName` は省略可（アイコン/自己紹介だけ更新するときは渡さない）。
 		 * 画面表示用のラベルをここへ渡すと、それが本名として保存され slug まで変わるので注意。
@@ -633,11 +657,14 @@ const liveApi = {
 			displayName?: string;
 			avatarUrl?: string;
 			bio?: string;
-		}) =>
-			fetcher<{ success: boolean }>("/auth/anonymous", {
+		}) => {
+			// 使い回し中の古い表示名を返さないように
+			anonymousInFlight.clear();
+			return fetcher<{ success: boolean }>("/auth/anonymous", {
 				method: "PUT",
 				body: JSON.stringify({ ...changes, sessionId: ensureSessionId() }),
-			}),
+			});
+		},
 		// 本人の設定だけを返す（サーバーがセッションから決める）。slug は互換のため受け取るが送らない
 		getSettings: (_slug?: string) =>
 			fetcher<{
@@ -1198,3 +1225,23 @@ const liveApi = {
 };
 
 export const api = useStaticMockData ? staticApi : liveApi;
+
+/**
+ * トーストに出す文言。サーバーが利用者向けに返した日本語のエラー（4xx の `{ error }`。例:
+ * 「この画像URLは添付にできません…」「このスレッドは終了しています」）はそのまま出し、
+ * それ以外（英語の内部向けの文言・5xx・通信エラー）は fallback にする。
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+	const e = err as { status?: unknown; message?: unknown } | null;
+	if (
+		e &&
+		typeof e.status === "number" &&
+		e.status >= 400 &&
+		e.status < 500 &&
+		typeof e.message === "string" &&
+		/[^\x00-\x7f]/.test(e.message)
+	) {
+		return e.message;
+	}
+	return fallback;
+}

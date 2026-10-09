@@ -12,8 +12,12 @@ import type { OriginType } from "@/lib/types";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
 import {
 	contentError,
+	errorResponse,
 	isAcceptableNewImageSrc,
+	isAcceptableOriginType,
+	parseCreateDotMeta,
 	sanitizeAvatarColor,
+	sanitizeContentText,
 } from "../_lib/post-input";
 import { workOwnershipError } from "../_lib/work-owner";
 
@@ -61,7 +65,10 @@ export async function GET(request: NextRequest) {
 		return await withEdgeCache(
 			request,
 			// 過去ページ（カーソル付き）は内容がほぼ変わらないので長めに持たせる。
-			{ sMaxAge: beforeId ? 60 : 10, personalized: !!claimedUserId },
+			// パーソナライズの判定はセッションで裏取りした viewer で行う。名乗っただけの
+			// ?userId= で判定すると、でたらめな値を付けるだけで毎回キャッシュを素通りして
+			// Neon を叩かせられる（R4）。裏取りできなければ匿名の応答なので共有キャッシュでよい。
+			{ sMaxAge: beforeId ? 60 : 10, personalized: !!userId },
 			async () => {
 				const posts = await db.getPosts(userId, {
 					limit,
@@ -78,9 +85,8 @@ export async function GET(request: NextRequest) {
 			},
 		);
 	} catch (e) {
-		console.error("[GET /api/posts]", e);
-		const message = e instanceof Error ? e.message : String(e);
-		return NextResponse.json({ error: message }, { status: 500 });
+		// Postgres のエラーメッセージを利用者に返さない（app/api/_lib/post-input.ts errorResponse）
+		return errorResponse("[GET /api/posts]", e);
 	}
 }
 
@@ -89,7 +95,7 @@ export async function POST(request: NextRequest) {
 		const body = await request.json();
 		const {
 			displayName: bodyDisplayName,
-			content,
+			content: rawContent,
 			hasImage,
 			imageSrc,
 			imageAlt,
@@ -99,10 +105,7 @@ export async function POST(request: NextRequest) {
 			mvId,
 			talkId,
 			otomadId,
-			dotW,
-			dotH,
-			animFrames,
-			animFps,
+			// dotW/dotH/animFrames/animFps は parseCreateDotMeta(body) で読む
 			walkPreset,
 			originType,
 			sessionId: bodySessionId,
@@ -123,9 +126,14 @@ export async function POST(request: NextRequest) {
 			animFrames?: number;
 			animFps?: number;
 			walkPreset?: string;
-			originType?: OriginType;
+			originType?: OriginType | null;
 			sessionId?: string;
 		} = body;
+
+		// 不可視・bidi・制御文字は保存前に除去する（unj でも表示される行なので。post-input.ts）。
+		// 「本文が空か」の判定も除去後の値で行い、ゼロ幅文字だけの投稿を通さない。
+		// 以降の検証・保存はすべてこの値を使うこと。
+		const content = sanitizeContentText(rawContent);
 
 		if (
 			!content &&
@@ -148,6 +156,15 @@ export async function POST(request: NextRequest) {
 		}
 		if (!isAcceptableNewImageSrc(imageSrc)) {
 			return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
+		}
+		// ドット絵メタは PATCH と同じ範囲に収める（列は SMALLINT。NaN・文字列は 400、範囲外の数値は丸める／捨てる）
+		const dotMeta = parseCreateDotMeta(body);
+		if (dotMeta === "invalid") {
+			return NextResponse.json({ error: "Invalid dotMeta" }, { status: 400 });
+		}
+		// 権利表記は選択肢の値だけ（任意の文字列を共有の行に置かせない）
+		if (!isAcceptableOriginType(originType)) {
+			return NextResponse.json({ error: "Invalid originType" }, { status: 400 });
 		}
 
 		// 多層不正検知（Turnstile + 指紋 + TLS、lib/security/post-guard.ts）。
@@ -208,14 +225,11 @@ export async function POST(request: NextRequest) {
 			mvId: decodedMvId === null ? undefined : decodedMvId,
 			talkId: decodedTalkId === null ? undefined : decodedTalkId,
 			otomadId: decodedOtomadId === null ? undefined : decodedOtomadId,
-			dotW: dotW ? Number(dotW) : undefined,
-			dotH: dotH ? Number(dotH) : undefined,
-			animFrames: animFrames ? Number(animFrames) : undefined,
-			animFps: animFps ? Number(animFps) : undefined,
+			...dotMeta,
 			walkPreset: sanitizeWalkPreset(walkPreset),
 			...mmlRef,
 			...parseImageDeleteRef(body, imageSrc),
-			originType,
+			originType: originType ?? undefined,
 		});
 		await attachEmbedInfo(post);
 		const encoded = encodePost(post);
@@ -230,8 +244,7 @@ export async function POST(request: NextRequest) {
 
 		return NextResponse.json(encoded, { status: 201 });
 	} catch (e) {
-		console.error("[POST /api/posts]", e);
-		const message = e instanceof Error ? e.message : String(e);
-		return NextResponse.json({ error: message }, { status: 500 });
+		// セッション無し（401）・登録枠（429）などの expose 付きエラーだけ文言を返す
+		return errorResponse("[POST /api/posts]", e);
 	}
 }

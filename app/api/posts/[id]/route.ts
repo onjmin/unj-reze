@@ -8,9 +8,41 @@ import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
-import { tryHeart, tryVote } from "@/lib/security/vote-guard";
+import { torBlockedResponse } from "@/lib/security/post-guard";
+import { claimOnce, tryHeart, tryVote } from "@/lib/security/vote-guard";
 import { isValidWalkPreset } from "@/lib/assets/walk-cycle";
-import { contentError, isAcceptableEditedImageSrc } from "../../_lib/post-input";
+import {
+	contentLengthError,
+	DOT_META_MAX,
+	EDITED_IMAGE_REJECTED_MESSAGE,
+	errorResponse,
+	isAcceptableEditedImageSrc,
+	isAcceptableOriginType,
+	parseDotMetaInt,
+	sanitizeContentText,
+	unjTextRuleError,
+	unjTextRuleErrorForEdit,
+} from "../../_lib/post-input";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+/**
+ * ハンドラの例外を errorResponse（app/api/_lib/post-input.ts）に通す。以前は素通しで、
+ * Next の既定の 500 になるか、他のルートでは Postgres のエラーメッセージをそのまま返していた。
+ * expose 付きのエラー（db が投げる利用者向けの文言）だけはその文言と status で返す。
+ */
+function withErrorResponse(
+	tag: string,
+	handler: (request: NextRequest, context: RouteContext) => Promise<Response>,
+) {
+	return async (request: NextRequest, context: RouteContext) => {
+		try {
+			return await handler(request, context);
+		} catch (e) {
+			return errorResponse(tag, e);
+		}
+	};
+}
 
 /**
  * ハート1回の送信で足せる上限。クライアント（lib/hooks/usePostActions.ts handleHeart）は
@@ -32,32 +64,12 @@ function parseDotMeta(raw: unknown): DotMetaEdit | undefined | "invalid" {
 	const r = raw as Record<string, unknown>;
 	const out: DotMetaEdit = {};
 
-	const posInt = (v: unknown, max: number): number | null | "invalid" => {
-		if (v === null) return null;
-		if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > max)
-			return "invalid";
-		return v;
-	};
-
-	if ("dotW" in r) {
-		const v = posInt(r.dotW, 512);
+	// 範囲は新規投稿・返信と共通（app/api/_lib/post-input.ts DOT_META_MAX）
+	for (const key of ["dotW", "dotH", "animFrames", "animFps"] as const) {
+		if (!(key in r)) continue;
+		const v = parseDotMetaInt(r[key], DOT_META_MAX[key]);
 		if (v === "invalid") return "invalid";
-		out.dotW = v;
-	}
-	if ("dotH" in r) {
-		const v = posInt(r.dotH, 512);
-		if (v === "invalid") return "invalid";
-		out.dotH = v;
-	}
-	if ("animFrames" in r) {
-		const v = posInt(r.animFrames, 200);
-		if (v === "invalid") return "invalid";
-		out.animFrames = v;
-	}
-	if ("animFps" in r) {
-		const v = posInt(r.animFps, 60);
-		if (v === "invalid") return "invalid";
-		out.animFps = v;
+		out[key] = v;
 	}
 	if ("walkPreset" in r) {
 		if (r.walkPreset === null) out.walkPreset = null;
@@ -67,10 +79,10 @@ function parseDotMeta(raw: unknown): DotMetaEdit | undefined | "invalid" {
 	return out;
 }
 
-export async function GET(
+export const GET = withErrorResponse("[GET /api/posts/[id]]", async (
 	_request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+	{ params }: RouteContext,
+) => {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) {
@@ -89,12 +101,12 @@ export async function GET(
 	}
 	await attachEmbedInfo(post);
 	return NextResponse.json(encodePost(post));
-}
+});
 
-export async function PUT(
+export const PUT = withErrorResponse("[PUT /api/posts/[id]]", async (
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+	{ params }: RouteContext,
+) => {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) {
@@ -119,9 +131,14 @@ export async function PUT(
 	switch (action) {
 		case "like":
 		case "dislike":
-			// 重複投票の判定はインメモリ（unj の like.ts と同じ方式）。
+			// 重複投票の判定はインメモリ（unj の like.ts と同じ方式）に加え、isolate をまたいで
+			// 効く DEDUPE_LIMITER（lib/security/vote-guard.ts claimOnce）も通す。Workers では
+			// インメモリだけだと別 isolate に当たるたびに何度でも入っていた。
 			// DBに投票行を持たないので、再投票済みなら現状の投稿をそのまま返す。
-			if (!tryVote(actorId, decodedId, action)) {
+			if (
+				!tryVote(actorId, decodedId, action) ||
+				!(await claimOnce("vote", actorId, decodedId))
+			) {
 				const current = await db.getPost(decodedId, actorId);
 				if (!current)
 					return NextResponse.json(
@@ -152,12 +169,12 @@ export async function PUT(
 
 	await attachEmbedInfo(result);
 	return NextResponse.json(encodePost(result));
-}
+});
 
-export async function POST(
+export const POST = withErrorResponse("[POST /api/posts/[id]]", async (
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+	{ params }: RouteContext,
+) => {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) {
@@ -180,8 +197,11 @@ export async function POST(
 		Math.max(1, Math.floor(Number(rawCount) || 1)),
 	);
 
-	// ハートも1投稿1回まで（インメモリ判定）
-	if (!tryHeart(actorId, decodedId)) {
+	// ハートも1投稿1回まで（インメモリ判定＋DEDUPE_LIMITER。理由は PUT の like と同じ）
+	if (
+		!tryHeart(actorId, decodedId) ||
+		!(await claimOnce("heart", actorId, decodedId))
+	) {
 		const current = await db.getPost(decodedId, actorId);
 		if (!current)
 			return NextResponse.json({ error: "Post not found" }, { status: 404 });
@@ -195,17 +215,21 @@ export async function POST(
 	}
 	await attachEmbedInfo(result);
 	return NextResponse.json(encodePost(result));
-}
+});
 
-export async function PATCH(
+export const PATCH = withErrorResponse("[PATCH /api/posts/[id]]", async (
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+	{ params }: RouteContext,
+) => {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) {
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
+	// 編集も unj の板に出る行を書き換えるので、新規投稿と同じく Tor からは受け付けない
+	// （lib/security/post-guard.ts torBlockedResponse）
+	const torBlocked = torBlockedResponse(request);
+	if (torBlocked) return torBlocked;
 	const body = (await request.json()) as {
 		content?: string;
 		originType?: OriginType | null;
@@ -213,24 +237,66 @@ export async function PATCH(
 		sessionId?: string;
 		dotMeta?: unknown;
 	};
-	const { content, originType, imageSrc, sessionId, dotMeta: rawDotMeta } = body;
+	const {
+		content: rawContent,
+		originType,
+		imageSrc,
+		sessionId,
+		dotMeta: rawDotMeta,
+	} = body;
 	// 所有者判定に使う身元は必ずセッションから取る。body の userId を信じると
 	// display_name / slug はどちらも公開情報なので、他人の投稿を編集できてしまう。
 	const user = await resolveSessionUser(request, sessionId);
 	if (!user) {
 		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	}
-	if (typeof content !== "string") {
+	if (typeof rawContent !== "string") {
 		return NextResponse.json({ error: "content is required" }, { status: 400 });
 	}
-	// 本文の長さと画像URLの検証は新規投稿と同じ（app/api/_lib/post-input.ts）。
-	// 画像は「本文中のURLを添付に昇格」導線があるので https の外部URLも通す。
-	const badContent = contentError(content);
-	if (badContent) {
-		return NextResponse.json({ error: badContent }, { status: 400 });
+	// 不可視・bidi・制御文字の除去も新規投稿と同じ。検証・保存はこの値で行う
+	const content = sanitizeContentText(rawContent);
+	// 本文の長さ・URL 規則と画像URLの検証は新規投稿と同じ（app/api/_lib/post-input.ts）。
+	// 画像は「本文中のURLを添付に昇格」導線があるので、unj が画像の埋め込みを許すホストの
+	// 外部URLも通す（それ以外は unj の閲覧者全員に読ませるトラッキングピクセルになる）。
+	const lengthError = contentLengthError(content);
+	if (lengthError) {
+		return NextResponse.json({ error: lengthError }, { status: 400 });
 	}
-	if (!isAcceptableEditedImageSrc(imageSrc)) {
-		return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
+	let ruleError = unjTextRuleError(content);
+	let imageOk = isAcceptableEditedImageSrc(imageSrc);
+	if (ruleError || !imageOk) {
+		// 規則を入れる前の投稿は、9 本以上の URL・短縮URL・許可外ホストの添付画像を含みうる。
+		// 編集モーダルは本文と画像を毎回丸ごと送り直すので、以前から入っていたものまで弾くと
+		// 誤字直しや権利表記の変更すらできなくなる。違反があったときだけ保存済みの行を
+		// （レス無しで）読み、以前からあったものなら通す。他人の投稿なら下の editPost が 404 にする。
+		const current = await db.getPost(decodedId, user.slug, {
+			withReplies: false,
+		});
+		if (current) {
+			if (ruleError)
+				ruleError = unjTextRuleErrorForEdit(
+					content,
+					sanitizeContentText(current.content ?? ""),
+				);
+			if (!imageOk)
+				imageOk =
+					typeof imageSrc === "string" &&
+					imageSrc !== "" &&
+					imageSrc === current.imageSrc;
+		}
+	}
+	if (ruleError) {
+		return NextResponse.json({ error: ruleError }, { status: 400 });
+	}
+	if (!imageOk) {
+		return NextResponse.json(
+			{ error: EDITED_IMAGE_REJECTED_MESSAGE },
+			{ status: 400 },
+		);
+	}
+	// 権利表記は選択肢の値か、null（＝表記を外す）だけ
+	if (!isAcceptableOriginType(originType)) {
+		return NextResponse.json({ error: "Invalid originType" }, { status: 400 });
 	}
 	const dotMeta = parseDotMeta(rawDotMeta);
 	if (dotMeta === "invalid") {
@@ -302,12 +368,12 @@ export async function PATCH(
 		previousImage?: { deleteId: string; deleteHash: string };
 	};
 	return NextResponse.json({ ...encoded, previousMml, previousImage });
-}
+});
 
-export async function DELETE(
+export const DELETE = withErrorResponse("[DELETE /api/posts/[id]]", async (
 	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+	{ params }: RouteContext,
+) => {
 	const { id } = await params;
 	const decodedId = decodeId(id);
 	if (decodedId === null) {
@@ -392,4 +458,4 @@ export async function DELETE(
 				}
 			: undefined,
 	});
-}
+});

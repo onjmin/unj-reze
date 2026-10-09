@@ -84,6 +84,69 @@ const notFound = () =>
 const upstreamError = () =>
 	NextResponse.json({ error: "rpgen upstream unreachable" }, { status: 502 });
 
+/**
+ * 上流のリダイレクトには従わない（`redirect: "manual"`）。従うと、上流（や途中の CDN）が
+ * 返した Location 先の内容を自オリジンから配ることになり、allowlist を迂回される。
+ * 3xx（ブラウザ互換の実装では opaqueredirect）は上流エラー扱いにする。
+ */
+const isRedirect = (res: Response) =>
+	res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
+
+/** rechord の JSON をこれ以上は読まない（上流が巨大な応答を返しても Worker のメモリを守る） */
+const MAX_RECHORD_JSON_BYTES = 2 * 1024 * 1024;
+
+/** 本文を上限付きで読む。上限を超えたら null（読みかけの本文は捨てる） */
+const readTextCapped = async (
+	res: Response,
+	maxBytes: number,
+): Promise<string | null> => {
+	const declared = Number(res.headers.get("Content-Length"));
+	if (Number.isFinite(declared) && declared > maxBytes) {
+		await res.body?.cancel().catch(() => {});
+		return null;
+	}
+	if (!res.body) return "";
+	const reader = res.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > maxBytes) {
+			await reader.cancel().catch(() => {});
+			return null;
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const c of chunks) {
+		bytes.set(c, offset);
+		offset += c.byteLength;
+	}
+	return new TextDecoder().decode(bytes);
+};
+
+/**
+ * JSON の文字列値に含まれる `<` `>` を全角（＜ ＞）に置き換える（キーはそのまま）。
+ * @onjmin/dtm 2.1.32 の和音パネルは rechord の譜面本文（score.content）をエスケープせずに
+ * innerHTML へ入れる（node_modules/@onjmin/dtm/dist/index.mjs の rechord 表示部）ので、
+ * 本体が直るまではここでタグとして解釈されない形にしてから渡す（R26 の当座の対策）。
+ * `__proto__` というキーも普通のプロパティとして写すため、受け皿はプロトタイプ無しにする。
+ */
+const neutralizeAngles = (value: unknown): unknown => {
+	if (typeof value === "string")
+		return value.replace(/</g, "＜").replace(/>/g, "＞");
+	if (Array.isArray(value)) return value.map(neutralizeAngles);
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = Object.create(null);
+		for (const [k, v] of Object.entries(value)) out[k] = neutralizeAngles(v);
+		return out;
+	}
+	return value;
+};
+
 const authHeaders = (request: NextRequest): Record<string, string> => ({
 	Authorization: `Bearer ${AUTH_TOKEN}`,
 	Origin: request.headers.get("origin") ?? "",
@@ -113,18 +176,48 @@ export async function GET(
 	try {
 		const res = await fetch(upstreamUrl, {
 			headers: isData ? {} : authHeaders(request),
+			redirect: "manual",
 			next: { revalidate: isData ? 86400 : 300 },
 		});
+		if (isRedirect(res)) {
+			await res.body?.cancel().catch(() => {});
+			return upstreamError();
+		}
 
-		// 本文はストリームのまま返す（MIDI 等のバイナリもあるので text() にしない）。
-		const headers = hardenHeaders(
-			new Headers(),
-			res.headers.get("Content-Type"),
-		);
+		const upstreamType = res.headers.get("Content-Type");
+		const headers = hardenHeaders(new Headers(), upstreamType);
+		// 長く持たせるのは成功応答だけ。エラー（404/5xx）を immutable で配ると、
+		// 上流が直っても閲覧者のブラウザに1日残り続ける。
 		headers.set(
 			"Cache-Control",
-			isData ? "public, max-age=86400, immutable" : "public, max-age=300",
+			!res.ok
+				? "no-store"
+				: isData
+					? "public, max-age=86400, immutable"
+					: "public, max-age=300",
 		);
+
+		// rechord の成功応答は中身を書き換える（neutralizeAngles 参照）。dtm は rechord を
+		// 必ず res.json() で読むので、Content-Type に関係なく JSON として扱う（application/json
+		// 以外で返されたときに素通しになる抜け道を作らない）。読めない・大きすぎる・JSON で
+		// ないものは素通しせず上流エラーにする。
+		if (path[0] === "rechord" && res.ok) {
+			const text = await readTextCapped(res, MAX_RECHORD_JSON_BYTES);
+			if (text === null) return upstreamError();
+			let json: unknown;
+			try {
+				json = neutralizeAngles(JSON.parse(text));
+			} catch {
+				return upstreamError();
+			}
+			headers.set("Content-Type", "application/json; charset=utf-8");
+			return new NextResponse(JSON.stringify(json), {
+				status: res.status,
+				headers,
+			});
+		}
+
+		// 本文はストリームのまま返す（MIDI 等のバイナリもあるので text() にしない）。
 		return new NextResponse(res.body, { status: res.status, headers });
 	} catch {
 		return upstreamError();
@@ -162,7 +255,12 @@ export async function POST(
 			method: "POST",
 			headers: { ...authHeaders(request), "Content-Type": "application/json" },
 			body: JSON.stringify({ ids }),
+			redirect: "manual",
 		});
+		if (isRedirect(res)) {
+			await res.body?.cancel().catch(() => {});
+			return upstreamError();
+		}
 		const headers = hardenHeaders(
 			new Headers(),
 			res.headers.get("Content-Type"),

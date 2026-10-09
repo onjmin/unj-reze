@@ -433,6 +433,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 							type="text"
 							value={input}
 							onChange={(e) => setInput(e.target.value)}
+							maxLength={5000}
 							disabled={!myId || !canSend}
 							placeholder={
 								canSend ? "メッセージを入力..." : "相手からの返信を待っています"

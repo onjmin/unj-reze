@@ -64,10 +64,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 			/* noop */
 		}
 
+		// slug は reze 利用者の投稿にだけ付く（unj 純正・システムユーザーには付かない）。
+		// slug の無い投稿は飛ばす。表示名の URL は作らない（/api/users は 404 になる）。
 		const slugs = new Set<string>();
 		for (const post of posts) {
-			const slug = post.slug || post.displayName;
-			if (slug) slugs.add(slug);
+			if (post.slug) slugs.add(post.slug);
 		}
 		userEntries = [...slugs].slice(0, 100).map((slug) => ({
 			url: `${SITE_URL}/user/${encodeURIComponent(slug)}`,

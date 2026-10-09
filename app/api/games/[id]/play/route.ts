@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
-import { getClientIp } from "@/lib/ip";
-import { kvExists, kvSetEx } from "@/lib/kv";
+import { getClientIp, rateLimitKeyFromIp } from "@/lib/ip";
+import {
+	getRateLimitEnv,
+	isFirstWithinWindow,
+} from "@/lib/security/rate-limit";
 import { decodeId, encodeGame } from "@/lib/sqids";
 
-/** 同じIPからの連打でプレイ数が水増しされないようにする猶予（秒） */
+/**
+ * 同じIPからの連打でプレイ数が水増しされないようにする猶予（秒）。KV で判定するとき用。
+ * 本番は DEDUPE_LIMITER（60 秒窓）で判定し、KV の書き込み枠を食わない
+ * （lib/security/rate-limit.ts isFirstWithinWindow）。
+ */
 const PLAY_DEDUPE_SEC = 120;
 
 /**
@@ -44,15 +51,17 @@ export async function POST(
 	// 誰でも他人の名前（や任意の文言）でランキングに載せられる。身元が無ければ名無し。
 	const displayName = sessionUser?.displayName ?? "名無し";
 
+	// IPv6 は /64 に丸める（末尾を変えるだけで何度でも数え直せないように）
+	const ipKey = rateLimitKeyFromIp(getClientIp(request.headers));
+	const env = await getRateLimitEnv();
+
 	let countPlay = phase === "start";
 	if (countPlay) {
-		const key = `gameplay:${gameId}:${getClientIp(request.headers)}`;
-		try {
-			if (await kvExists(key)) countPlay = false;
-			else await kvSetEx(key, "1", PLAY_DEDUPE_SEC);
-		} catch {
-			// KVが落ちていても記録自体は続行する
-		}
+		countPlay = await isFirstWithinWindow(
+			env,
+			`play:game:${gameId}:${ipKey}`,
+			PLAY_DEDUPE_SEC,
+		);
 	}
 
 	if (!countPlay && phase === "start") {
@@ -62,13 +71,11 @@ export async function POST(
 	// クリア数も同じIPからの連打で水増しさせない（スコア自体は自己申告なので防げない）
 	let countClear = cleared;
 	if (countClear) {
-		const key = `gameclear:${gameId}:${getClientIp(request.headers)}`;
-		try {
-			if (await kvExists(key)) countClear = false;
-			else await kvSetEx(key, "1", PLAY_DEDUPE_SEC);
-		} catch {
-			// KVが落ちていても記録自体は続行する
-		}
+		countClear = await isFirstWithinWindow(
+			env,
+			`clear:game:${gameId}:${ipKey}`,
+			PLAY_DEDUPE_SEC,
+		);
 	}
 
 	const updated = await db.recordGamePlay(gameId, {

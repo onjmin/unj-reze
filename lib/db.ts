@@ -57,7 +57,15 @@ export const db = new Proxy<DataStore>({} as DataStore, {
 					);
 				} catch (err) {
 					const provider = process.env.DATABASE_PROVIDER || "mock";
-					if (provider !== "mock" && isConnError(err)) {
+					// 本番では mockStore に切り替えない。切り替えると、DB 障害中に書き込みが
+					// アイソレートのメモリへ消え、閲覧者ごとに違う架空のデータが「正常」として返る
+					// （障害にも気付きにくい）。エラーのまま返して呼び出し側の 500 / fail-open に任せる。
+					// ローカル開発（docker の DB を上げ忘れた等）でだけ従来どおり落とす。
+					if (
+						provider !== "mock" &&
+						isConnError(err) &&
+						process.env.NODE_ENV !== "production"
+					) {
 						console.warn(
 							`[db] Database connection failed (${provider}). Falling back to mockStore.`,
 							(err as ErrorLike).message || err,

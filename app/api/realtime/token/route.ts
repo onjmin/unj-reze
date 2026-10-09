@@ -18,7 +18,11 @@ export const dynamic = "force-dynamic";
  * そのまま従来のポーリングで動く。
  */
 
-/** トークンの寿命。ハブは購読の瞬間にだけ検証するので、張った購読は接続が続く限り生きる。 */
+/**
+ * トークンの寿命。ハブは既定では購読の瞬間にだけ検証するので、張った購読は接続が続く限り生きる。
+ * ハブを ENFORCE_USER_SUB_EXPIRY=1 で動かすと期限で購読を外して `{t:"resub"}` を送り、
+ * クライアント（lib/realtime/client.ts）が新しいトークンで張り直す。
+ */
 const TOKEN_TTL_SEC = 60 * 60;
 
 function base64url(bytes: ArrayBuffer): string {

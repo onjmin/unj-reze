@@ -314,7 +314,7 @@ export default function SpriteImage({
 	const playing = animate && !isSheet;
 
 	const spriteStyle: CSSProperties = {
-		backgroundImage: `url(${src})`,
+		backgroundImage: `url(${JSON.stringify(src)})`,
 		backgroundSize: isSheet ? "100% 100%" : `${frames * 100}% ${rows * 100}%`,
 		backgroundPosition: isSheet ? "0% 0%" : `0% ${yPos}%`,
 		backgroundRepeat: "no-repeat",

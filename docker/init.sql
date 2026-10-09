@@ -364,8 +364,8 @@ CREATE INDEX idx_user_follows_followed ON user_follows (followed_user_id);
 -- unj-reze の PUT /api/posts/[id] action=repost が書く（lib/db/pg.ts repostPost）。
 -- threads と res は id 空間が別なので post_kind で分ける（0=threads.id, 1=res.id）。
 -- threads/res.reposts はここの行数を非正規化した件数で、行が実際に増減したときだけ ±1 する。
--- target_id に外部キーは張れない（参照先が種別で変わる）。レスは物理削除なので孤児行が
--- 残りうるが、res.id は SERIAL で再利用されないので表示には影響しない。
+-- target_id に外部キーは張れない（参照先が種別で変わる）。レスもスレと同じく論理削除
+-- （本文を差し替え、行と num は残す）なので参照先は消えない。res.id は SERIAL で再利用もされない。
 CREATE TABLE post_reposts (
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     post_kind SMALLINT NOT NULL, -- 0=スレ(threads.id) / 1=レス(res.id)

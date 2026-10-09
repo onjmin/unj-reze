@@ -60,7 +60,10 @@ export type RealtimeMessage =
 			t: "partyUpdate";
 			game: string;
 			members: { playerId: string; name?: string }[];
-	  };
+	  }
+	/** user:* 購読のトークン期限（ハブが ENFORCE_USER_SUB_EXPIRY=1 のときだけ）。client.ts が内部で
+	 *  張り直し、購読者のハンドラには渡さない */
+	| { t: "resub"; channel: string };
 
 export interface RealtimePlayer {
 	/** ハブが振った公開ID（セッションIDではない）。 */

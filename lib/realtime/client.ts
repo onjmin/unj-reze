@@ -159,6 +159,13 @@ class RealtimeClient {
 				return;
 			}
 			if (!msg || typeof msg !== "object") return;
+			// ハブ→この接続だけの制御メッセージ（RealtimeMessage には載せない）。
+			const ctl = msg as unknown as { t?: unknown; channel?: unknown };
+			if (ctl.t === "resub") {
+				if (this.ws === ws && typeof ctl.channel === "string")
+					this.handleResub(ctl.channel);
+				return;
+			}
 			if (msg.t === "welcome" && this.ws === ws) {
 				this.serverId =
 					typeof msg.playerId === "string" ? msg.playerId : null;
@@ -268,7 +275,8 @@ class RealtimeClient {
 
 	/** user:* チャンネルをトークン付きで購読する。トークンが取れなくても sub は送る
 	 *  （新ハブは黙って捨てるだけ。トークン非対応の旧ハブならそのまま購読できる）。
-	 *  ハブはトークンを購読の瞬間にだけ見るので、期限切れでも張った購読は接続が続く限り生きる。
+	 *  ハブは既定ではトークンを購読の瞬間にだけ見るので、期限切れでも張った購読は接続が続く限り生きる
+	 *  （ハブが ENFORCE_USER_SUB_EXPIRY=1 なら期限で外して resub を送ってくる → handleResub）。
 	 *  再接続時は onopen からここへ来て、期限が近ければ取り直す。 */
 	private async subscribeUserChannels(list: string[]) {
 		const token = await this.getUserToken();
@@ -280,6 +288,24 @@ class RealtimeClient {
 				? { t: "sub", channels: still, token }
 				: { t: "sub", channels: still },
 		);
+	}
+
+	/** ハブから `{t:"resub", channel}`（user:* 購読のトークン期限が近い／切れて外した）。
+	 *  トークンを取り直して sub し直す（購読中なら期限が延びるだけ）。手元のトークンは
+	 *  端末の時計のずれで「まだ使える」と見誤らないよう捨てる。取れなかったら1回だけ
+	 *  TOKEN_RETRY_MS 後にやり直す（ハブは外した購読にはもう resub を送ってこない）。 */
+	private handleResub(channel: string, retried = false) {
+		if (!isUserChannel(channel) || !this.refCounts.has(channel)) return;
+		this.userToken = null;
+		void this.getUserToken().then((token) => {
+			if (!this.refCounts.has(channel)) return;
+			if (token) {
+				this.rawSend({ t: "sub", channels: [channel], token });
+				return;
+			}
+			if (retried || this.disposed) return;
+			setTimeout(() => this.handleResub(channel, true), TOKEN_RETRY_MS + 1000);
+		});
 	}
 
 	/** メッセージ購読。返り値を呼ぶと解除。 */

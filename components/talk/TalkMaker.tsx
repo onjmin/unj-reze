@@ -324,6 +324,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 				<input
 					value={manifest.title}
 					onChange={(e) => update({ title: e.target.value })}
+					maxLength={100}
 					placeholder="タイトル"
 					className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[13px] outline-none"
 				/>

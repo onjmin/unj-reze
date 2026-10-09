@@ -1,0 +1,7 @@
+# ビルドコンテキストは services/realtime なので、ルートの .dockerignore はここには効かない
+# 秘密・ローカル専用のものをイメージに入れない
+.env*
+!.env.example
+.dev.vars*
+node_modules
+npm-debug.log*

@@ -40,6 +40,11 @@ yarn-error.log*
 .env.development
 # 本番相当のローカル検証用上書き（秘密が入りうるのでコミットしない）
 .env*.local
+# 上に無い .env.* も含めて全部（.env.example だけはコミットする）
+.env*
+!.env.example
+# wrangler dev の秘密（Worker secret のローカル版）
+.dev.vars*
 
 # vercel
 .vercel
@@ -68,3 +73,6 @@ tmp
 
 # wrangler / miniflare のローカル実行状態（ビルド時に生成される）
 .wrangler/
+
+# OpenNext のビルド出力（Worker バンドル。ビルド時の env が焼き込まれうる）
+/.open-next/

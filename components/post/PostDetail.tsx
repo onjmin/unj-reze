@@ -22,7 +22,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiErrorMessage } from "@/lib/api";
+import {
+	isDeletedPlaceholder,
+	toDeletedPlaceholder,
+} from "@/lib/post/deleted-placeholder";
 import { avatarSeedOf, getAvatarInfo } from "@/lib/social/avatar";
 import {
 	createGame,
@@ -255,8 +259,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	);
 
 	useEffect(() => {
-		const targetSlug = post.slug || post.displayName;
-		if (!userSlug || userSlug === targetSlug) return;
+		// slug の無い投稿者（unj 純正・システムユーザー）はプロフィールなし。表示名では引かない。
+		const targetSlug = post.slug;
+		if (!userSlug || !targetSlug || userSlug === targetSlug) return;
 		api.mute
 			.list(userSlug)
 			.then((r) => setMuted(r.muted.includes(targetSlug)))
@@ -265,7 +270,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			.list(userSlug)
 			.then((r) => setBlocked(r.blocked.includes(targetSlug)))
 			.catch(() => {});
-	}, [userSlug, post.slug, post.displayName]);
+	}, [userSlug, post.slug]);
 
 	const [prevInitial, setPrevInitial] = useState(initial);
 	if (prevInitial !== initial) {
@@ -445,8 +450,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 	const handleMenuBlock = async () => {
 		setMenuOpen(false);
-		const targetSlug = post.slug || post.displayName;
-		if (!userSlug || userSlug === targetSlug) return;
+		const targetSlug = post.slug;
+		if (!userSlug || !targetSlug || userSlug === targetSlug) return;
 		const was = blocked;
 		setBlocked(!was);
 		try {
@@ -461,8 +466,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 	const handleMenuMute = async () => {
 		setMenuOpen(false);
-		const targetSlug = post.slug || post.displayName;
-		if (!userSlug || userSlug === targetSlug) return;
+		const targetSlug = post.slug;
+		if (!userSlug || !targetSlug || userSlug === targetSlug) return;
 		const was = muted;
 		setMuted(!was);
 		try {
@@ -733,23 +738,27 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						: r,
 				),
 			}));
-		} catch {
+		} catch (e) {
 			if (prevReply) {
 				setPost((p) => ({
 					...p,
 					replies: p.replies.map((r) => (r.id === replyId ? prevReply : r)),
 				}));
 			}
-			showToast("error", "返信の編集に失敗しました");
+			showToast("error", apiErrorMessage(e, "返信の編集に失敗しました"));
 		}
 	};
 
 	const handleDeleteReply = async (replyId: string) => {
 		const prevReplies = post.replies;
+		const prevCount = post.repliesCount;
+		// サーバーはレスを消さずに番号ごと「(削除されました)」のプレースホルダにする（件数も減らない）。
+		// 一覧から抜くと再読み込みでプレースホルダとして戻ってくるので、その場で同じ形に置き換える
 		setPost((p) => ({
 			...p,
-			replies: p.replies.filter((r) => r.id !== replyId),
-			repliesCount: Math.max(0, p.repliesCount - 1),
+			replies: p.replies.map((r) =>
+				r.id === replyId ? toDeletedPlaceholder(r) : r,
+			),
 		}));
 		try {
 			await api.posts.remove(replyId, userId);
@@ -757,7 +766,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			setPost((p) => ({
 				...p,
 				replies: prevReplies,
-				repliesCount: prevReplies.length,
+				repliesCount: prevCount,
 			}));
 			showToast("error", "返信の削除に失敗しました");
 		}
@@ -992,9 +1001,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			);
 			setPost(updated);
 			router.refresh();
-		} catch {
+		} catch (e) {
 			setPost(prevPost);
-			showToast("error", "投稿の編集に失敗しました");
+			showToast("error", apiErrorMessage(e, "投稿の編集に失敗しました"));
 		}
 	};
 
@@ -1038,9 +1047,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			);
 			setPost(updated);
 			router.refresh();
-		} catch {
+		} catch (e) {
 			setPost(prevPost);
-			showToast("error", "画像の編集に失敗しました");
+			showToast("error", apiErrorMessage(e, "画像の編集に失敗しました"));
 		}
 	};
 
@@ -1250,9 +1259,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				);
 				setPost(updated);
 				router.refresh();
-			} catch {
+			} catch (e) {
 				setPost(prevPost);
-				showToast("error", "楽曲の編集に失敗しました");
+				showToast("error", apiErrorMessage(e, "楽曲の編集に失敗しました"));
 			}
 		} else {
 			// 返信のMML編集は、返信の本文編集と同じ経路（handleEditReply）に乗せる。
@@ -1270,9 +1279,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			const updated = await api.posts.edit(post.id, userId, post.content, ot);
 			setPost(updated);
 			router.refresh();
-		} catch {
+		} catch (e) {
 			setPost(prevPost);
-			showToast("error", "権利表記の更新に失敗しました");
+			showToast("error", apiErrorMessage(e, "権利表記の更新に失敗しました"));
 		}
 	};
 
@@ -1302,7 +1311,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setMenuOpen(false);
 	};
 
-	const isSelf = !!userSlug && (post.slug || post.displayName) === userSlug;
+	// slug はサーバーが reze 利用者の投稿にだけ付ける（unj 純正の書き込み・システムユーザーには
+	// 付かない＝users.id で名寄せさせない）。無ければプロフィール・DM・フォロー・ミュート・
+	// ブロックを出さない（表示名で代用すると別人を指しうる）。
+	const postHasProfile = !!post.slug;
+	const isSelf = postHasProfile && post.slug === userSlug;
+	// 削除済みのプレースホルダは編集（PATCH）が 404 になるので、編集・権利表記の導線を出さない
+	const canEdit = isSelf && !isDeletedPlaceholder(post);
 
 	// MML本文はR2にある。content にはマーカーだけが残るので、埋め込み表示可否の
 	// 判定は hasMml も見る（inline抽出は常に空文字になる）
@@ -1347,7 +1362,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									<Copy size={12} className="shrink-0" />
 									<span>テキストをコピー</span>
 								</button>
-								{isSelf && (
+								{canEdit && (
 									<button
 										role="menuitem"
 										onClick={handleMenuEdit}
@@ -1357,7 +1372,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>ポストを編集</span>
 									</button>
 								)}
-								{isSelf && (
+								{canEdit && (
 									<button
 										role="menuitem"
 										onClick={handleMenuOriginType}
@@ -1450,7 +1465,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>MVを改造する</span>
 									</button>
 								)}
-								{!isSelf && (
+								{!isSelf && postHasProfile && (
 									<button
 										role="menuitem"
 										onClick={handleMenuFollow}
@@ -1464,12 +1479,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										</span>
 									</button>
 								)}
-								{!isSelf && (
+								{!isSelf && postHasProfile && (
 									<button
 										role="menuitem"
 										onClick={() => {
 											setMenuOpen(false);
-											router.push(`/user/${post.slug || post.displayName}`);
+											router.push(`/user/${post.slug}`);
 										}}
 										className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors"
 									>
@@ -1477,7 +1492,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										<span>プロフページ</span>
 									</button>
 								)}
-								{!isSelf && (
+								{!isSelf && postHasProfile && (
 									<button
 										role="menuitem"
 										onClick={handleMenuMute}
@@ -1491,7 +1506,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 										</span>
 									</button>
 								)}
-								{!isSelf && (
+								{!isSelf && postHasProfile && (
 									<button
 										role="menuitem"
 										onClick={handleMenuBlock}
@@ -1524,13 +1539,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 				<div
 					onClick={(e) => {
 						e.stopPropagation();
-						cacheProfileSeed({
-							slug: post.slug || undefined,
-							displayName: post.displayName,
-							avatarUrl: post.avatarUrl,
-						});
+						if (postHasProfile) {
+							cacheProfileSeed({
+								slug: post.slug,
+								displayName: post.displayName,
+								avatarUrl: post.avatarUrl,
+							});
+						}
 						if (isSelf) {
-							router.push(`/user/${post.slug || post.displayName}`);
+							router.push(`/user/${post.slug}`);
 						} else {
 							const rect = e.currentTarget.getBoundingClientRect();
 							handleAvatarClick(
@@ -1714,19 +1731,20 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								<Repeat size={14} />
 								<span className="text-[11px]">{post.reactionsHidden ? "" : post.reposts || ""}</span>
 							</button>
-							<button
-								onClick={(e) => {
-									e.stopPropagation();
-									const targetSlug = post.slug || post.displayName;
-									if (targetSlug) {
-										router.push(`/messages/${encodeURIComponent(targetSlug)}`);
-									}
-								}}
-								className="flex items-center hover:text-blue-400 transition-colors"
-								title="DMを送る"
-							>
-								<Mail size={14} />
-							</button>
+							{postHasProfile && (
+								<button
+									onClick={(e) => {
+										e.stopPropagation();
+										router.push(
+											`/messages/${encodeURIComponent(post.slug || "")}`,
+										);
+									}}
+									className="flex items-center hover:text-blue-400 transition-colors"
+									title="DMを送る"
+								>
+									<Mail size={14} />
+								</button>
+							)}
 							<ShareButton
 								url={postShareUrl(post.id)}
 								text={buildPostShareText(post)}
@@ -2116,6 +2134,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						<textarea
 							value={reportReason}
 							onChange={(e) => setReportReason(e.target.value)}
+							maxLength={1000}
 							placeholder="理由の詳細…"
 							rows={3}
 							className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
@@ -2247,22 +2266,23 @@ function ReplyTreeItem({
 		setMenuOpen(false);
 	};
 
-	/** 返信者のプロフィールへ移動する。 */
+	/** 返信者のプロフィールへ移動する。slug の無い返信者（unj 純正）にはプロフィールが無い。 */
 	const handleMenuProfile = () => {
 		setMenuOpen(false);
+		if (!localPost.slug) return;
 		cacheProfileSeed({
-			slug: localPost.slug || undefined,
+			slug: localPost.slug,
 			displayName: localPost.displayName,
 			avatarUrl: localPost.avatarUrl,
 		});
-		router.push(`/user/${localPost.slug || localPost.displayName}`);
+		router.push(`/user/${localPost.slug}`);
 	};
 
 	// メニューを開いたときに現在のミュート/ブロック状態を取り出し、解除表記にできるようにする
 	useEffect(() => {
 		if (!menuOpen || !userSlug) return;
-		const targetSlug = localPost.slug || localPost.displayName;
-		if (userSlug === targetSlug) return;
+		const targetSlug = localPost.slug;
+		if (!targetSlug || userSlug === targetSlug) return;
 		api.mute
 			.list(userSlug)
 			.then((r) => setMuted(r.muted.includes(targetSlug)))
@@ -2271,13 +2291,13 @@ function ReplyTreeItem({
 			.list(userSlug)
 			.then((r) => setBlocked(r.blocked.includes(targetSlug)))
 			.catch(() => {});
-	}, [menuOpen, userSlug, localPost.slug, localPost.displayName]);
+	}, [menuOpen, userSlug, localPost.slug]);
 
 	/** 返信者をミュート／ブロックする。SNSモードの返信からも導線を出す。 */
 	const toggleModeration = async (kind: "mute" | "block") => {
 		setMenuOpen(false);
-		const targetSlug = localPost.slug || localPost.displayName;
-		if (!userSlug || userSlug === targetSlug) return;
+		const targetSlug = localPost.slug;
+		if (!userSlug || !targetSlug || userSlug === targetSlug) return;
 		const was = kind === "mute" ? muted : blocked;
 		const setLocal = kind === "mute" ? setMuted : setBlocked;
 		setLocal(!was);
@@ -2357,8 +2377,10 @@ function ReplyTreeItem({
 
 	const authorId = avatarSeedOf(localPost);
 	const avatarInfo = getAvatarInfo(authorId, localPost.displayName);
-	const isSelf =
-		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;
+	// slug の無い返信者（unj 純正・システムユーザー）はプロフィールなし（本体の postHasProfile と同じ）
+	const hasProfile = !!localPost.slug;
+	const isSelf = hasProfile && localPost.slug === userSlug;
+	const canEdit = isSelf && !isDeletedPlaceholder(localPost);
 
 	// タイムラインの PostContainer と同じ投稿演出（ポップイン＋効果音）。temp-id は自分が
 	// この場で送った楽観的返信にしか付かず、key が id なので本物の id に差し替わると
@@ -2383,7 +2405,7 @@ function ReplyTreeItem({
 					onClick={(e) => {
 							e.stopPropagation();
 							if (isSelf) {
-								router.push(`/user/${localPost.slug || localPost.displayName}`);
+								router.push(`/user/${localPost.slug}`);
 							} else {
 								const rect = e.currentTarget.getBoundingClientRect();
 								onAvatarClick(
@@ -2475,7 +2497,7 @@ function ReplyTreeItem({
 										<Copy size={11} className="shrink-0" />
 										<span>コピー</span>
 									</button>
-									{isSelf && (
+									{canEdit && (
 										<button
 											role="menuitem"
 											onClick={handleMenuEdit}
@@ -2485,7 +2507,7 @@ function ReplyTreeItem({
 											<span>編集</span>
 										</button>
 									)}
-									{isSelf && (
+									{canEdit && (
 										<button
 											role="menuitem"
 											onClick={handleMenuOriginType}
@@ -2505,7 +2527,7 @@ function ReplyTreeItem({
 											<span>削除</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={handleMenuProfile}
@@ -2515,7 +2537,7 @@ function ReplyTreeItem({
 											<span>プロフページ</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={() => toggleModeration("mute")}
@@ -2525,7 +2547,7 @@ function ReplyTreeItem({
 											<span>{muted ? "ミュート解除" : "この人をミュート"}</span>
 										</button>
 									)}
-									{!isSelf && (
+									{!isSelf && hasProfile && (
 										<button
 											role="menuitem"
 											onClick={() => toggleModeration("block")}
@@ -2642,19 +2664,20 @@ function ReplyTreeItem({
 								<Repeat size={14} />
 								<span className="text-[11px]">{localPost.reactionsHidden ? "" : localPost.reposts || ""}</span>
 							</button>
-							<button
-								onClick={(e) => {
-									e.stopPropagation();
-									const targetSlug = localPost.slug || localPost.displayName;
-									if (targetSlug) {
-										router.push(`/messages/${encodeURIComponent(targetSlug)}`);
-									}
-								}}
-								className="flex items-center hover:text-blue-400 transition-colors"
-								title="DMを送る"
-							>
-								<Mail size={14} />
-							</button>
+							{hasProfile && (
+								<button
+									onClick={(e) => {
+										e.stopPropagation();
+										router.push(
+											`/messages/${encodeURIComponent(localPost.slug || "")}`,
+										);
+									}}
+									className="flex items-center hover:text-blue-400 transition-colors"
+									title="DMを送る"
+								>
+									<Mail size={14} />
+								</button>
+							)}
 						</div>
 						{/* タイムライン（PostContainer）と同じく、ハートは右端に独立配置 */}
 						<button
