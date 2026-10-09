@@ -302,7 +302,8 @@ export interface OshiItem {
 }
 
 export interface GhostPlayer {
-	sessionId: string;
+	/** リアルタイムハブが振った公開ID。セッションID（唯一の秘密）を入れてはいけない。 */
+	playerId: string;
 	x: number;
 	y: number;
 	emoji: string;

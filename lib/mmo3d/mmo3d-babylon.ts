@@ -822,16 +822,16 @@ export class Mmo3dBabylonEngine {
 	setRemotePlayers(players: RealtimePlayer[]) {
 		const seen = new Set<string>();
 		for (const p of players) {
-			seen.add(p.sessionId);
-			let mesh = this.ghosts.get(p.sessionId);
+			seen.add(p.playerId);
+			let mesh = this.ghosts.get(p.playerId);
 			if (!mesh) {
 				mesh = MeshBuilder.CreateCapsule(
-					`ghost-${p.sessionId}`,
+					`ghost-${p.playerId}`,
 					{ height: 1.8, radius: 0.4 },
 					this.scene,
 				);
 				mesh.material = this.ghostMat;
-				this.ghosts.set(p.sessionId, mesh);
+				this.ghosts.set(p.playerId, mesh);
 			}
 			mesh.position.set(p.x, 0.9, p.y);
 			if (p.rotY !== undefined) mesh.rotation.y = p.rotY;
@@ -839,10 +839,10 @@ export class Mmo3dBabylonEngine {
 			// （idle=等倍、walk/run=わずかに縦伸縮させる）。three版のアニメ切替の代替表現。
 			mesh.scaling.y = p.anim === "run" ? 1.08 : p.anim === "walk" ? 1.04 : 1;
 		}
-		for (const [sessionId, mesh] of this.ghosts) {
-			if (seen.has(sessionId)) continue;
+		for (const [playerId, mesh] of this.ghosts) {
+			if (seen.has(playerId)) continue;
 			mesh.dispose();
-			this.ghosts.delete(sessionId);
+			this.ghosts.delete(playerId);
 		}
 	}
 

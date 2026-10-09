@@ -15,7 +15,8 @@ export const chThread = (encodedThreadId: string) =>
 /** ゲームルームのゴーストプレイヤー位置。 */
 export const chGame = (encodedGameId: string) => `game:${encodedGameId}`;
 
-/** 個人宛の通知。値は notifications.target_user と同じ識別子。 */
+/** 個人宛の通知・DM。値は users.id（AnonymousUser.id）。
+ *  購読にはハブが検証する署名トークンが要る（client.ts が自動で取りに行く）。 */
 export const chUser = (userId: string) => `user:${userId}`;
 
 export type RealtimeEventName =
@@ -35,18 +36,35 @@ export interface RealtimeEvent {
 /** サーバー→クライアントのメッセージ。
  *  chat/partyInvite/partyUpdate はフェーズ25で追加（mmo3dのソーシャル機能）。
  *  完全にインメモリのハブ内で完結し、DBには一切書かない。
- *  TODO(persist): チャット履歴・パーティー状態を残したいなら別途保存経路の設計が要る。 */
+ *  TODO(persist): チャット履歴・パーティー状態を残したいなら別途保存経路の設計が要る。
+ *
+ *  プレイヤーの識別子 `playerId` は**ハブが接続ごとに振る公開の乱数**で、セッションIDではない。
+ *  セッションID（Cookie `unj_reze_session`）は唯一の秘密情報なので、ハブへは絶対に送らない
+ *  （以前は presence でルーム全員へ配っており、購読するだけで他人のアカウントを乗っ取れた）。
+ *  自分の playerId は welcome で届く（`RealtimeClient.getSelfId()`）。 */
 export type RealtimeMessage =
-	| { t: "welcome"; presenceTtlMs: number }
+	| { t: "welcome"; presenceTtlMs: number; playerId?: string }
 	| { t: "pong" }
 	| { t: "event"; channel: string; event: RealtimeEventName; data: unknown }
 	| { t: "presence"; game: string; players: RealtimePlayer[] }
-	| { t: "chat"; game: string; sessionId: string; name: string; text: string; ts: number }
-	| { t: "partyInvite"; game: string; fromSessionId: string; fromName: string }
-	| { t: "partyUpdate"; game: string; members: { sessionId: string; name?: string }[] };
+	| {
+			t: "chat";
+			game: string;
+			playerId: string;
+			name: string;
+			text: string;
+			ts: number;
+	  }
+	| { t: "partyInvite"; game: string; fromPlayerId: string; fromName: string }
+	| {
+			t: "partyUpdate";
+			game: string;
+			members: { playerId: string; name?: string }[];
+	  };
 
 export interface RealtimePlayer {
-	sessionId: string;
+	/** ハブが振った公開ID（セッションIDではない）。 */
+	playerId: string;
 	x: number;
 	y: number;
 	emoji: string;
@@ -60,3 +78,6 @@ export interface RealtimePlayer {
 	/** 表示名（任意、フェーズ25）。パーティー招待UI等で使う。 */
 	name?: string;
 }
+
+/** 個人宛チャンネル（`user:<id>`）か。購読には /api/realtime/token の署名トークンが要る。 */
+export const isUserChannel = (channel: string) => channel.startsWith("user:");

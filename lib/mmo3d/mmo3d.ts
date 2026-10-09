@@ -671,28 +671,28 @@ export class Mmo3dEngine {
 		};
 	}
 
-	/** 他プレイヤーの最新一覧を反映する。存在しなくなったsessionIdのゴーストは消す。
+	/** 他プレイヤーの最新一覧を反映する。存在しなくなったplayerIdのゴーストは消す。
 	 *  実モデルは持たないため、簡易カプセル＋向きのみで表現する（アニメ切替は今後）。 */
 	setRemotePlayers(players: RealtimePlayer[]) {
 		const seen = new Set<string>();
 		for (const p of players) {
-			seen.add(p.sessionId);
-			let mesh = this.ghosts.get(p.sessionId);
+			seen.add(p.playerId);
+			let mesh = this.ghosts.get(p.playerId);
 			if (!mesh) {
 				mesh = new THREE.Mesh(this.ghostGeo, this.ghostMat);
 				const head = new THREE.Mesh(this.headGeo, this.ghostMat);
 				head.position.set(0, CHIBI_HEAD_LOCAL_Y, 0);
 				mesh.add(head);
-				this.ghosts.set(p.sessionId, mesh);
+				this.ghosts.set(p.playerId, mesh);
 				this.scene.add(mesh);
 			}
 			mesh.position.set(p.x, CHIBI_BODY_CENTER_Y, p.y);
 			if (p.rotY !== undefined) mesh.rotation.y = p.rotY;
 		}
-		for (const [sessionId, mesh] of this.ghosts) {
-			if (seen.has(sessionId)) continue;
+		for (const [playerId, mesh] of this.ghosts) {
+			if (seen.has(playerId)) continue;
 			this.scene.remove(mesh);
-			this.ghosts.delete(sessionId);
+			this.ghosts.delete(playerId);
 		}
 	}
 

@@ -2337,7 +2337,7 @@ export default function App() {
 								className={`flex-1 scrollbar-none ${currentNav === "home" && topTab === "game" ? "overflow-hidden flex flex-col pb-14" : "pb-20"}`}
 							>
 								{currentNav === "home" && topTab === "game" && (
-									<LiveGameView userId={userId} sessionId={ensureSessionId()} />
+									<LiveGameView userId={userId} />
 								)}
 								{currentNav === "home" && topTab !== "game" && (
 									<>

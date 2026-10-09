@@ -2,8 +2,10 @@
 
 // 3D MMOエンジン（mmo3d）専用のプレイビュー雛形。
 // フェーズ3: WASD/矢印キー移動 + Shiftダッシュ + idle/walk/run のスケルタルアニメ。
-// フェーズ4: gameId/sessionId が渡されればリアルタイムハブ経由で位置/向き/アニメ状態を
+// フェーズ4: gameId が渡されればリアルタイムハブ経由で位置/向き/アニメ状態を
 // 同期する（DBには一切書かない、既存の chGame/LiveGameView と同じ経路の使い回し）。
+// 自分の識別はハブが接続ごとに振る公開ID（client.getSelfId()）。セッションIDは渡さない
+// （ハブは presence/チャットをルーム全員へ配るので、載せると乗っ取りの材料になる）。
 // フェーズ5: Space/クリックで近接攻撃。HPをHUDに表示する。
 // フェーズ8: boardPostId を渡すとワールドに掲示板を設置し、近づいてEキーで本SNSの
 // 該当スレッド（GameThreadBoard）を開ける。外部サイトへは繋がず、既存の投稿/返信APIを使う。
@@ -50,7 +52,6 @@ const MAX_PARTY_SIZE = 4;
 export default function Mmo3dMaker({
 	renderer = "three",
 	gameId,
-	sessionId,
 	boardPostId,
 	boards,
 	dummies,
@@ -65,7 +66,6 @@ export default function Mmo3dMaker({
 	renderer?: Mmo3dRenderer;
 	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three/babylon共通対応）。 */
 	gameId?: string;
-	sessionId?: string;
 	/** 掲示板1枚のフォールバック（boardsが空のとき既定位置に置く）。近づいてEキーで開ける（three/babylon共通対応）。 */
 	boardPostId?: string;
 	/** ワールド上の任意位置に複数の掲示板を配置する。空ならboardPostId 1枚にフォールバック。 */
@@ -139,18 +139,20 @@ export default function Mmo3dMaker({
 	// フェーズ25: ソーシャル（チャット・パーティー）。すべてリアルタイムハブ上のみで完結し、
 	// DBには一切書かない（TODO(persist): 履歴を残すなら別途設計）。
 	const [chatLog, setChatLog] = useState<
-		{ sessionId: string; name: string; text: string; ts: number }[]
+		{ playerId: string; name: string; text: string; ts: number }[]
 	>([]);
 	const [chatInput, setChatInput] = useState("");
 	const [chatOpen, setChatOpen] = useState(false);
 	const [others, setOthers] = useState<RealtimePlayer[]>([]);
-	const [partyMembers, setPartyMembers] = useState<{ sessionId: string; name?: string }[]>(
+	const [partyMembers, setPartyMembers] = useState<{ playerId: string; name?: string }[]>(
 		[],
 	);
 	const [pendingInvite, setPendingInvite] = useState<{
-		fromSessionId: string;
+		fromPlayerId: string;
 		fromName: string;
 	} | null>(null);
+	/** ハブが振った自分の公開ID（再接続で変わるので presence のたびに読み直す）。 */
+	const [selfId, setSelfId] = useState<string | null>(null);
 	const [socialOpen, setSocialOpen] = useState(false);
 	const me = useCurrentUser();
 	const myName = me?.displayName || "名無し";
@@ -400,10 +402,10 @@ export default function Mmo3dMaker({
 		setEquipment((prev) => ({ ...prev, skillId: id }));
 	}, []);
 
-	// ── リアルタイム同期（three/babylon共通、gameId/sessionIdがある時だけ）。DBには書かない。
+	// ── リアルタイム同期（three/babylon共通、gameIdがある時だけ）。DBには書かない。
 	// フェーズ25でlevel/nameも一緒に送るようにした（他プレイヤーのネームプレート/招待UI用）。 ──
 	useEffect(() => {
-		if (!realtimeConfigured || !gameId || !sessionId) return;
+		if (!realtimeConfigured || !gameId) return;
 		const client = getRealtimeClient();
 		if (!client) return;
 		const send = () => {
@@ -414,7 +416,7 @@ export default function Mmo3dMaker({
 			// ハブが受け付けない値("attack"/"hit"/"death")は送らない。
 			const safeAnim = anim === "walk" || anim === "run" ? anim : "idle";
 			const level = engine.getPlayerLevel();
-			client.sendPosition(gameId, sessionId, x, y, "🧑", {
+			client.sendPosition(gameId, x, y, "🧑", {
 				rotY,
 				anim: safeAnim,
 				level,
@@ -425,16 +427,18 @@ export default function Mmo3dMaker({
 		return () => {
 			clearInterval(id);
 			client.leaveGame(gameId);
-			client.sendPartyLeave(gameId, sessionId);
+			client.sendPartyLeave(gameId);
 		};
-	}, [gameId, sessionId, myName]);
+	}, [gameId, myName]);
 
 	useRealtimeSubscription(
 		gameId ? [chGame(gameId)] : [],
 		useCallback(
 			(msg) => {
+				const me = getRealtimeClient()?.getSelfId() ?? null;
+				setSelfId(me);
 				if (msg.t === "presence") {
-					const rest = msg.players.filter((p) => p.sessionId !== sessionId);
+					const rest = msg.players.filter((p) => p.playerId !== me);
 					engineRef.current?.setRemotePlayers(rest);
 					setOthers(rest);
 					return;
@@ -448,7 +452,7 @@ export default function Mmo3dMaker({
 				}
 				if (msg.t === "partyInvite") {
 					if (msg.game !== gameId) return;
-					setPendingInvite({ fromSessionId: msg.fromSessionId, fromName: msg.fromName });
+					setPendingInvite({ fromPlayerId: msg.fromPlayerId, fromName: msg.fromName });
 					setSocialOpen(true);
 					return;
 				}
@@ -458,33 +462,33 @@ export default function Mmo3dMaker({
 					return;
 				}
 			},
-			[sessionId, gameId],
+			[gameId],
 		),
 		realtimeConfigured && !!gameId,
 	);
 
 	// ── パーティー操作（フェーズ25）。全部リアルタイムハブ上のみ、DBには書かない。 ──
 	const invitePlayer = useCallback(
-		(targetSessionId: string) => {
-			if (!gameId || !sessionId) return;
+		(targetPlayerId: string) => {
+			if (!gameId) return;
 			const client = getRealtimeClient();
-			client?.sendPartyInvite(gameId, sessionId, targetSessionId);
+			client?.sendPartyInvite(gameId, targetPlayerId);
 		},
-		[gameId, sessionId],
+		[gameId],
 	);
 	const acceptInvite = useCallback(() => {
-		if (!gameId || !sessionId || !pendingInvite) return;
+		if (!gameId || !pendingInvite) return;
 		const client = getRealtimeClient();
-		client?.sendPartyAccept(gameId, sessionId, pendingInvite.fromSessionId);
+		client?.sendPartyAccept(gameId, pendingInvite.fromPlayerId);
 		setPendingInvite(null);
-	}, [gameId, sessionId, pendingInvite]);
+	}, [gameId, pendingInvite]);
 	const declineInvite = useCallback(() => setPendingInvite(null), []);
 	const leaveParty = useCallback(() => {
-		if (!gameId || !sessionId) return;
+		if (!gameId) return;
 		const client = getRealtimeClient();
-		client?.sendPartyLeave(gameId, sessionId);
+		client?.sendPartyLeave(gameId);
 		setPartyMembers([]);
-	}, [gameId, sessionId]);
+	}, [gameId]);
 	// ── フェーズ28: キャンバスのドラッグで視点回転（マウス・タッチ共通、Pointer Events）。
 	//    横方向=カメラ旋回(yaw)、縦方向=見上げ/見下ろし(elev)。ゆめにっき3D
 	//    （Yume25DMaker.tsx の glPointer* ）と同じ操作感・同じ符号に揃えてある。
@@ -659,11 +663,11 @@ export default function Mmo3dMaker({
 
 	const sendChatMessage = useCallback(() => {
 		const text = chatInput.trim();
-		if (!text || !gameId || !sessionId) return;
+		if (!text || !gameId) return;
 		const client = getRealtimeClient();
-		client?.sendChat(gameId, sessionId, myName, text);
+		client?.sendChat(gameId, myName, text);
 		setChatInput("");
-	}, [chatInput, gameId, sessionId, myName]);
+	}, [chatInput, gameId, myName]);
 
 	return (
 		<div className="relative w-full h-full">
@@ -880,7 +884,7 @@ export default function Mmo3dMaker({
 
 			{/* フェーズ25: ソーシャル（チャット・パーティー）。realtimeConfiguredでない環境
 			    （ハブ未設定）では何も送受信できないため、案内だけ出してボタンは表示しない。 */}
-			{realtimeConfigured && gameId && sessionId && (
+			{realtimeConfigured && gameId && (
 				<>
 					{/* パーティー招待の通知（受信側）。 */}
 					{pendingInvite && (
@@ -937,7 +941,7 @@ export default function Mmo3dMaker({
 									<p className="text-gray-400">まだメッセージはありません</p>
 								)}
 								{chatLog.map((m, i) => (
-									<p key={`${m.sessionId}-${m.ts}-${i}`}>
+									<p key={`${m.playerId}-${m.ts}-${i}`}>
 										<span className="font-bold text-amber-300">{m.name}: </span>
 										<span className="break-words">{m.text}</span>
 									</p>
@@ -977,9 +981,9 @@ export default function Mmo3dMaker({
 								) : (
 									<ul className="space-y-0.5">
 										{partyMembers.map((m) => (
-											<li key={m.sessionId}>
+											<li key={m.playerId}>
 												{m.name || "名無し"}
-												{m.sessionId === sessionId && "（自分）"}
+												{m.playerId === selfId && "（自分）"}
 											</li>
 										))}
 									</ul>
@@ -1002,10 +1006,10 @@ export default function Mmo3dMaker({
 									<ul className="space-y-1">
 										{others.map((p) => {
 											const alreadyInParty = partyMembers.some(
-												(m) => m.sessionId === p.sessionId,
+												(m) => m.playerId === p.playerId,
 											);
 											return (
-												<li key={p.sessionId} className="flex items-center justify-between gap-1">
+												<li key={p.playerId} className="flex items-center justify-between gap-1">
 													<span className="truncate">
 														{p.name || "名無し"}
 														{p.level !== undefined ? ` Lv${p.level}` : ""}
@@ -1015,7 +1019,7 @@ export default function Mmo3dMaker({
 														disabled={
 															alreadyInParty || partyMembers.length >= MAX_PARTY_SIZE
 														}
-														onClick={() => invitePlayer(p.sessionId)}
+														onClick={() => invitePlayer(p.playerId)}
 														className="shrink-0 bg-blue-700 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 rounded px-1.5 py-0.5"
 													>
 														{alreadyInParty ? "編成済" : "招待"}
@@ -1033,13 +1037,13 @@ export default function Mmo3dMaker({
 							<div>
 								<p className="font-bold text-gray-300 mb-1">順位（このルーム内）</p>
 								<ol className="space-y-0.5 list-decimal list-inside">
-									{[{ sessionId: sessionId ?? "me", name: myName, level: growth.level }, ...others]
+									{[{ playerId: selfId ?? "me", name: myName, level: growth.level }, ...others]
 										.sort((a, b) => (b.level ?? 1) - (a.level ?? 1))
 										.slice(0, 5)
 										.map((p) => (
-											<li key={p.sessionId}>
+											<li key={p.playerId}>
 												{p.name || "名無し"} Lv{p.level ?? 1}
-												{p.sessionId === sessionId && "（自分）"}
+												{p.playerId === (selfId ?? "me") && "（自分）"}
 											</li>
 										))}
 								</ol>

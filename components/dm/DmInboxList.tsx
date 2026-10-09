@@ -65,9 +65,10 @@ export default function DmInboxList({ userId }: DmInboxListProps) {
 	useEffect(() => {
 		const client = getRealtimeClient();
 		if (!client || !currentSender) return;
-		const channelsToSub = Array.from(
-			new Set(Array.from(myIdentifiers).map(chUser)),
-		);
+		// 個人宛チャンネルは users.id でだけ開ける（ハブが /api/realtime/token の署名を
+		// その id に対して検証する）。表示名・slug 名義のチャンネルは購読できない。
+		const channelsToSub = me?.id ? [chUser(String(me.id))] : [];
+		if (channelsToSub.length === 0) return;
 		const unsubChannel = client.subscribe(channelsToSub);
 		const unsubHandler = client.addHandler((msg) => {
 			if (
@@ -90,7 +91,7 @@ export default function DmInboxList({ userId }: DmInboxListProps) {
 			unsubChannel();
 			unsubHandler();
 		};
-	}, [currentSender, myIdentifiers]);
+	}, [currentSender, myIdentifiers, me?.id]);
 
 	// 相手ごとに直近1件だけ残す（messagesは新しい順なので最初に出た方が最新）。
 	const previews = useMemo(() => {

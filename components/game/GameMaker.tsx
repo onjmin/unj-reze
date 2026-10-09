@@ -76,7 +76,6 @@ import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } fr
 import Mmo3dEditorPanel from './mmo3d/Mmo3dEditorPanel';
 import GameThreadBoard from './GameThreadBoard';
 import type { Mmo3dRenderer, WeatherDef, ObjectAi } from './presets/shared';
-import { ensureSessionId } from '@/lib/session';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/game/pixel-weather';
 import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv/mv-config';
 import { useSaveShortcut } from '@/lib/hooks/useSaveShortcut';
@@ -1264,7 +1263,7 @@ interface GameMakerProps {
   embedded?: boolean;
   /** モバイルの仮想コントローラーを画面全体に固定表示する（フィード等の小さい埋め込み領域用） */
   fixedControls?: boolean;
-  ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string; color?: string }[];
+  ghostPlayers?: { playerId: string; x: number; y: number; emoji: string; color?: string }[];
   onPositionChange?: (x: number, y: number, emoji: string) => void;
   /** ゲームポストのID（コメント返信先） */
   postId?: string;
@@ -1651,11 +1650,6 @@ function DigitReel({ digit, dir, cellH = 16 }: { digit: number; dir: 'up' | 'dow
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, gameId, onRemix, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // mmo3d専用: リアルタイムハブでの自分の識別子。ensureSessionId()はCookie/localStorage
-  // 由来で安定しているため、レンダーごとに再生成しないようrefへ1回だけ入れる（SSR中はundefined）。
-  const mmo3dSessionIdRef = useRef<string | undefined>(
-    typeof window !== 'undefined' ? ensureSessionId() : undefined,
-  );
   // canvas エリア（親フレックス）の実測サイズを ResizeObserver で追いかけ、PLAY_W:PLAY_H を保った
   // まま contain フィットさせる。CSS の aspect-ratio + width:auto;height:auto だけに頼ると、親の高さが
   // 子（このボックス）に依存し子の高さが親に依存する循環になり、ブラウザ/構成によって 0px に潰れる
@@ -1987,10 +1981,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const states = ghostRenderRef.current;
     const alive = new Set<string>();
     for (const g of ghostPlayers || []) {
-      alive.add(g.sessionId);
-      const cur = states.get(g.sessionId);
+      alive.add(g.playerId);
+      const cur = states.get(g.playerId);
       if (!cur) {
-        states.set(g.sessionId, {
+        states.set(g.playerId, {
           x: g.x, y: g.y, fromX: g.x, fromY: g.y, toX: g.x, toY: g.y,
           start: now, dur: 0, lastRecv: now,
         });
@@ -10681,7 +10675,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (ghostPlayersRef.current.length > 0) {
         const nowMs = performance.now();
         for (const ghost of ghostPlayersRef.current) {
-          const gr = ghostRenderRef.current.get(ghost.sessionId);
+          const gr = ghostRenderRef.current.get(ghost.playerId);
           let gx = ghost.x, gy = ghost.y;
           if (gr) {
             const t = gr.dur > 0 ? Math.min(1, (nowMs - gr.start) / gr.dur) : 1;
@@ -10692,10 +10686,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.globalAlpha = 0.75;
           drawSprite(
             { emoji: ghost.emoji || pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef },
-            gx, gy, pData.w, pData.h, `ghost_${ghost.sessionId}`,
+            gx, gy, pData.w, pData.h, `ghost_${ghost.playerId}`,
           );
           // 名前タグ代わりに色ドット
-          ctx.fillStyle = ghost.color ?? colorFromId(ghost.sessionId);
+          ctx.fillStyle = ghost.color ?? colorFromId(ghost.playerId);
           ctx.globalAlpha = 0.7;
           ctx.beginPath(); ctx.arc(gx + pData.w / 2, gy - 4, 4, 0, Math.PI * 2); ctx.fill();
           ctx.globalAlpha = 1;
@@ -13180,7 +13174,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <Mmo3dMaker
                 renderer={gameData.mmo3dConfig?.renderer ?? 'three'}
                 gameId={gameId}
-                sessionId={mmo3dSessionIdRef.current}
                 boardPostId={gameData.mmo3dConfig?.boardPostId ?? postId}
                 boards={gameData.mmo3dConfig?.boards}
                 dummies={gameData.mmo3dConfig?.dummies}

@@ -184,9 +184,10 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 	useEffect(() => {
 		const client = getRealtimeClient();
 		if (!client || !myId) return;
-		const channelsToSub = Array.from(
-			new Set(Array.from(myIdentifiers).map(chUser)),
-		);
+		// 個人宛チャンネルは users.id でだけ開ける（ハブが /api/realtime/token の署名を
+		// その id に対して検証する）。表示名・slug 名義のチャンネルは購読できない。
+		const channelsToSub = me?.id ? [chUser(String(me.id))] : [];
+		if (channelsToSub.length === 0) return;
 		const unsubChannel = client.subscribe(channelsToSub);
 		const unsubHandler = client.addHandler((msg) => {
 			if (
@@ -215,7 +216,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 			unsubChannel();
 			unsubHandler();
 		};
-	}, [myId, partnerIdentifiers, myIdentifiers]);
+	}, [myId, partnerIdentifiers, myIdentifiers, me?.id]);
 
 	const open = isDmOpen(gate);
 	const canSend = canSendDm(gate);

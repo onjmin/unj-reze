@@ -31,10 +31,11 @@ interface LiveInfo {
 
 interface Props {
 	userId: string;
-	sessionId: string;
 }
 
-export default function LiveGameView({ userId, sessionId }: Props) {
+// セッションIDはここへ渡さない。ハブは presence をルーム全員へ配るので、
+// 自分の識別はハブが振る公開ID（client.getSelfId()）で行う。
+export default function LiveGameView({ userId }: Props) {
 	const [info, setInfo] = useState<LiveInfo | null>(null);
 	// manifest 本体はDBに無いので、URLが決まった時点でR2から引く。
 	// 実況の枠自体は manifest を待たずに描ける
@@ -104,7 +105,6 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 			if (posRef.current.x > 0 || posRef.current.y > 0) {
 				client.sendPosition(
 					gameId,
-					sessionId,
 					posRef.current.x,
 					posRef.current.y,
 					posRef.current.emoji,
@@ -117,7 +117,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 			clearInterval(id);
 			client.leaveGame(gameId);
 		};
-	}, [info?.gameId, sessionId]);
+	}, [info?.gameId]);
 
 	// 他プレイヤーの位置を受け取る
 	useRealtimeSubscription(
@@ -126,11 +126,12 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 			(msg) => {
 				if (msg.t !== "presence") return;
 				// ハブは直列化を1回で済ませるため自分を含めた全員を配る。自分はここで除く。
-				const others = msg.players.filter((p) => p.sessionId !== sessionId);
+				const selfId = getRealtimeClient()?.getSelfId();
+				const others = msg.players.filter((p) => p.playerId !== selfId);
 				setGhostPlayers(others);
 				setOnlineCount(others.length + 1);
 			},
-			[sessionId],
+			[],
 		),
 		realtimeConfigured && !!info?.gameId,
 	);
@@ -214,7 +215,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 		return () => {
 			if (syncRef.current) clearInterval(syncRef.current);
 		};
-	}, [info?.gameId, info?.postId, sessionId]);
+	}, [info?.gameId, info?.postId]);
 
 	const handlePositionChange = useCallback(
 		(x: number, y: number, emoji: string) => {
