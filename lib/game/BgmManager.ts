@@ -281,6 +281,11 @@ class BgmManager {
 		const inst = await SF.instrument(ctx, "lead_1_square", {
 			soundfont: "MusyngKite",
 		});
+		// 投稿ゲームの manifest 由来の URL。http(s) / data: / blob: 以外は読まない
+		if (!/^(https?:|data:|blob:)/i.test(url.trim())) {
+			ctx.close();
+			return;
+		}
 		const res = await fetch(url);
 		if (!res.ok) return;
 		const ab = await res.arrayBuffer();
@@ -621,6 +626,14 @@ class BgmManager {
 	// ── SoundCloud ──
 
 	private playSoundCloud(url: string, volume: number = 50) {
+		// BGM の src は投稿ゲームの manifest から来るので、そのまま iframe.src に入れると
+		// javascript: URL でこちらのオリジンのスクリプトが走る。SoundCloud の https URL だけ通す。
+		const soundcloudSrc = soundCloudPlayerSrc(url);
+		if (!soundcloudSrc) {
+			console.warn("[BGM] SoundCloud の URL ではないため再生しません:", url);
+			return;
+		}
+
 		const existing = document.querySelector(".bgm-soundcloud-container");
 		if (existing) existing.remove();
 
@@ -632,9 +645,6 @@ class BgmManager {
 
 		const iframe = document.createElement("iframe");
 		iframe.id = "bgm-soundcloud-iframe";
-		const soundcloudSrc = url.startsWith("http")
-			? `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=true&hide_related=true&show_comments=false&show_user=false&show_reposts=false&visual=false`
-			: url;
 		iframe.src = soundcloudSrc;
 		iframe.style.cssText = "width:1px;height:1px;border:none";
 		iframe.allow = "autoplay";
@@ -687,6 +697,31 @@ class BgmManager {
 			},
 		};
 	}
+}
+
+const SOUNDCLOUD_HOSTS = new Set([
+	"soundcloud.com",
+	"www.soundcloud.com",
+	"m.soundcloud.com",
+	"on.soundcloud.com",
+	"api.soundcloud.com",
+	"w.soundcloud.com",
+]);
+
+/** SoundCloud の URL を埋め込みプレイヤーの iframe.src に直す。SoundCloud の https URL で
+ *  なければ null（javascript: 等を iframe に入れないため）。プレイヤー URL ならそのまま使う。 */
+export function soundCloudPlayerSrc(raw: string): string | null {
+	let u: URL;
+	try {
+		u = new URL(raw.trim());
+	} catch {
+		return null;
+	}
+	// http の曲 URL は https に上げてプレイヤーへ渡す（iframe に入るのは常に w.soundcloud.com）
+	if (u.protocol === "http:") u.protocol = "https:";
+	if (u.protocol !== "https:" || !SOUNDCLOUD_HOSTS.has(u.hostname.toLowerCase())) return null;
+	if (u.hostname.toLowerCase() === "w.soundcloud.com") return u.href;
+	return `https://w.soundcloud.com/player/?url=${encodeURIComponent(u.href)}&auto_play=true&hide_related=true&show_comments=false&show_user=false&show_reposts=false&visual=false`;
 }
 
 export const bgmManager = new BgmManager();

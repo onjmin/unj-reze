@@ -273,6 +273,20 @@ export function getBgmStart(ref?: string): number {
 	return params.start !== undefined ? params.start : 0;
 }
 
+/** 音声・埋め込みに使ってよい URL か。scheme 付きなら http / https / blob / data:audio だけ、
+ *  scheme 無し（`/assets/game-sfx/…` のような相対パス）はそのまま許す。 */
+export function isSafeMediaUrl(raw: string): boolean {
+	// ブラウザは URL 中のタブ・改行を読み飛ばす（"java\tscript:" も javascript: になる）ので先に除く
+	const v = raw.replace(/[\t\n\r]/g, "").trim();
+	// 制御文字の混入も弾く
+	if (/[\u0000-\u001f]/.test(v)) return false;
+	const m = v.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+	if (!m) return true;
+	const scheme = m[1].toLowerCase();
+	if (scheme === "http" || scheme === "https" || scheme === "blob") return true;
+	return scheme === "data" && /^data:audio\//i.test(v);
+}
+
 /** BGM参照を BgmManager が解釈できる {type, src, loop, volume, start} へ。
  *  mml:post:N はその投稿のMML本文(rawMml)が要るため省略可。 */
 export function bgmRefToAsset(
@@ -297,6 +311,14 @@ export function bgmRefToAsset(
 	const start = getBgmStart(raw);
 
 	const valStr = ref.value;
+
+	// URL を持つ種別は、投稿ゲームの manifest 由来の値が iframe.src / fetch / Audio に入るので
+	// javascript: などは通さない（http(s)・相対パス・blob:・data:audio だけ）。
+	if (
+		(ref.scheme === "url" || ref.scheme === "direct" || ref.scheme === "soundcloud") &&
+		!isSafeMediaUrl(valStr)
+	)
+		return null;
 
 	if (ref.scheme === "youtube")
 		return { type: "youtube", src: toYoutubeWatchUrl(valStr), volume, start };
