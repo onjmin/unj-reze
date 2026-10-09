@@ -7,7 +7,6 @@
 
 [functions]
   node_bundler = "esbuild"
-  region = "ap-northeast-1"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
