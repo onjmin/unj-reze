@@ -6,9 +6,35 @@
  *
  * 検証内容:
  * - https であること
+ * - origin が uploader の公開テキストバケット（R2）であること
  * - パスが /{kind}/[16桁hex].{ext} 形式であること（kind の取り違えを防ぐ）
- * - origin の検証は行わない（画像 URL も同様に検証していないため一貫性を保つ）
+ *
+ * origin を縛るのは、manifest/MML の URL を任意のサーバーへ向けられると、それを開いた
+ * 閲覧者のブラウザが攻撃者のサーバーへ fetch しに行く（IP の収集・中身の差し替え）ため。
  */
+
+/**
+ * uploader-worker が返すテキストの公開URL（uploader の PUBLIC_TEXT_URL_BASE）の origin。
+ * 環境変数 UPLOADER_TEXT_ORIGINS（カンマ区切り）で差し替えられる。カスタムドメインへ移すときは
+ * 旧 origin も残しておくこと（既存の投稿の再保存が 400 になる）。
+ * 未設定時は本番のテキストバケット（unj-text）。ローカル開発も uploader は本番を叩くのでこれで通る。
+ */
+const DEFAULT_TEXT_ORIGINS = ["https://pub-d3e350a3f80445c68eb4689f0cb158ff.r2.dev"];
+
+function allowedTextOrigins(): Set<string> {
+	const fromEnv = (process.env.UPLOADER_TEXT_ORIGINS ?? "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.flatMap((s) => {
+			try {
+				return [new URL(s).origin];
+			} catch {
+				return [];
+			}
+		});
+	return new Set(fromEnv.length ? fromEnv : DEFAULT_TEXT_ORIGINS);
+}
 
 export interface ParsedManifestRef {
 	manifestUrl: string;
@@ -33,6 +59,9 @@ export function isValidPayloadUrl(
 		return false;
 	}
 	if (parsed.protocol !== "https:") return false;
+	if (!allowedTextOrigins().has(parsed.origin)) return false;
+	// クエリ・フラグメント付きは正規の uploader 応答には無い
+	if (parsed.search || parsed.hash) return false;
 	return new RegExp(`^/${kind}/[0-9a-f]{16}\\.(json|mml|txt)$`).test(
 		parsed.pathname,
 	);

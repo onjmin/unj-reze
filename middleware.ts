@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCountryFromHeaders, isBlockedCountry } from '@/lib/security/geo';
 import { kvGet, kvSetEx } from '@/lib/kv';
-import { getClientIp } from '@/lib/ip';
+import { getClientIp, rateLimitKeyFromIp } from '@/lib/ip';
 import {
   assessTls,
   isBotUserAgent,
@@ -32,8 +32,9 @@ async function isRateLimited(ip: string, max: number): Promise<{ limited: boolea
     count = parseInt((await kvGet(key)) || '0', 10);
     // TTL を毎回リフレッシュ(ウィンドウ index でキーが自然にローテートする)
     await kvSetEx(key, String(count + 1), RATE_LIMIT_WINDOW_SEC * 2);
-  } catch {
-    // KV 障害時はレート制限を無効化(可用性優先)
+  } catch (err) {
+    // KV 障害時はレート制限を無効化(可用性優先)。ただし黙って素通しにはせず痕跡を残す。
+    console.warn('rate limit: KV unavailable, failing open', err);
     return { limited: false, retryAfter: 0 };
   }
   const nextWindowStart = (windowIndex + 1) * RATE_LIMIT_WINDOW_SEC * 1000;
@@ -86,35 +87,86 @@ function isBbsProtocolPath(pathname: string): boolean {
   return BBS_PROTOCOL_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 }
 
+// 書き込みのレート制限を掛けるパス。専ブラの書き込み口 /test/bbs.cgi は /api/ の外にあるので明示的に含める。
+const BBS_POST_PATH = '/test/bbs.cgi';
+function isRateLimitedWritePath(pathname: string): boolean {
+  return pathname.startsWith('/api/') || pathname === BBS_POST_PATH || pathname.startsWith(`${BBS_POST_PATH}/`);
+}
+
+// 全レスポンスに付けるセキュリティヘッダ。script-src を含む本格的な CSP はまだ入れない
+// (インラインスクリプト・外部 CDN・YouTube 埋め込み等の棚卸しが要る)。ここは壊れようのないものだけ。
+// - frame-ancestors 'self': このサイトを他所の iframe に埋め込む用途は無い(unj 側もリンクのみ)。
+// - Permissions-Policy: カメラ・マイク・位置情報は使っていない(getUserMedia 等の呼び出し無し)。
+//   クリップボード・全画面・自動再生は使うので触らない。
+// 静的アセット(_next/static と public/)は Workers の ASSETS から直接返り middleware を通らないので、
+// public/_headers でも同じものの一部を付けている。
+function applySecurityHeaders(request: NextRequest, response: Response): Response {
+  const h = response.headers;
+  h.set('X-Content-Type-Options', 'nosniff');
+  h.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  // RPGEN プロキシは自前で `sandbox` の CSP を付ける。middleware 側の値とどちらが勝つかに
+  // 依存しないよう、そのパスでは付けない(ルート側で frame-ancestors も合わせて付けている)。
+  if (!request.nextUrl.pathname.startsWith('/api/rpgen/')) {
+    h.set('Content-Security-Policy', "frame-ancestors 'self'");
+  }
+  // HSTS は本番の https だけ(ローカルの next start や http で付けても意味が無い／事故の元)
+  if (process.env.NODE_ENV === 'production' && request.nextUrl.protocol === 'https:') {
+    h.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // EU/EEA からのアクセスを 451 で遮断(専ブラ向けプロトコルパスは対象外。上記コメント参照)
   const country = getCountryFromHeaders(request.headers);
   if (isBlockedCountry(country) && !isBbsProtocolPath(pathname)) {
-    return new NextResponse(BLOCKED_HTML, {
-      status: 451,
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    });
+    return applySecurityHeaders(
+      request,
+      new NextResponse(BLOCKED_HTML, {
+        status: 451,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+    );
   }
 
   // TLSを終端しているのは自分自身(Cloudflare Workers)なので、ここで直接ハンドシェイク情報を読む。
   const tls = await getTlsSignals();
 
-  // API の書き込みメソッドにレートリミット。
+  // API と専ブラ書き込み口の書き込みメソッドにレートリミット。
   // ブラウザを名乗りながらTLSハンドシェイクが一致しない相手は書き込み予算を絞る。
-  if (pathname.startsWith('/api/') && WRITE_METHODS.has(request.method)) {
+  if (isRateLimitedWritePath(pathname) && WRITE_METHODS.has(request.method)) {
     const userAgent = request.headers.get('user-agent') || '';
     const claimsBrowser = !isBotUserAgent(userAgent);
     const suspiciousTls = claimsBrowser && assessTls(tls).verdict === 'non-browser';
     const max = suspiciousTls || !claimsBrowser ? RATE_LIMIT_MAX_NON_BROWSER : RATE_LIMIT_MAX;
 
-    const ip = getClientIp(request.headers);
+    // IPv6 は /64 単位で数える(lib/ip.ts の rateLimitKeyFromIp 参照)
+    const ip = rateLimitKeyFromIp(getClientIp(request.headers));
     const { limited, retryAfter } = await isRateLimited(ip, max);
     if (limited) {
-      return NextResponse.json(
-        { error: 'リクエストが多すぎます。しばらくしてから再試行してください。' },
-        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      if (!pathname.startsWith('/api/')) {
+        // 専ブラは JSON を読めないので bbs.cgi 流儀のエラーページで返す。
+        // ASCII だけなので Shift_JIS としてもそのまま読める(encoding-japanese を middleware に持ち込まない)。
+        return applySecurityHeaders(
+          request,
+          new NextResponse(
+            '<html><head><title>ERROR</title></head><body>ERROR: Too many requests. Please wait and try again.</body></html>\n',
+            {
+              status: 429,
+              headers: { 'content-type': 'text/html; charset=Shift_JIS', 'Retry-After': String(retryAfter) },
+            },
+          ),
+        );
+      }
+      return applySecurityHeaders(
+        request,
+        NextResponse.json(
+          { error: 'リクエストが多すぎます。しばらくしてから再試行してください。' },
+          { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+        ),
       );
     }
   }
@@ -128,7 +180,7 @@ export async function middleware(request: NextRequest) {
     else forwarded.set(name, value);
   }
 
-  return NextResponse.next({ request: { headers: forwarded } });
+  return applySecurityHeaders(request, NextResponse.next({ request: { headers: forwarded } }));
 }
 
 export const config = {

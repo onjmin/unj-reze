@@ -6,7 +6,9 @@
 // 参照: tmp/asset_collect_guide.md, rpgen-crawler/deploy/api
 
 const CDN = "https://rpgen-search.pages.dev";
-const PUBLIC_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || "";
+// 検索APIは必ず自前プロキシ経由（トークンはサーバー側の RPGEN_SEARCH_TOKEN で付与する）。
+// ブラウザから上流を直接叩くとトークンをバンドルに埋めることになるので、ここで持たないこと。
+const API = "/api/rpgen";
 
 // ───────────────── アセット実体URL ─────────────────
 // rpgen-search.pages.dev はCORSヘッダーを返すため直リンクで安全に扱える。
@@ -125,7 +127,7 @@ export interface SearchParams {
 	signal?: AbortSignal;
 }
 
-// ───────────────── 検索（フロントエンド直叩き） ─────────────────
+// ───────────────── 検索（自前プロキシ経由） ─────────────────
 
 async function get<T>(
 	endpoint: string,
@@ -137,8 +139,7 @@ async function get<T>(
 	usp.set("limit", String(params.limit ?? 60));
 	if (params.category1 != null) usp.set("category1", String(params.category1));
 	if (params.category2 != null) usp.set("category2", String(params.category2));
-	const res = await fetch(`${CDN}/api/rpgen/${endpoint}?${usp.toString()}`, {
-		headers: { Authorization: `Bearer ${PUBLIC_TOKEN}` },
+	const res = await fetch(`${API}/${endpoint}?${usp.toString()}`, {
 		signal: params.signal,
 	});
 	if (!res.ok) throw new Error(`rpgen ${endpoint} ${res.status}`);
@@ -160,7 +161,7 @@ export const searchSAnimSheets = (p?: SearchParams) =>
 export const searchSoundSheets = (p?: SearchParams) =>
 	get<SoundSheetItem>("sheets/sound", p);
 
-// ───────────────── 単体詳細（フロントエンド直叩き） ─────────────────
+// ───────────────── 単体詳細（自前プロキシ経由） ─────────────────
 // `sheets/*` のメンバー配列は `{id}` のみ（name等は含まれない）。名前を出すには
 // メンバーの id ごとに単体詳細（GET /sprites/:id 等）を引く必要がある。
 
@@ -171,11 +172,8 @@ async function getById<T>(
 ): Promise<T | null> {
 	try {
 		const res = await fetch(
-			`${CDN}/api/rpgen/${endpoint}/${encodeURIComponent(id)}`,
-			{
-				headers: { Authorization: `Bearer ${PUBLIC_TOKEN}` },
-				signal,
-			},
+			`${API}/${endpoint}/${encodeURIComponent(id)}`,
+			{ signal },
 		);
 		if (!res.ok) return null;
 		return await res.json();

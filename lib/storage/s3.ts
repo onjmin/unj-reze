@@ -19,6 +19,20 @@ async function loadFs(): Promise<{ fs: FsModule; path: PathModule }> {
 	return { fs: _fs!, path: _path! };
 }
 
+/**
+ * `/uploads/<key>` の key を UPLOADS_DIR 配下の実パスへ解決する。外へ出るなら null。
+ * key は DB に入った URL 由来（＝利用者が送れる文字列）なので、`../` や絶対パス、
+ * サブディレクトリを使って public/uploads の外を読み書き・削除されないよう、
+ * 「1階層のファイル名」で、かつ解決後も UPLOADS_DIR の直下にあるものだけ通す。
+ */
+function resolveUploadPath(pathMod: PathModule, key: string): string | null {
+	if (!/^[\w.-]+$/.test(key) || key === "." || key === "..") return null;
+	const base = pathMod.resolve(UPLOADS_DIR);
+	const filePath = pathMod.resolve(base, key);
+	if (pathMod.dirname(filePath) !== base) return null;
+	return filePath;
+}
+
 export async function uploadImage(base64Data: string): Promise<string> {
 	const ext = (base64Data.match(/^data:image\/(\w+)/) || [])[1] || "png";
 	const extMap: Record<string, string> = {
@@ -46,7 +60,10 @@ export async function uploadImage(base64Data: string): Promise<string> {
 	if (!fs.existsSync(UPLOADS_DIR)) {
 		fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 	}
-	fs.writeFileSync(pathMod.join(UPLOADS_DIR, key), buffer);
+	// key はサーバーが作った名前だが、念のため同じ検査を通す
+	const filePath = resolveUploadPath(pathMod, key);
+	if (!filePath) throw new Error("invalid upload key");
+	fs.writeFileSync(filePath, buffer);
 
 	return `/uploads/${key}`;
 }
@@ -60,8 +77,8 @@ export async function deleteImage(url: string): Promise<void> {
 	} catch {
 		return;
 	}
-	const filePath = pathMod.join(UPLOADS_DIR, key);
-	if (fs.existsSync(filePath)) {
+	const filePath = resolveUploadPath(pathMod, key);
+	if (filePath && fs.existsSync(filePath)) {
 		fs.unlinkSync(filePath);
 	}
 }
@@ -75,7 +92,8 @@ export async function getImageBuffer(url: string): Promise<Buffer | null> {
 	} catch {
 		return null;
 	}
-	const filePath = pathMod.join(UPLOADS_DIR, key);
+	const filePath = resolveUploadPath(pathMod, key);
+	if (!filePath) return null;
 	try {
 		return fs.readFileSync(filePath);
 	} catch {

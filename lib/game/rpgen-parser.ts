@@ -492,20 +492,16 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 		}
 	}
 
-	const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || "";
-
 	const uniqueIds = Array.from(idsToTranslate);
 	const idToHash = new Map<number, string>();
 
 	for (let i = 0; i < uniqueIds.length; i += 1000) {
 		const chunk = uniqueIds.slice(i, i + 1000);
 		try {
-			const res = await fetch(`${ORIGIN}/api/rpgen/encode`, {
+			// 自前プロキシ経由（トークンはサーバー側で付与。ブラウザには持たせない）
+			const res = await fetch("/api/rpgen/encode", {
 				method: "POST",
-				headers: {
-					Authorization: `Bearer ${AUTH_TOKEN}`,
-					"Content-Type": "application/json",
-				},
+				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ ids: chunk }),
 			});
 			const data = await res.json();

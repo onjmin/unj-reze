@@ -42,3 +42,23 @@ export function getClientIp(headers: Headers): string {
 
 	return normalizeIp(rawIp);
 }
+
+/** レート制限のキー用。IPv6 は利用者1人に /64 がまるごと割り当てられるのが普通で、
+ * アドレスをそのままキーにすると末尾を変えるだけで無限に枠を取り直せる。
+ * なので IPv6 は先頭 /64（4グループ）に丸める。IPv4 はそのまま。 */
+export function rateLimitKeyFromIp(ip: string): string {
+	if (!ip.includes(":")) return ip;
+	const [head, tail] = ip.split("::");
+	const headGroups = head ? head.split(":") : [];
+	// "::" で省略されたゼロのグループを補ってから先頭4つを取る
+	const tailGroups = tail ? tail.split(":") : [];
+	const missing =
+		tail === undefined
+			? 0
+			: Math.max(0, 8 - headGroups.length - tailGroups.length);
+	const groups = [...headGroups, ...Array(missing).fill("0"), ...tailGroups];
+	return `${groups
+		.slice(0, 4)
+		.map((g) => g.replace(/^0+(?=.)/, ""))
+		.join(":")}::/64`;
+}

@@ -8,8 +8,14 @@ export const getStudio = (): Promise<DtmStudio> => {
 		studioPromise = (async () => {
 			const { createDtmStudio } = await import("@onjmin/dtm");
 			const studio = await createDtmStudio({
+				// MIDI/コード検索は自前プロキシ（app/api/rpgen）経由。本物のトークンはサーバー側で付ける。
+				// dtm の MidiSearchClient は apiKey が空だと検索自体を無効にするので、
+				// 秘密ではない目印の文字列を渡している（プロキシはこの Authorization を読まない）。
+				// GitHub Pages（静的書き出し）には API が無いので無効のままにする。
 				midiSearch: {
-					apiKey: process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || "",
+					baseUrl: `${typeof window === "undefined" ? "" : window.location.origin}/api/rpgen`,
+					apiKey:
+						process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" ? "" : "proxy",
 				},
 				masterVolume: applyMasterVolume(100),
 			});

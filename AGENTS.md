@@ -152,9 +152,10 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
 - **Tile & Command ID Remapping**
   - When merging into an existing scene, assign non-conflicting tile IDs and keep a `tileIdRemap` (with `0 → 0`).
   - Recursively remap `#CH_SP` / `changeTile` tile IDs inside nested commands (`choice`, and the `then`/`else` branches of `ifSwitch` / `ifItem` / `ifGold`).
-- **RPGEN Search access has two paths**
-  - Client/parse-time (`lib/game/rpgen-parser.ts`, `lib/game/rpgen-assets.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` (privileged agent token configured via local env / `.agents/`).
-  - Server proxy `app/api/rpgen/[...path]/route.ts`: uses `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` or `RPGEN_SEARCH_TOKEN`, with an endpoint allowlist for legacy routing.
+- **RPGEN Search goes only through the server proxy** `app/api/rpgen/[...path]/route.ts` (search,
+  `encode`, dtm's `picotune`/`rechord` via `midiSearch.baseUrl`). Its token is server-only
+  `RPGEN_SEARCH_TOKEN`; never read a token client-side or add a `NEXT_PUBLIC_` one (it ships in the JS).
+  New endpoints must be added to the proxy's allowlist.
 
 ---
 
