@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveSessionUser } from "@/lib/auth/session-server";
+import { resolveSessionUser, resolveViewerId } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import type { DotMetaEdit } from "@/lib/db/interface";
 import { parseImageDeleteRef, parseMmlRef } from "@/lib/assets/manifest-ref";
@@ -10,6 +10,14 @@ import { decodeId, encodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { tryHeart, tryVote } from "@/lib/security/vote-guard";
 import { isValidWalkPreset } from "@/lib/assets/walk-cycle";
+import { contentError, isAcceptableEditedImageSrc } from "../../_lib/post-input";
+
+/**
+ * ハート1回の送信で足せる上限。クライアント（lib/hooks/usePostActions.ts handleHeart）は
+ * 連打を2秒まとめて count で送るので、人の指で届く範囲に収める。以前は count を
+ * そのまま足していたので、1リクエストで hearts_total を任意の値にできた。
+ */
+const MAX_HEARTS_PER_REQUEST = 50;
 
 /**
  * ドット絵素材メタの後付け編集。投稿済みの任意の画像URLに dotW/dotH/animFrames/animFps/
@@ -69,7 +77,12 @@ export async function GET(
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
 	const url = new URL(_request.url);
-	const userId = url.searchParams.get("userId") || undefined;
+	// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
+	// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
+	const userId = await resolveViewerId(
+		_request,
+		url.searchParams.get("userId"),
+	);
 	const post = await db.getPost(decodedId, userId);
 	if (!post) {
 		return NextResponse.json({ error: "Post not found" }, { status: 404 });
@@ -151,12 +164,21 @@ export async function POST(
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
 	const body = await request.json();
-	const { count = 1, sessionId } = body;
+	const { count: rawCount = 1, sessionId } = body;
 
-	// ハートもセッション本人から。未認証の場合は空文字で続行（後方互換）。
+	// ハートもセッション本人から。身元が無いと tryHeart の「1投稿1回」が効かない
+	// （空の actorId は素通しになる）ので、未認証は受け付けない。
 	// slug を使う理由は上の PUT ハンドラと同じ（displayName は改名で変わる）。
 	const user = await resolveSessionUser(request, sessionId);
-	const actorId = user?.slug ?? "";
+	if (!user?.slug) {
+		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+	}
+	const actorId = user.slug;
+	// 1..MAX_HEARTS_PER_REQUEST の整数に丸める（負数・小数・巨大値で hearts_total を壊させない）
+	const count = Math.min(
+		MAX_HEARTS_PER_REQUEST,
+		Math.max(1, Math.floor(Number(rawCount) || 1)),
+	);
 
 	// ハートも1投稿1回まで（インメモリ判定）
 	if (!tryHeart(actorId, decodedId)) {
@@ -200,6 +222,15 @@ export async function PATCH(
 	}
 	if (typeof content !== "string") {
 		return NextResponse.json({ error: "content is required" }, { status: 400 });
+	}
+	// 本文の長さと画像URLの検証は新規投稿と同じ（app/api/_lib/post-input.ts）。
+	// 画像は「本文中のURLを添付に昇格」導線があるので https の外部URLも通す。
+	const badContent = contentError(content);
+	if (badContent) {
+		return NextResponse.json({ error: badContent }, { status: 400 });
+	}
+	if (!isAcceptableEditedImageSrc(imageSrc)) {
+		return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
 	}
 	const dotMeta = parseDotMeta(rawDotMeta);
 	if (dotMeta === "invalid") {

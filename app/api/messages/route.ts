@@ -6,21 +6,34 @@ import { chUser } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 
 export async function GET(request: NextRequest) {
-	const url = new URL(request.url);
-	const userId = url.searchParams.get("userId") || undefined;
-	const partner = url.searchParams.get("partner") || undefined;
+	// 誰のDMを読むかは必ずセッションから決める。以前は ?userId= をそのまま信じていたので、
+	// 公開情報である他人の id を渡すだけでその人のDMを全部読めた。
+	// GET は本文が無いので Cookie か x-unj-session ヘッダー（lib/api.ts の fetcher）で届く。
+	const user = await resolveSessionUser(request);
+	if (!user?.slug) {
+		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+	}
+	const me = user.slug;
+	const partner = new URL(request.url).searchParams.get("partner") || undefined;
 
 	// 1対1スレッド表示。受信箱(全件)ではなくこの相手との往復だけを返す。
-	if (userId && partner) {
+	if (partner) {
 		const [messages, gate] = await Promise.all([
-			db.getConversation(userId, partner, 100),
-			db.getDmGate(userId, partner),
+			db.getConversation(me, partner, 100),
+			db.getDmGate(me, partner),
 		]);
-		return NextResponse.json({ messages, gate });
+		return privateJson({ messages, gate });
 	}
 
-	const messages = await db.getMessages(userId);
-	return NextResponse.json(messages);
+	const messages = await db.getMessages(me);
+	return privateJson(messages);
+}
+
+/** 個人宛てのデータは共有キャッシュに載せない */
+function privateJson(data: unknown) {
+	const res = NextResponse.json(data);
+	res.headers.set("Cache-Control", "private, no-store");
+	return res;
 }
 
 export async function POST(request: NextRequest) {
@@ -53,12 +66,16 @@ export async function POST(request: NextRequest) {
 
 	const message = await db.addMessage({ sender, text, recipient });
 
-	// Koyeb Realtime WS ハブ経由で送信先および送信元に即時プッシュ配信
+	// Koyeb Realtime WS ハブ経由で送信先および送信元に即時プッシュ配信。
+	// ハブの `user:*` は users.id 名義の署名トークンでしか購読できない
+	// （app/api/realtime/token/route.ts）ので、チャンネル名は必ず解決済みの users.id で作る。
+	// 送信者は user.id、受信者は DB が解決して返した message.recipient（pg では
+	// String(recipient_user_id)）。body の recipient 文字列をそのまま使うと、表示名などで
+	// 送られたときに誰も購読していないチャンネルへ投げることになり、誰にも届かない。
 	const targetChannels = new Set<string>();
-	if (sender) targetChannels.add(chUser(sender));
-	if (recipient) targetChannels.add(chUser(recipient));
-	if (message.sender) targetChannels.add(chUser(message.sender));
-	if (message.recipient) targetChannels.add(chUser(message.recipient));
+	targetChannels.add(chUser(String(user.id)));
+	if (message.recipient && /^\d+$/.test(message.recipient))
+		targetChannels.add(chUser(message.recipient));
 
 	publishRealtime(
 		Array.from(targetChannels).map((channel) => ({

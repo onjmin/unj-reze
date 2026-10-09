@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveViewerId } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { attachEmbedInfo } from "@/lib/post/post-embeds";
 import { encodePost } from "@/lib/sqids";
@@ -10,7 +11,9 @@ export async function GET(
 	const rawParams = await params;
 	const id = decodeURIComponent(rawParams.id || "");
 	const url = new URL(request.url);
-	const userId = url.searchParams.get("userId") || undefined;
+	// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
+	// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
+	const userId = await resolveViewerId(request, url.searchParams.get("userId"));
 	const tab = url.searchParams.get("tab");
 
 	// DMスレッドのヘッダーのように「表示名とアイコンだけ」欲しい呼び出し。

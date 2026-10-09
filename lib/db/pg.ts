@@ -391,6 +391,31 @@ function mmlDeleteRefOf(row: {
 	return {};
 }
 
+/** 検索語の上限（文字数）。app/api/search・media-search も同じ値で弾く */
+const MAX_SEARCH_QUERY_LENGTH = 100;
+
+/**
+ * LIKE/ILIKE のワイルドカード（% _）を文字どおりに扱わせる。エスケープ文字は '!'
+ * （SQL 側は `ESCAPE '!'`）。バックスラッシュにすると JS のテンプレート文字列と
+ * SQL の文字列リテラルで二重にエスケープが要って間違えやすいので避けた。
+ * これが無いと `%` や `_` だけの検索語で、意図しない全件一致を作れてしまう。
+ */
+function escapeLike(term: string): string {
+	return term.replace(/[!%_]/g, "!$&");
+}
+
+/** 移行トークンの有効期限（分）。発行から過ぎたものは引き換えできない */
+const MIGRATION_TOKEN_TTL_MINUTES = 30;
+
+/** 移行トークン。128bit の暗号論的乱数を base64url で（22文字） */
+function generateMigrationToken(): string {
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	let bin = "";
+	for (const b of bytes) bin += String.fromCharCode(b);
+	return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /**
  * game_id/mv_id が、削除確定した行以外の投稿からまだ参照されているか。
  * スレッドは論理削除（deleted_at）されるとどのみち二度と表示されないので、
@@ -417,12 +442,20 @@ async function hasOtherPostRef(
  * （呼び出し側=クライアントがR2実体を消す。previousMmlと同じ「DB確定後に消す」流儀）。
  * 参照が残っていれば何もしない（他の投稿の再生/改造の起点として生きているため）。
  */
-async function orphanedManifestRefsOf(row: {
-	game_id?: number | string | null;
-	mv_id?: number | string | null;
-	talk_id?: number | string | null;
-	otomad_id?: number | string | null;
-}): Promise<{
+async function orphanedManifestRefsOf(
+	row: {
+		game_id?: number | string | null;
+		mv_id?: number | string | null;
+		talk_id?: number | string | null;
+		otomad_id?: number | string | null;
+	},
+	/**
+	 * 削除した投稿の作者（users.id）。作品行と manifest を消すのは作者本人の作品
+	 * （と作者不明の古い行）だけにする。他人の作品を自分の投稿に添付できた頃の行が残っていると、
+	 * それを消すだけで他人の作品と R2 の実体まで消せてしまうため（削除トークンも返さない）。
+	 */
+	ownerUid: number,
+): Promise<{
 	gameManifestDeleteId?: string;
 	gameManifestDeleteHash?: string;
 	mvManifestDeleteId?: string;
@@ -447,8 +480,8 @@ async function orphanedManifestRefsOf(row: {
 		// games行を消せば game_schedule/game_votes は ON DELETE CASCADE で連動して消える
 		// （docker/init.sql参照）。game_players のようなDB書き込みは元々存在しない。
 		const { rows } = await q(
-			`DELETE FROM games WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
-			[gameId],
+			`DELETE FROM games WHERE id = $1 AND (creator_user_id IS NULL OR creator_user_id = $2) RETURNING manifest_delete_id, manifest_delete_hash`,
+			[gameId, ownerUid],
 		);
 		if (rows[0]?.manifest_delete_id) {
 			out.gameManifestDeleteId = rows[0].manifest_delete_id;
@@ -458,8 +491,8 @@ async function orphanedManifestRefsOf(row: {
 	const mvId = row.mv_id != null ? Number(row.mv_id) : null;
 	if (mvId != null && !(await hasOtherPostRef("mv_id", mvId))) {
 		const { rows } = await q(
-			`DELETE FROM mvs WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
-			[mvId],
+			`DELETE FROM mvs WHERE id = $1 AND (creator_user_id IS NULL OR creator_user_id = $2) RETURNING manifest_delete_id, manifest_delete_hash`,
+			[mvId, ownerUid],
 		);
 		if (rows[0]?.manifest_delete_id) {
 			out.mvManifestDeleteId = rows[0].manifest_delete_id;
@@ -469,8 +502,8 @@ async function orphanedManifestRefsOf(row: {
 	const talkId = row.talk_id != null ? Number(row.talk_id) : null;
 	if (talkId != null && !(await hasOtherPostRef("talk_id", talkId))) {
 		const { rows } = await q(
-			`DELETE FROM talks WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
-			[talkId],
+			`DELETE FROM talks WHERE id = $1 AND (creator_user_id IS NULL OR creator_user_id = $2) RETURNING manifest_delete_id, manifest_delete_hash`,
+			[talkId, ownerUid],
 		);
 		if (rows[0]?.manifest_delete_id) {
 			out.talkManifestDeleteId = rows[0].manifest_delete_id;
@@ -480,8 +513,8 @@ async function orphanedManifestRefsOf(row: {
 	const otomadId = row.otomad_id != null ? Number(row.otomad_id) : null;
 	if (otomadId != null && !(await hasOtherPostRef("otomad_id", otomadId))) {
 		const { rows } = await q(
-			`DELETE FROM otomads WHERE id = $1 RETURNING manifest_delete_id, manifest_delete_hash`,
-			[otomadId],
+			`DELETE FROM otomads WHERE id = $1 AND (creator_user_id IS NULL OR creator_user_id = $2) RETURNING manifest_delete_id, manifest_delete_hash`,
+			[otomadId, ownerUid],
 		);
 		if (rows[0]?.manifest_delete_id) {
 			out.otomadManifestDeleteId = rows[0].manifest_delete_id;
@@ -1009,9 +1042,12 @@ export const pgStore: DataStore = {
 	async heartPost(id: number, userId: string, count = 1) {
 		const table = isReplyPostId(id) ? "res" : "threads";
 		const rawId = isReplyPostId(id) ? postIdToResId(id) : postIdToThreadId(id);
+		// 上限はルート側（app/api/posts/[id]/route.ts MAX_HEARTS_PER_REQUEST）で切る。
+		// ここでは負数・小数で hearts_total を減らせないことだけ保証する。
+		const n = Math.max(1, Math.floor(Number(count) || 1));
 		await q(
 			`UPDATE ${table} SET hearts_total = hearts_total + $1 WHERE id = $2`,
-			[count, rawId],
+			[n, rawId],
 		);
 		await notifyPostAction(id, userId, "heart");
 		return pgStore.getPost(id);
@@ -1424,7 +1460,7 @@ export const pgStore: DataStore = {
 				threadId: threadToPostId(Number(row.thread_id)),
 				...mmlDeleteRefOf(row),
 				...imageDeleteRefOf(row),
-				...(await orphanedManifestRefsOf(row)),
+				...(await orphanedManifestRefsOf(row, Number(userId))),
 			};
 		}
 		const threadId = postIdToThreadId(id);
@@ -1460,7 +1496,7 @@ export const pgStore: DataStore = {
 				threadId: threadToPostId(threadId),
 				...mmlDeleteRefOf(row),
 				...imageDeleteRefOf(row),
-				...(await orphanedManifestRefsOf(row)),
+				...(await orphanedManifestRefsOf(row, Number(userId))),
 			};
 		}
 		await q(`UPDATE threads SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, [
@@ -1475,7 +1511,7 @@ export const pgStore: DataStore = {
 			threadId: threadToPostId(threadId),
 			...mmlDeleteRefOf(row),
 			...imageDeleteRefOf(row),
-			...(await orphanedManifestRefsOf(row)),
+			...(await orphanedManifestRefsOf(row, Number(userId))),
 		};
 	},
 
@@ -1708,18 +1744,18 @@ export const pgStore: DataStore = {
 	async searchPosts(query: string, userId?: string, limit = 20) {
 		if (!query.trim()) return [];
 		const safeLimit = Math.max(1, Math.min(limit, 50));
-		const like = `%${query.trim()}%`;
+		const like = `%${escapeLike(query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH))}%`;
 		const hidden = await getHiddenUserIds(userId);
 		const { rows: tRows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
-         AND (t.content_text ILIKE $1 OR COALESCE(u.display_name,t.cc_user_name) ILIKE $1)
+         AND (t.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,t.cc_user_name) ILIKE $1 ESCAPE '!')
        ORDER BY t.id DESC LIMIT $2`,
 			[like, safeLimit],
 		);
 		const { rows: rRows } = await q(
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
-       WHERE r.content_text ILIKE $1 OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1
+       WHERE r.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1 ESCAPE '!'
        ORDER BY r.id DESC LIMIT $2`,
 			[like, safeLimit],
 		);
@@ -1754,12 +1790,12 @@ export const pgStore: DataStore = {
 		// offset は 200 件で頭打ちなので、深く遡るのは before カーソルで行う。
 		const fetchEach = Math.min(safeOffset + safeLimit, 200);
 		const contentType = kind === "image" ? CT.Image : CT.Dtm;
-		const trimmed = query.trim();
+		const trimmed = query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH);
 		const params: any[] = [contentType];
 		let where = `content_type = $1 AND COALESCE(u.hide_from_search, false) = false`;
 		if (trimmed) {
-			params.push(`%${trimmed}%`);
-			where += ` AND (content_text ILIKE $${params.length} OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length})`;
+			params.push(`%${escapeLike(trimmed)}%`);
+			where += ` AND (content_text ILIKE $${params.length} ESCAPE '!' OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length} ESCAPE '!')`;
 		}
 		if (cursor) {
 			params.push(cursor.toISOString());
@@ -2032,7 +2068,15 @@ export const pgStore: DataStore = {
 	async issueMigrationToken(userId: string) {
 		const uid = toUid(userId);
 		if (uid === null) throw new Error("invalid userId");
-		const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+		// アカウント乗っ取りと同じ重みを持つ秘密なので、推測できない乱数で作る
+		// （Math.random + 時刻だった頃は推測の余地があった）
+		const token = generateMigrationToken();
+		// 生きているトークンは1人1つ（発行し直したら古いものは無効）。期限切れの行もついでに掃除する。
+		await q(
+			`DELETE FROM migration_tokens
+        WHERE user_id = $1 OR created_at < CURRENT_TIMESTAMP - make_interval(mins => $2)`,
+			[uid, MIGRATION_TOKEN_TTL_MINUTES],
+		);
 		await q(`INSERT INTO migration_tokens (token, user_id) VALUES ($1,$2)`, [
 			token,
 			uid,
@@ -2040,11 +2084,15 @@ export const pgStore: DataStore = {
 		return token;
 	},
 	async redeemMigrationToken(token: string, newSessionId: string) {
+		// 引き換えと同時に消す（DELETE ... RETURNING）。SELECT してから DELETE だと、
+		// 同じトークンを同時に2回出されたとき両方通ってしまう。期限切れもここで弾き、
+		// 期限切れの行はついでに掃除する。
 		const { rows } = await q(
-			`SELECT user_id FROM migration_tokens WHERE token = $1`,
-			[token],
+			`DELETE FROM migration_tokens WHERE token = $1
+       RETURNING user_id, created_at > CURRENT_TIMESTAMP - make_interval(mins => $2) AS fresh`,
+			[token, MIGRATION_TOKEN_TTL_MINUTES],
 		);
-		if (!rows.length) return null;
+		if (!rows.length || !rows[0].fresh) return null;
 		const userId = Number(rows[0].user_id);
 		const { rows: userRows } = await q(`SELECT * FROM users WHERE id = $1`, [
 			userId,
@@ -2058,7 +2106,6 @@ export const pgStore: DataStore = {
        ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, last_used_at = CURRENT_TIMESTAMP`,
 			[userId, newSessionId],
 		);
-		await q(`DELETE FROM migration_tokens WHERE token = $1`, [token]);
 		return userRowToAnonymousUser(userRows[0]);
 	},
 

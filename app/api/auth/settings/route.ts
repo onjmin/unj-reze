@@ -3,11 +3,14 @@ import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
-	const slug = new URL(request.url).searchParams.get("slug");
-	if (!slug)
-		return NextResponse.json({ error: "slug is required" }, { status: 400 });
-	const settings = await db.getUserSettings(slug);
-	return NextResponse.json(settings);
+	// 公開範囲設定は本人だけが読む。?slug= は受け付けない（PUT と同じくセッションから決める）。
+	const user = await resolveSessionUser(request);
+	if (!user?.slug)
+		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+	const settings = await db.getUserSettings(user.slug);
+	const res = NextResponse.json(settings);
+	res.headers.set("Cache-Control", "private, no-store");
+	return res;
 }
 
 export async function PUT(request: NextRequest) {

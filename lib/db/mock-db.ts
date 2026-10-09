@@ -182,8 +182,9 @@ class MockDB {
 		{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }
 	> = new Map();
 	private hiddenFromSearchSlugs: Set<string> = new Set();
-	// Phase 2: 移行トークン(token -> userId)。
-	private migrationTokens: Map<string, string> = new Map();
+	// Phase 2: 移行トークン(token -> 発行先と発行時刻)。期限は pg.ts と同じ30分。
+	private migrationTokens: Map<string, { userId: string; issuedAt: number }> =
+		new Map();
 
 	constructor() {
 		this.posts = JSON.parse(JSON.stringify(INITIAL_POSTS));
@@ -1678,8 +1679,16 @@ class MockDB {
 	// ── 移行トークン(匿名アカウントの引き継ぎ) ──
 
 	issueMigrationToken(userId: string): string {
-		const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-		this.migrationTokens.set(token, userId);
+		// pg.ts と同じく暗号論的乱数（128bit）で作り、生きているトークンは1人1つにする
+		const bytes = new Uint8Array(16);
+		crypto.getRandomValues(bytes);
+		const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+			"",
+		);
+		for (const [t, v] of this.migrationTokens) {
+			if (v.userId === userId) this.migrationTokens.delete(t);
+		}
+		this.migrationTokens.set(token, { userId, issuedAt: Date.now() });
 		return token;
 	}
 
@@ -1687,15 +1696,16 @@ class MockDB {
 		token: string,
 		newSessionId: string,
 	): AnonymousUser | null {
-		const userId = this.migrationTokens.get(token);
-		if (!userId) return null;
+		const entry = this.migrationTokens.get(token);
+		this.migrationTokens.delete(token); // ワンタイム（期限切れでも消す）
+		if (!entry || Date.now() - entry.issuedAt > 30 * 60 * 1000) return null;
+		const userId = entry.userId;
 		const stored = this.anonUserData.get(userId);
 		if (!stored) return null;
 		// 新セッションを既存ユーザーに再バインド
 		this.sessionToUser.set(newSessionId, userId);
 		stored.sessionId = newSessionId;
 		stored.lastSeenAt = this.now();
-		this.migrationTokens.delete(token); // ワンタイム
 		return {
 			id: stored.id,
 			displayName: stored.displayName,

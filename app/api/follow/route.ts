@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveSessionUser } from "@/lib/auth/session-server";
+import { resolveSessionUser, resolveViewerId } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
@@ -8,7 +8,11 @@ export async function GET(request: NextRequest) {
 	const followerId = url.searchParams.get("followerId");
 	const followedId = url.searchParams.get("followedId");
 	const list = url.searchParams.get("list");
-	const viewerId = url.searchParams.get("viewerId") || undefined;
+	// 一覧の「自分がフォロー中か」表示は本人視点のときだけ。クエリの viewerId はセッションで裏取りする
+	const viewerId = await resolveViewerId(
+		request,
+		url.searchParams.get("viewerId"),
+	);
 
 	// フォロワー / フォロー一覧（プロフィールのカウントをタップして開くシート）
 	if (userId && (list === "followers" || list === "following")) {

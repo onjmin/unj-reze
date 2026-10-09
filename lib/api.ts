@@ -65,9 +65,23 @@ function withSessionId(init?: RequestInit): RequestInit | undefined {
 	}
 }
 
+/**
+ * 本文の無い GET でも本人確認できるよう、セッションIDをヘッダーにも載せる
+ * （lib/auth/session-server.ts の SESSION_HEADER）。通常は Cookie で足りるが、
+ * Cookie が落ちる環境の保険。クエリに載せるとログや Referer に秘密が残るので使わない。
+ */
+function sessionHeaders(): Record<string, string> {
+	if (typeof window === "undefined") return {};
+	try {
+		return { "x-unj-session": ensureSessionId() };
+	} catch {
+		return {};
+	}
+}
+
 async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(`${BASE}${url}`, {
-		headers: { "Content-Type": "application/json" },
+		headers: { "Content-Type": "application/json", ...sessionHeaders() },
 		...withSessionId(init),
 	});
 	if (!res.ok) {
@@ -601,10 +615,13 @@ function imageTokensFor(imageSrc?: string) {
 
 const liveApi = {
 	auth: {
-		anonymous: (sessionId: string) => {
-			const qs = `?sessionId=${encodeURIComponent(sessionId)}`;
-			return fetcher<AnonymousUser>(`/auth/anonymous${qs}`);
-		},
+		// セッションIDは秘密なのでクエリ（GET ?sessionId=）ではなく本文で送る。
+		// サーバーは互換のため GET も受け付ける（app/api/auth/anonymous/route.ts）。
+		anonymous: (sessionId: string) =>
+			fetcher<AnonymousUser>("/auth/anonymous", {
+				method: "POST",
+				body: JSON.stringify({ sessionId }),
+			}),
 		/**
 		 * プロフィール更新。`displayName` は省略可（アイコン/自己紹介だけ更新するときは渡さない）。
 		 * 画面表示用のラベルをここへ渡すと、それが本名として保存され slug まで変わるので注意。
@@ -618,12 +635,13 @@ const liveApi = {
 				method: "PUT",
 				body: JSON.stringify({ ...changes, sessionId: ensureSessionId() }),
 			}),
-		getSettings: (slug: string) =>
+		// 本人の設定だけを返す（サーバーがセッションから決める）。slug は互換のため受け取るが送らない
+		getSettings: (_slug?: string) =>
 			fetcher<{
 				isPrivate: boolean;
 				hideFromSearch: boolean;
 				hideReactions: boolean;
-			}>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
+			}>("/auth/settings"),
 		updateSettings: (
 			settings: Partial<{
 				isPrivate: boolean;
@@ -780,6 +798,11 @@ const liveApi = {
 				walkPreset?: string | null;
 			},
 		) => {
+			// 描き直した絵（data: URL）は先にアップロードしてURLにする。サーバーは data: を
+			// 受け付けない（DB に画像本体が入って転送量を壊すため。app/api/_lib/post-input.ts）。
+			if (imageSrc?.startsWith("data:")) {
+				imageSrc = (await liveApi.upload.image({ image: imageSrc })).url;
+			}
 			const result = await fetcher<
 				Post & {
 					previousMml?: { deleteId: string; deleteHash: string };
@@ -909,15 +932,13 @@ const liveApi = {
 				),
 		},
 	},
+	// 通知・DM・ブロック/ミュート一覧は本人の分だけ。誰の分かはサーバーがセッションから決めるので、
+	// userId 引数は呼び出し側との互換のため受け取るだけでクエリには載せない
+	// （載せていた頃は、他人の id を渡すだけでその人の通知やDMが読めた）。
 	notifications: {
-		list: (userId?: string) => {
-			const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-			return fetcher<Notification[]>(`/notifications${qs}`);
-		},
-		unreadCount: (userId: string) =>
-			fetcher<{ count: number }>(
-				`/notifications?unread=1&userId=${encodeURIComponent(userId)}`,
-			),
+		list: (_userId?: string) => fetcher<Notification[]>("/notifications"),
+		unreadCount: (_userId?: string) =>
+			fetcher<{ count: number }>("/notifications?unread=1"),
 		markRead: (id: string, userId: string) =>
 			fetcher<{ success: boolean }>("/notifications", {
 				method: "PATCH",
@@ -935,13 +956,10 @@ const liveApi = {
 			}),
 	},
 	messages: {
-		list: (userId?: string) => {
-			const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-			return fetcher<Message[]>(`/messages${qs}`);
-		},
-		conversation: (userId: string, partner: string) =>
+		list: (_userId?: string) => fetcher<Message[]>("/messages"),
+		conversation: (_userId: string, partner: string) =>
 			fetcher<{ messages: Message[]; gate: DmGate }>(
-				`/messages?userId=${encodeURIComponent(userId)}&partner=${encodeURIComponent(partner)}`,
+				`/messages?partner=${encodeURIComponent(partner)}`,
 			),
 		send: (data: { sender: string; text: string; recipient?: string }) =>
 			fetcher<Message>("/messages", {
@@ -1099,10 +1117,7 @@ const liveApi = {
 			}),
 	},
 	block: {
-		list: (blockerSlug: string) =>
-			fetcher<{ blocked: string[] }>(
-				`/block?blockerSlug=${encodeURIComponent(blockerSlug)}`,
-			),
+		list: (_blockerSlug?: string) => fetcher<{ blocked: string[] }>("/block"),
 		block: (blockerSlug: string, blockedSlug: string) =>
 			fetcher<{ success: boolean }>("/block", {
 				method: "POST",
@@ -1115,10 +1130,7 @@ const liveApi = {
 			}),
 	},
 	mute: {
-		list: (muterSlug: string) =>
-			fetcher<{ muted: string[] }>(
-				`/mute?muterSlug=${encodeURIComponent(muterSlug)}`,
-			),
+		list: (_muterSlug?: string) => fetcher<{ muted: string[] }>("/mute"),
 		mute: (muterSlug: string, mutedSlug: string) =>
 			fetcher<{ success: boolean }>("/mute", {
 				method: "POST",

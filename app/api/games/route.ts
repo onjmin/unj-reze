@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveSessionUser } from "@/lib/auth/session-server";
+import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { parseBgRef, parseManifestRef } from "@/lib/assets/manifest-ref";
 import { encodeGame } from "@/lib/sqids";
@@ -36,8 +36,10 @@ export async function POST(request: NextRequest) {
 	}
 
 	// creatorSlug はセッション本人の slug を使う。body の creatorSlug は公開情報なので信用できない。
-	const user = await resolveSessionUser(request, sessionId);
-	const creatorSlug = user?.slug;
+	// 投稿（/api/posts）と同じく未登録セッションならここで作る：作者が空だと、続く投稿で
+	// 「自分の作品か」を確かめられず添付できない（app/api/_lib/work-owner.ts）。
+	const user = await resolveOrCreateSessionUser(request, sessionId);
+	const creatorSlug = user.slug;
 
 	const game = await db.createGame({
 		preset,

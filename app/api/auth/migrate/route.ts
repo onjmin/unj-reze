@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveSessionUser } from "@/lib/auth/session-server";
+import {
+	isClientSessionId,
+	resolveSessionUser,
+} from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 
 // 移行トークンの発行(過去の匿名アカウントを新セッションへ引き継ぐため)
@@ -24,6 +27,11 @@ export async function PUT(request: NextRequest) {
 			{ error: "token and sessionId are required" },
 			{ status: 400 },
 		);
+	}
+	// 付け替え先のセッションIDもクライアントが名乗る値なので、内部専用の `bbscgi:` などは
+	// 弾く（通すと専ブラ利用者のIPトークンを自分のアカウントへ付け替えられる）。
+	if (typeof token !== "string" || token.length > 128 || !isClientSessionId(sessionId)) {
+		return NextResponse.json({ error: "invalid token or sessionId" }, { status: 400 });
 	}
 	const user = await db.redeemMigrationToken(token, sessionId);
 	if (!user)

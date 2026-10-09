@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
+import { resolveOrCreateSessionUser, resolveViewerId } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
 import { getClientIp } from "@/lib/ip";
@@ -14,11 +14,20 @@ import type { FingerprintSignals } from "@/lib/security/types";
 import { decodeId, encodePost } from "@/lib/sqids";
 import type { OriginType } from "@/lib/types";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
+import {
+	contentError,
+	isAcceptableNewImageSrc,
+	sanitizeAvatarColor,
+} from "../_lib/post-input";
+import { workOwnershipError } from "../_lib/work-owner";
 
 export async function GET(request: NextRequest) {
 	try {
 		const url = new URL(request.url);
-		const userId = url.searchParams.get("userId") || undefined;
+		const claimedUserId = url.searchParams.get("userId");
+		// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
+		// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
+		const userId = await resolveViewerId(request, claimedUserId);
 		const limitParam = url.searchParams.get("limit");
 		const limit = limitParam
 			? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50)
@@ -56,7 +65,7 @@ export async function GET(request: NextRequest) {
 		return await withEdgeCache(
 			request,
 			// 過去ページ（カーソル付き）は内容がほぼ変わらないので長めに持たせる。
-			{ sMaxAge: beforeId ? 60 : 10, personalized: !!userId },
+			{ sMaxAge: beforeId ? 60 : 10, personalized: !!claimedUserId },
 			async () => {
 				const posts = await db.getPosts(userId, {
 					limit,
@@ -140,6 +149,15 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
+		// 本文の長さと画像URLは公開ボディ由来なので必ず検証する（app/api/_lib/post-input.ts）
+		const badContent = contentError(content);
+		if (badContent) {
+			return NextResponse.json({ error: badContent }, { status: 400 });
+		}
+		if (!isAcceptableNewImageSrc(imageSrc)) {
+			return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
+		}
+
 		// セッション本人を解決、未登録セッションなら自動作成
 		const sessionUser = await resolveOrCreateSessionUser(request, bodySessionId);
 		const displayName = sessionUser.displayName;
@@ -199,6 +217,17 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: "Invalid otomadId" }, { status: 400 });
 		}
 
+		// 添付できるのは自分の作品だけ（app/api/_lib/work-owner.ts）
+		const ownershipError = await workOwnershipError(sessionUser, {
+			gameId: decodedGameId ?? undefined,
+			mvId: decodedMvId ?? undefined,
+			talkId: decodedTalkId ?? undefined,
+			otomadId: decodedOtomadId ?? undefined,
+		});
+		if (ownershipError) {
+			return NextResponse.json({ error: ownershipError }, { status: 403 });
+		}
+
 		// MML本文はブラウザが uploader-worker へ直接上げ済み。ここに来るのはURLだけ。
 		// 公開ボディ由来なので保存先ホストを必ず検証する
 		const mmlRef = parseMmlRef(body);
@@ -213,7 +242,7 @@ export async function POST(request: NextRequest) {
 			imageSrc,
 			imageAlt,
 			imageIsDrawn,
-			avatarColor,
+			avatarColor: sanitizeAvatarColor(avatarColor),
 			slug: authorSlug,
 			gameId: decodedGameId === null ? undefined : decodedGameId,
 			mvId: decodedMvId === null ? undefined : decodedMvId,

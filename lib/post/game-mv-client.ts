@@ -15,6 +15,7 @@ import type {
 	OtomadRecord,
 	TalkRecord,
 } from "@/lib/types";
+import { ensureSessionId } from "@/lib/session";
 import { deleteObject, fetchJson, uploadJson } from "@/lib/uploader";
 
 /**
@@ -55,6 +56,8 @@ export async function createGame(params: {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			preset: params.preset,
 			title: params.title,
 			manifestUrl: uploaded.link,
@@ -77,6 +80,8 @@ export async function createMv(params: {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			preset: params.preset,
 			title: params.title,
 			manifestUrl: uploaded.link,
@@ -98,6 +103,8 @@ export async function createTalk(params: {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,
@@ -123,6 +130,8 @@ export async function updateGame(
 		method: "PATCH",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,
@@ -145,6 +154,8 @@ export async function updateMv(
 		method: "PATCH",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,
@@ -167,6 +178,8 @@ export async function updateTalk(
 		method: "PATCH",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,
@@ -196,6 +209,8 @@ export async function createOtomad(params: {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,
@@ -217,6 +232,8 @@ export async function updateOtomad(
 		method: "PATCH",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
+			// 作者判定はサーバーがセッションで行う。Cookie が落ちる環境でも届くよう本文にも載せる
+			sessionId: ensureSessionId(),
 			title: params.title,
 			manifestUrl: uploaded.link,
 			manifestDeleteId: uploaded.deleteId,

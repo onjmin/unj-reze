@@ -3,14 +3,14 @@ import { resolveSessionUser } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
-	const blockerSlug = new URL(request.url).searchParams.get("blockerSlug");
-	if (!blockerSlug)
-		return NextResponse.json(
-			{ error: "blockerSlug is required" },
-			{ status: 400 },
-		);
-	const blocked = await db.getBlockedSlugs(blockerSlug);
-	return NextResponse.json({ blocked });
+	// 一覧は本人の分だけ。?blockerSlug= を信じると他人の一覧が覗けるので、セッションから決める。
+	const user = await resolveSessionUser(request);
+	if (!user?.slug)
+		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+	const blocked = await db.getBlockedSlugs(user.slug);
+	const res = NextResponse.json({ blocked });
+	res.headers.set("Cache-Control", "private, no-store");
+	return res;
 }
 
 // ブロックする側は必ずセッション本人。body の blockerSlug は公開情報なので受け付けない

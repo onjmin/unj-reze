@@ -254,6 +254,7 @@ export default function SettingsPanel({
 					</label>
 					<p className="text-[9px] text-gray-500">
 						セッションが変わっても過去のアカウントを復元できます。
+						トークンは発行から30分・1回限り有効です（発行し直すと前のものは無効）。
 					</p>
 					<button
 						onClick={handleIssueToken}

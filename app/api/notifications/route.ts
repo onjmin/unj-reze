@@ -5,18 +5,24 @@ import { withEdgeCache } from "@/lib/edge-cache";
 import { decodeId, encodeNotification } from "@/lib/sqids";
 
 export async function GET(request: NextRequest) {
+	// 対象は必ずセッション本人（?userId= は受け付けない。他人の通知が読めてしまう）。
+	// 既読化・削除（PATCH/DELETE）と同じく user.id をキーにする。
+	const user = await resolveSessionUser(request);
+	if (!user)
+		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	const url = new URL(request.url);
-	const userId = url.searchParams.get("userId") || undefined;
-	if (url.searchParams.get("unread") === "1" && userId) {
-		const count = await db.getUnreadCount(userId);
-		return NextResponse.json({ count });
+	if (url.searchParams.get("unread") === "1") {
+		const count = await db.getUnreadCount(user.id);
+		const res = NextResponse.json({ count });
+		res.headers.set("Cache-Control", "private, no-store");
+		return res;
 	}
 	// 通知は常に個人向けなので共有キャッシュには載せない（private のみ）。
 	return await withEdgeCache(
 		request,
 		{ sMaxAge: 10, personalized: true },
 		async () => {
-			const notifications = await db.getNotifications(userId);
+			const notifications = await db.getNotifications(user.id);
 			return NextResponse.json(notifications.map(encodeNotification));
 		},
 	);

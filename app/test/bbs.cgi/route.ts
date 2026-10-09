@@ -5,6 +5,10 @@ import { getClientIp } from "@/lib/ip";
 import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { encodePost } from "@/lib/sqids";
+import { contentError } from "../../api/_lib/post-input";
+
+/** フォーム本体の上限（バイト）。本文の上限（app/api/_lib/post-input.ts）を Shift_JIS で見積もって余裕を持たせた値 */
+const MAX_FORM_BYTES = 64 * 1024;
 
 // 専ブラ対応: POST /test/bbs.cgi
 // 仕様(公式には詳細記載なし): https://scrapbox.io/2chtypebbs/bbs.cgi
@@ -40,6 +44,9 @@ export async function POST(request: NextRequest) {
 	let fields: Record<string, string>;
 	try {
 		const bytes = new Uint8Array(await request.arrayBuffer());
+		if (bytes.length > MAX_FORM_BYTES) {
+			return errorPage("本文が長すぎます。");
+		}
 		fields = parseSjisFormBody(bytes);
 	} catch (e) {
 		console.error("[POST /test/bbs.cgi] parse", e);
@@ -53,6 +60,10 @@ export async function POST(request: NextRequest) {
 	if (!message) {
 		return errorPage("本文が空です。");
 	}
+	// 本文の上限は /api/posts と同じ（スレタイは本文の1行目として入るので合算で見る）
+	if (contentError(subject ? `${subject}\n${message}` : message)) {
+		return errorPage("本文が長すぎます。");
+	}
 
 	// 専ブラはセッションCookieを持たない。IPから決定的に導いたトークンで
 	// createPost/addReply が要求する「解決済みの投稿者(slug)」を用意する
@@ -61,6 +72,10 @@ export async function POST(request: NextRequest) {
 	// displayName はアカウント側の値を採用する(FROM欄の自己申告では上書きしない)。
 	// これは /api/posts と同じ方針: 名前をリクエスト本文に委ねると他人のなりすましが
 	// 成立してしまうため(lib/auth/session-server.ts のコメント参照)。
+	//
+	// `bbscgi:<IP>` は誰でも組み立てられるので、Web側（Cookie / 本文の sessionId）から
+	// 名乗られた場合は lib/auth/session-server.ts の isClientSessionId が必ず弾く。
+	// このトークンで引けるのはこの bbs.cgi だけ、という前提を崩さないこと。
 	const ip = getClientIp(request.headers);
 	const anonUser = await db.getOrCreateAnonymousUser(`bbscgi:${ip}`, ip);
 	const displayName = anonUser.displayName;

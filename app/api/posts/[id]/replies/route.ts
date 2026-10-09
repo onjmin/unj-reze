@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveOrCreateSessionUser } from "@/lib/auth/session-server";
+import {
+	isClientSessionId,
+	resolveOrCreateSessionUser,
+	resolveViewerId,
+} from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { REPLIES_PAGE_MAX, REPLIES_PAGE_SIZE } from "@/lib/db/interface";
 import { withEdgeCache } from "@/lib/edge-cache";
@@ -9,6 +13,12 @@ import { CH_FEED, chThread } from "@/lib/realtime/channels";
 import { publishRealtime } from "@/lib/realtime/publish";
 import { decodeId, encodePost } from "@/lib/sqids";
 import { sanitizeWalkPreset } from "@/lib/assets/walk-cycle";
+import {
+	contentError,
+	isAcceptableNewImageSrc,
+	sanitizeAvatarColor,
+} from "../../../_lib/post-input";
+import { workOwnershipError } from "../../../_lib/work-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +32,10 @@ export async function GET(
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
 	const sp = new URL(_request.url).searchParams;
-	const userId = sp.get("userId") || undefined;
+	const claimedUserId = sp.get("userId");
+	// 「誰として見るか」はセッションで裏取りする（lib/auth/session-server.ts resolveViewerId）。
+	// クエリを信じると他人の id でその人のブロック/ミュート一覧や投票状態が覗ける。
+	const userId = await resolveViewerId(_request, claimedUserId);
 	// 既定は「直近 REPLIES_PAGE_SIZE 件」。スレ全件は返さない（docs/NEON_EGRESS.md）。
 	// before=<レス番号> で、その番号より古い側の直近 limit 件＝上スクロールの追加読み込み。
 	// 未指定は Number(null) === 0 になるので、パラメータの有無を先に見る
@@ -38,7 +51,7 @@ export async function GET(
 		Number.isFinite(rawBefore) && rawBefore > 1 ? rawBefore : undefined;
 	return await withEdgeCache(
 		_request,
-		{ sMaxAge: 5, personalized: !!userId },
+		{ sMaxAge: 5, personalized: !!claimedUserId },
 		async () => {
 			const replies = await db.getReplies(decodedId, userId, {
 				limit,
@@ -96,6 +109,26 @@ export async function POST(
 			);
 		}
 
+		// 本文の長さと画像URLは公開ボディ由来なので必ず検証する（app/api/_lib/post-input.ts）
+		const badContent = contentError(content);
+		if (badContent) {
+			return NextResponse.json({ error: badContent }, { status: 400 });
+		}
+		if (!isAcceptableNewImageSrc(imageSrc)) {
+			return NextResponse.json({ error: "Invalid imageSrc" }, { status: 400 });
+		}
+
+		// 作品IDは /api/posts と同じく decodeId で読む（旧sqids形式のIDも通すため）
+		const decodedWorkIds: Record<string, number | undefined> = {};
+		for (const [key, raw] of Object.entries({ gameId, mvId, talkId, otomadId })) {
+			if (!raw) continue;
+			const decoded = decodeId(String(raw));
+			if (decoded === null) {
+				return NextResponse.json({ error: `Invalid ${key}` }, { status: 400 });
+			}
+			decodedWorkIds[key] = decoded;
+		}
+
 		// セッション本人を解決、未登録セッションなら自動作成
 		const sessionUser = await resolveOrCreateSessionUser(request, sessionId);
 		const displayName = sessionUser.displayName;
@@ -107,6 +140,12 @@ export async function POST(
 				{ error: "Invalid parentPostId" },
 				{ status: 400 },
 			);
+		}
+
+		// 添付できるのは自分の作品だけ（app/api/_lib/work-owner.ts）
+		const ownershipError = await workOwnershipError(sessionUser, decodedWorkIds);
+		if (ownershipError) {
+			return NextResponse.json({ error: ownershipError }, { status: 403 });
 		}
 
 		// MML本文はブラウザが uploader-worker へ直接上げ済み。ここに来るのはURLだけ
@@ -125,11 +164,11 @@ export async function POST(
 			imageSrc,
 			imageAlt,
 			imageIsDrawn,
-			avatarColor,
-			gameId: gameId ? Number(gameId) : undefined,
-			mvId: mvId ? Number(mvId) : undefined,
-			talkId: talkId ? Number(talkId) : undefined,
-			otomadId: otomadId ? Number(otomadId) : undefined,
+			avatarColor: sanitizeAvatarColor(avatarColor),
+			gameId: decodedWorkIds.gameId,
+			mvId: decodedWorkIds.mvId,
+			talkId: decodedWorkIds.talkId,
+			otomadId: decodedWorkIds.otomadId,
 			dotW: dotW ? Number(dotW) : undefined,
 			dotH: dotH ? Number(dotH) : undefined,
 			animFrames: animFrames ? Number(animFrames) : undefined,
@@ -156,7 +195,7 @@ export async function POST(
 		const response = NextResponse.json(encoded, { status: 201 });
 		const resolvedSessionId =
 			request.cookies.get("unj_reze_session")?.value ||
-			(typeof sessionId === "string" ? sessionId : undefined);
+			(isClientSessionId(sessionId) ? sessionId : undefined);
 		if (resolvedSessionId) {
 			response.cookies.set("unj_reze_session", resolvedSessionId, {
 				httpOnly: false,

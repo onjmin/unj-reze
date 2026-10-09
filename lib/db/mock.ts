@@ -70,7 +70,8 @@ export const mockStore: DataStore = {
 	},
 
 	async heartPost(id: number, userId: string, count?: number) {
-		return mockDb.heartPost(id, userId, count);
+		// pg.ts と同じく負数・小数を弾く（上限はルート側で切る）
+		return mockDb.heartPost(id, userId, Math.max(1, Math.floor(Number(count) || 1)));
 	},
 
 	async repostPost(id: number, userId?: string) {
