@@ -111,6 +111,20 @@ R2 パブリックアクセスの有効化：バケットの **Settings → Publ
 流さないこと。スキーマを変えたときは、既存DBに当てる差分SQLを新しい順にここへ書き足す。
 （`docker/init.sql` と unj リポジトリの `wiki/init.sql` にも同じ変更を入れておく。）
 
+**2026-10-15 — 検索用インデックス（`lib/db/pg.ts` searchPosts / searchMedia）**
+
+検索を `LOWER(content_text) LIKE` に直して既存の trgm インデックスに乗せた。名前での一致は
+reze 利用者の id を引いて `user_id = ANY` で足すので、そのためのインデックスを足す。当てる前でも
+動くが、名前が一致する語では全件走査のまま。大きい表なので `CONCURRENTLY` で当てる
+（トランザクションの外で1文ずつ）。
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_threads_user_id ON threads (user_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_res_user_id ON res (user_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_search_display_name
+    ON users USING gin (LOWER(display_name) gin_trgm_ops) WHERE display_name IS NOT NULL;
+```
+
 **2026-10-09 — `post_reposts`（リポストをユーザーごとに。`lib/db/pg.ts` repostPost）**
 
 以前は `threads/res.reposted` という全員共通のフラグを反転していたので、誰かがリポストすると

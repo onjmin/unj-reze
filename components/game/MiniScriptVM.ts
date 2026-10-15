@@ -624,6 +624,27 @@ export function parseMiniScript(src: string): string[] {
 	return lines;
 }
 
+// 投稿ゲームのスクリプトは他人のブラウザで走る。wait() を挟まないループは
+// イベントループに戻らないので、上限が無いと `while true` 一行で遊んだ人のタブが固まる。
+/** wait() などの非同期呼び出しを挟まずに実行できる文の数 */
+export const MAX_STEPS_WITHOUT_WAIT = 100_000;
+/** range() が返す要素数の上限 */
+export const MAX_RANGE_LENGTH = 10_000;
+
+export function miniRange(from: unknown, to: unknown, step: unknown = 1): number[] {
+	const out: number[] = [];
+	const s = +(step as number) || 1;
+	const a = +(from as number);
+	const b = +(to as number);
+	if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(s)) return out;
+	for (let i = a; s > 0 ? i <= b : i >= b; i += s) {
+		// step が小さすぎて i が増えない（1e-300 等）場合もここで止まる
+		if (out.length >= MAX_RANGE_LENGTH) throw new Error(`range is too long (max ${MAX_RANGE_LENGTH})`);
+		out.push(i);
+	}
+	return out;
+}
+
 export async function runMiniScript(
 	lines: string[],
 	env: MiniEnv,
@@ -635,11 +656,17 @@ export async function runMiniScript(
 	env = mergedEnv;
 	// 式から呼んでよい関数は env に入っている関数だけ
 	const trusted = new Set<unknown>(Object.values(mergedEnv).filter((v) => typeof v === "function"));
+	let steps = 0;
+	const tick = () => {
+		if (++steps > MAX_STEPS_WITHOUT_WAIT)
+			throw new Error(`too many steps without wait() (max ${MAX_STEPS_WITHOUT_WAIT})`);
+	};
 	async function run(stmts: string[], sc: MiniScope): Promise<void> {
 		const ctx: EvalCtx = { scope: sc, env, trusted };
 		let ip = 0;
 		while (ip < stmts.length) {
 			const line = stmts[ip];
+			tick();
 
 			// if / else if / else
 			if (/^if\b/.test(line)) {
@@ -699,6 +726,7 @@ export async function runMiniScript(
 				const condSrc = line.replace(/^while\s*/, "");
 				const end = getBlockEnd(stmts, ip, "while");
 				while (!!evalExpr(condSrc, ctx)) {
+					tick();
 					await run(stmts.slice(ip + 1, end), sc);
 				}
 				ip = end + 1;
@@ -715,6 +743,7 @@ export async function runMiniScript(
 				if (!Array.isArray(list))
 					throw new Error(`for expects array: ${iterExpr}`);
 				for (const v of list) {
+					tick();
 					setVar(sc, varName, v);
 					await run(stmts.slice(ip + 1, end), sc);
 				}
@@ -758,8 +787,10 @@ export async function runMiniScript(
 					if (typeof f !== "function")
 						throw new Error(`Unknown function: ${fn}`);
 					const r = (f as (...a: unknown[]) => unknown)(...args);
-					if (r && typeof (r as Promise<void>).then === "function")
+					if (r && typeof (r as Promise<void>).then === "function") {
 						await (r as Promise<void>);
+						steps = 0;
+					}
 				}
 				ip++;
 				continue;

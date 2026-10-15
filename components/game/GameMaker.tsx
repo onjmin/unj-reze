@@ -68,7 +68,7 @@ import {
 } from './game-manifest';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
-import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
+import { miniRange, parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList, YUME25D_TOOL_LABELS } from './yume25d/Yume25DMaker';
 import Yume25DEditorPanel from './yume25d/Yume25DEditorPanel';
 import UserSheetPanel from '@/components/assets/UserSheetPanel';
@@ -1063,12 +1063,7 @@ function runEntityScript(
     pi: Math.PI,
     rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
     randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
-    range: (from: unknown, to: unknown, step: unknown = 1) => {
-      const out: number[] = [];
-      const s = +(step as number) || 1;
-      for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
-      return out;
-    },
+    range: miniRange,
 
     // エンティティ定数
     col: entity.def.col,
@@ -1203,12 +1198,7 @@ function runWaveScript(
     pi: Math.PI,
     rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
     randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
-    range: (from: unknown, to: unknown, step: unknown = 1) => {
-      const out: number[] = [];
-      const s = +(step as number) || 1;
-      for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
-      return out;
-    },
+    range: miniRange,
     W: VIEW_W, H: VIEW_H,
   };
 
@@ -4878,12 +4868,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           pi: Math.PI,
           rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
           randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
-          range: (from: unknown, to: unknown, step: unknown = 1) => {
-            const out: number[] = [];
-            const s = +(step as number) || 1;
-            for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
-            return out;
-          },
+          range: miniRange,
           W, H,
         };
 
@@ -5654,8 +5639,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const r = cmd.row, c = cmd.col;
           const targetLayer = (cmd.layer as string) === 'overlay' ? 'overlay' : (cmd.layer as string) === 'overhead' ? 'overhead' : 'map';
 
+          // 投稿ゲームの manifest は型を検査していない。row:"__proto__" だと比較が全部 false で
+          // すり抜け、g[r] が Array.prototype になって遊んだ人のタブ全体が壊れる。巨大な値は push が終わらない。
+          const isCell = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < 1000;
+          if (!isCell(r) || !isCell(c) || typeof cmd.tileId !== 'number') {
+            setTimeout(advance, 0);
+            break;
+          }
           const writeToGrid = (g: number[][] | undefined) => {
-            if (!g || r < 0 || c < 0) return;
+            if (!g) return;
             while (g.length <= r) g.push([]);
             while (g[r].length <= c) g[r].push(0);
             g[r][c] = cmd.tileId;

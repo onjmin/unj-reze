@@ -293,6 +293,11 @@ CREATE INDEX idx_res_search_content_url ON res USING gin (LOWER(content_url) gin
 CREATE INDEX idx_threads_search_cc_user_id ON threads USING gin (LOWER(cc_user_id) gin_trgm_ops);
 CREATE INDEX idx_threads_search_content_text ON threads USING gin (LOWER(content_text) gin_trgm_ops);
 CREATE INDEX idx_threads_search_content_url ON threads USING gin (LOWER(content_url) gin_trgm_ops);
+-- 検索の名前一致（reze 利用者の名前 → user_id = ANY、lib/db/pg.ts searchNameUserIds）
+CREATE INDEX idx_threads_user_id ON threads (user_id);
+CREATE INDEX idx_res_user_id ON res (user_id);
+CREATE INDEX idx_users_search_display_name ON users USING gin (LOWER(display_name) gin_trgm_ops)
+    WHERE display_name IS NOT NULL;
 
 -- ========== oshi_items テーブル ==========
 -- unj-reze のプロフィール「推しリスト」機能。unj本体のcc.tsは関与せず、

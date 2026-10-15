@@ -566,6 +566,29 @@ function escapeLike(term: string): string {
 	return term.replace(/[!%_]/g, "!$&");
 }
 
+// 検索は LOWER(content_text) の trgm インデックスに乗る形で書くこと。以前は
+// `content_text ILIKE … OR COALESCE(u.display_name, cc_user_name) ILIKE …` で、式が
+// インデックスと合わない上に JOIN 越しの OR なので、一致しない語で GET するたびに
+// threads/res（unj と共有）を全件走査させられた。名前での一致は、先に名前の合う reze 利用者の
+// id を引いて user_id = ANY で足す（idx_*_user_id と BitmapOr になる）。unj 側の名前
+// （cc_user_name）では引かない。
+const SEARCH_NAME_USER_LIMIT = 20;
+async function searchNameUserIds(like: string): Promise<number[]> {
+	const { rows } = await q(
+		`SELECT id FROM users WHERE display_name IS NOT NULL AND LOWER(display_name) LIKE LOWER($1) ESCAPE '!'
+     LIMIT ${SEARCH_NAME_USER_LIMIT}`,
+		[like],
+	);
+	return rows.map((r) => Number(r.id));
+}
+/** $1 が LIKE パターンであること。nameIds があれば params に足す */
+function searchMatchSql(alias: string, params: any[], nameIds: number[]): string {
+	const content = `LOWER(${alias}.content_text) LIKE LOWER($1) ESCAPE '!'`;
+	if (!nameIds.length) return content;
+	params.push(nameIds);
+	return `(${content} OR ${alias}.user_id = ANY($${params.length}::int[]))`;
+}
+
 /**
  * 利用者にそのまま見せてよい失敗。ルートは `expose === true` のときだけ e.message を返し、
  * それ以外の例外（Postgres のエラー文など）は一般的な 500 にする。
@@ -2600,12 +2623,14 @@ export const pgStore: DataStore = {
 		const like = `%${escapeLike(query.trim().slice(0, MAX_SEARCH_QUERY_LENGTH))}%`;
 		const hidden = await getHiddenUserIds(userId);
 		const viewerUid = toUid(userId);
+		const nameIds = await searchNameUserIds(like);
 		const tParams: any[] = [like, safeLimit];
+		const tMatch = searchMatchSql("t", tParams, nameIds);
 		const tFilter = `${authorVisibleSql("t.user_id", tParams, viewerUid)} AND ${searchableSql("t.user_id", tParams, viewerUid)}`;
 		const { rows: tRows } = await q(
 			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
-         AND (t.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,t.cc_user_name) ILIKE $1 ESCAPE '!')
+         AND ${tMatch}
          AND ${tFilter}
        ORDER BY t.id DESC LIMIT $2`,
 			tParams,
@@ -2613,12 +2638,13 @@ export const pgStore: DataStore = {
 		// レスは板1の生きているスレのものだけ、スレ主が鍵アカで見えないスレのレスも出さない
 		// （getReplies と同じ。検索からスレの中身を覗けないように）
 		const rParams: any[] = [like, safeLimit];
+		const rMatch = searchMatchSql("r", rParams, nameIds);
 		const rFilter = `${authorVisibleSql("r.user_id", rParams, viewerUid)} AND ${searchableSql("r.user_id", rParams, viewerUid)}
          AND t.board_id = 1 AND t.deleted_at IS NULL AND ${authorVisibleSql("t.user_id", rParams, viewerUid, "tu")}`;
 		const { rows: rRows } = await q(
 			`SELECT r.*, ${AUTHOR_SELECT} FROM res r LEFT JOIN users u ON u.id = r.user_id
          JOIN threads t ON t.id = r.thread_id LEFT JOIN users tu ON tu.id = t.user_id
-       WHERE (r.content_text ILIKE $1 ESCAPE '!' OR COALESCE(u.display_name,r.cc_user_name) ILIKE $1 ESCAPE '!')
+       WHERE ${rMatch}
          AND ${rFilter}
        ORDER BY r.id DESC LIMIT $2`,
 			rParams,
@@ -2665,8 +2691,16 @@ export const pgStore: DataStore = {
 		// （素の user_id）も下の scoped() で t./r. に差し替わる。
 		let where = `content_type = $1 AND ${authorVisibleSql("user_id", params, viewerUid)} AND ${searchableSql("user_id", params, viewerUid)}`;
 		if (trimmed) {
-			params.push(`%${escapeLike(trimmed)}%`);
-			where += ` AND (content_text ILIKE $${params.length} ESCAPE '!' OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length} ESCAPE '!')`;
+			const like = `%${escapeLike(trimmed)}%`;
+			const nameIds = await searchNameUserIds(like);
+			params.push(like);
+			const likeIdx = params.length;
+			let match = `LOWER(content_text) LIKE LOWER($${likeIdx}) ESCAPE '!'`;
+			if (nameIds.length) {
+				params.push(nameIds);
+				match += ` OR user_id = ANY($${params.length}::int[])`;
+			}
+			where += ` AND (${match})`;
 		}
 		if (cursor) {
 			params.push(cursor.toISOString());
