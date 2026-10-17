@@ -114,6 +114,11 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
 Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
 `lib/security/fingerprint.ts`, `lib/security/geo.ts`. Full rationale: [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md).
 
+- **Every feature change follows [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md)**: list the new untrusted inputs and
+  where they land while designing, follow its checklist while coding, and before committing changes under
+  `app/` `components/` `lib/` `services/` or `middleware.ts`, run the `security-reviewer` agent on the diff. Fix every
+  High/Medium before committing (ask the owner if it can't be fixed); when a new class of hole is found, add it to the checklist.
+
 - **TLS signals flow one way: `request.cf` → `middleware.ts` → headers → route handlers.** The
   Worker terminates TLS, so middleware reads `request.cf` itself; no upstream proxy is involved.
   Route handlers must use `readTlsSignalsFromHeaders()` and never trust `x-ja4-fingerprint` &co.
@@ -206,6 +211,7 @@ then run `pnpm typecheck` and `pnpm lint`.
 - [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md) — Neon transfer budget rules and the queries that broke it.
 - [services/realtime/README.md](services/realtime/README.md) — realtime hub protocol and Koyeb deploy.
 - [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.
+- [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) — per-change security checklist, severity scale, and the `security-reviewer` agent definition.
 - [docs/dsl-current-state.md](docs/dsl-current-state.md) — asset-reference / DSL layering.
 - [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding (`games` table).
 - [docs/game-presets.md](docs/game-presets.md) — sample presets vs engine templates, manifest null rules, third-party IP policy & history, built-in SE/effect generators, `preset_opens`.
