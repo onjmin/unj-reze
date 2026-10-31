@@ -2003,8 +2003,11 @@ export const pgStore: DataStore = {
 		// 呼び出し側が鍵アカのレスをリアルタイム配信しない判定に使う
 		inserted.author_is_private = authorIsPrivate;
 		const post = resRowToPost(inserted);
+		// resRowToPost はレスへの返信の親を「後段でnum→idを解決」として空にする。ここで埋めないと
+		// 投稿直後のレスだけ親が分からず、クライアントの返信ツリーで入れ子にならない（再読込すると直る）。
+		// parentNum が 1 以外になるのは、上で data.parentPostId のレスを同じスレに見つけたときだけ。
 		post.parentPostId =
-			parentNum === 1 ? threadToPostId(threadId) : post.parentPostId;
+			parentNum === 1 ? threadToPostId(threadId) : data.parentPostId;
 
 		// 配信は呼び出し側（app/api/posts/[id]/replies/route.ts）が担う。ここでも publish
 		// すると mock では出ないpg限定の二重配信になり、しかもここは attachEmbedInfo 前の
