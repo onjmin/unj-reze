@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { blockIfAlreadyHearted } from "@/lib/hooks/usePostActions";
 import { getUserIdLabel } from "@/lib/social/avatar";
 import {
 	createGame,
@@ -661,6 +662,8 @@ export default function BbsThreadView({
 
 	const handleHeart = useCallback(
 		(targetPost: Post) => {
+			if (heartQueue.current === 0 && blockIfAlreadyHearted(targetPost.id))
+				return;
 			setPost((p) => {
 				if (p.id === targetPost.id)
 					return { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 };

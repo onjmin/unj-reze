@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { api } from "@/lib/api";
+import { getLocalVote, hasLocalHeart } from "@/lib/post/local-votes";
 import { mergePostCounters } from "@/lib/post/post-merge";
 import { playPostSfx } from "@/lib/post/post-sfx";
 import { showToast } from "@/lib/toast";
@@ -35,6 +36,24 @@ const toggleRepost = (p: Post): Post => ({
 	reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
 });
 
+/**
+ * 送信済みの評価・ハートか。サーバーは取り消しも2回目も受け付けない（lib/security/vote-guard.ts）ので、
+ * 押しても数が巻き戻るだけ。見た目だけ動かさずに知らせる。
+ */
+export function blockIfAlreadyVoted(postId: string): boolean {
+	if (!getLocalVote(postId)) return false;
+	showToast("info", "評価は1投稿につき1回までです（取り消しはできません）", {
+		id: "vote-once",
+	});
+	return true;
+}
+
+export function blockIfAlreadyHearted(postId: string): boolean {
+	if (!hasLocalHeart(postId)) return false;
+	showToast("info", "ハートは1投稿につき1回まで送れます", { id: "heart-once" });
+	return true;
+}
+
 /** 投稿の いいね／低評価／リポスト／ハート／返信 の楽観的更新＋API同期を共通化するフック。
  * 更新対象の配列（メインフィード／検索結果など）は updatePost 経由で呼び出し側に委譲する。 */
 export function usePostActions(
@@ -56,6 +75,7 @@ export function usePostActions(
 	);
 
 	const handleLike = (postId: string) => {
+		if (blockIfAlreadyVoted(postId)) return;
 		updatePost(postId, toggleLike);
 		const parity = (likeParity.current.get(postId) || 0) + 1;
 		likeParity.current.set(postId, parity);
@@ -80,6 +100,7 @@ export function usePostActions(
 	};
 
 	const handleDislike = (postId: string) => {
+		if (blockIfAlreadyVoted(postId)) return;
 		updatePost(postId, toggleDislike);
 		const parity = (dislikeParity.current.get(postId) || 0) + 1;
 		dislikeParity.current.set(postId, parity);
@@ -115,6 +136,8 @@ export function usePostActions(
 	};
 
 	const handleHeart = (postId: string) => {
+		// 送信待ち（2秒のまとめ）の間は連打できる。送ったあとは受け付けられない
+		if (!heartQueue.current.has(postId) && blockIfAlreadyHearted(postId)) return;
 		updatePost(postId, (p) => ({
 			...p,
 			heartsTotal: (Number(p.heartsTotal) || 0) + 1,

@@ -7,6 +7,11 @@ import {
 	updateTalk,
 } from "./post/game-mv-client";
 import { externalizeMml } from "./mml/mml-payload";
+import {
+	applyLocalVotes,
+	recordLocalHeart,
+	recordLocalVote,
+} from "./post/local-votes";
 import type { Message, Trend } from "./db/mock-db";
 import { db as mockDbInstance } from "./db/mock-db";
 import type { MvManifest } from "./mv/mv-config";
@@ -92,7 +97,8 @@ async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
 			status: res.status,
 		});
 	}
-	return res.json();
+	// 押下済みの表示はサーバーが覚えていないので端末の記録を重ねる（lib/post/local-votes.ts）
+	return applyLocalVotes(await res.json());
 }
 
 const staticApi = {
@@ -788,24 +794,34 @@ const liveApi = {
 				}),
 			});
 		},
-		like: (id: string) =>
-			fetcher<Post>(`/posts/${id}`, {
+		// 成功したら（重複で数が増えなかった応答でも）押下済みとして端末に記録する
+		like: async (id: string) => {
+			const post = await fetcher<Post>(`/posts/${id}`, {
 				method: "PUT",
 				body: JSON.stringify({ action: "like", sessionId: ensureSessionId() }),
-			}),
-		dislike: (id: string) =>
-			fetcher<Post>(`/posts/${id}`, {
+			});
+			recordLocalVote(id, "like");
+			return applyLocalVotes(post);
+		},
+		dislike: async (id: string) => {
+			const post = await fetcher<Post>(`/posts/${id}`, {
 				method: "PUT",
 				body: JSON.stringify({
 					action: "dislike",
 					sessionId: ensureSessionId(),
 				}),
-			}),
-		heart: (id: string, _userId?: string, count?: number) =>
-			fetcher<Post>(`/posts/${id}`, {
+			});
+			recordLocalVote(id, "dislike");
+			return applyLocalVotes(post);
+		},
+		heart: async (id: string, _userId?: string, count?: number) => {
+			const post = await fetcher<Post>(`/posts/${id}`, {
 				method: "POST",
 				body: JSON.stringify({ count, sessionId: ensureSessionId() }),
-			}),
+			});
+			recordLocalHeart(id);
+			return post;
+		},
 		repost: (id: string) =>
 			fetcher<Post>(`/posts/${id}`, {
 				method: "PUT",

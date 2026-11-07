@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { collabHref } from "@/lib/social/collab-link";
+import {
+	blockIfAlreadyHearted,
+	blockIfAlreadyVoted,
+} from "@/lib/hooks/usePostActions";
 import { mergePostCounters } from "@/lib/post/post-merge";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser, Post } from "@/lib/types";
@@ -61,6 +65,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 	}, [fetchPosts]);
 
 	const handleLike = async (id: string) => {
+		if (blockIfAlreadyVoted(id)) return;
 		setPosts((prev) =>
 			prev.map((p) =>
 				p.id !== id
@@ -80,6 +85,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 		} catch {}
 	};
 	const handleDislike = async (id: string) => {
+		if (blockIfAlreadyVoted(id)) return;
 		setPosts((prev) =>
 			prev.map((p) =>
 				p.id !== id
@@ -110,6 +116,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 		} catch {}
 	};
 	const handleHeart = async (id: string) => {
+		if (blockIfAlreadyHearted(id)) return;
 		setPosts((prev) =>
 			prev.map((p) =>
 				p.id !== id
