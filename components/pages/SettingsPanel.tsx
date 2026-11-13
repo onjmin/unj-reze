@@ -2,6 +2,7 @@
 
 import {
 	ChevronRight,
+	Code,
 	Cookie,
 	Copy,
 	ExternalLink,
@@ -17,6 +18,10 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+	setDeveloperMode,
+	useDeveloperMode,
+} from "@/lib/hooks/useDeveloperMode";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser } from "@/lib/types";
 
@@ -86,6 +91,7 @@ export default function SettingsPanel({
 	const [migrationToken, setMigrationToken] = useState("");
 	const [redeemInput, setRedeemInput] = useState("");
 	const [redeemMsg, setRedeemMsg] = useState("");
+	const developerMode = useDeveloperMode();
 
 	const displayName = currentUser?.displayName || userId;
 
@@ -294,6 +300,21 @@ export default function SettingsPanel({
 						</button>
 					</div>
 					{redeemMsg && <p className="text-[9px] text-gray-400">{redeemMsg}</p>}
+				</div>
+
+				<div className="h-px bg-gray-800" />
+
+				<div className="space-y-2">
+					<label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+						開発者向け
+					</label>
+					<PrivacyToggle
+						label="開発者モード"
+						desc="開発者向けの表示を有効にします。この端末にだけ保存されます"
+						icon={Code}
+						active={developerMode}
+						onClick={() => setDeveloperMode(!developerMode)}
+					/>
 				</div>
 
 				<div className="h-px bg-gray-800" />

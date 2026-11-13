@@ -1,7 +1,8 @@
 "use client";
 
-import { Calendar, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Calendar, Download, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useDeveloperMode } from "@/lib/hooks/useDeveloperMode";
 import {
 	clearHistory,
 	composeDrawingPreview,
@@ -45,6 +46,9 @@ export default function HistoryModal<T = unknown>({
 	// お絵描き履歴は表示レイヤーを合成した見た目（id → dataURL）でサムネと拡大表示を出す
 	const [composed, setComposed] = useState<Record<string, string>>({});
 	const [zoomSrc, setZoomSrc] = useState<string | null>(null);
+	const developerMode = useDeveloperMode();
+	const canExport =
+		developerMode && (type === "drawing" || type === "dotdrawing");
 
 	useEffect(() => {
 		if (!isOpen || (type !== "drawing" && type !== "dotdrawing")) return;
@@ -82,6 +86,42 @@ export default function HistoryModal<T = unknown>({
 		setTimeout(() => {
 			onClose();
 		}, 1000);
+	};
+
+	// 開発者モード: その履歴の IndexedDB レコード（全レイヤー・全コマ込み）を JSON で手元へ落とす。
+	// 不具合の再現用。データは端末の外へは送らない。
+	const handleExport = (item: HistoryItem<T>) => {
+		const json = JSON.stringify(
+			{
+				format: "unj-reze-history-export",
+				version: 1,
+				db: "unj-reze",
+				store: "history",
+				key: storageKey,
+				type,
+				exportedAt: Date.now(),
+				item,
+			},
+			null,
+			2,
+		);
+		const url = URL.createObjectURL(
+			new Blob([json], { type: "application/json" }),
+		);
+		const d = new Date(item.timestamp);
+		const p = (n: number) => String(n).padStart(2, "0");
+		const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `${storageKey}-${stamp}.json`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+		setMessage({
+			text: "履歴のレコードを出力しました。",
+			color: "text-green-400",
+		});
 	};
 
 	const handleDelete = async (id: string) => {
@@ -302,6 +342,16 @@ export default function HistoryModal<T = unknown>({
 										<RotateCcw size={11} />
 										<span>復元</span>
 									</button>
+									{canExport && (
+										<button
+											onClick={() => handleExport(item)}
+											title="この履歴のレコードをJSONでダウンロード（開発者モード）"
+											className="flex items-center gap-0.5 px-2.5 py-1 text-[10px] font-bold bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors"
+										>
+											<Download size={11} />
+											<span>出力</span>
+										</button>
+									)}
 									<button
 										onClick={() => handleDelete(item.id)}
 										className="p-1 text-gray-500 hover:text-red-400 hover:bg-gray-800/30 rounded transition-colors"
