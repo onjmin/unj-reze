@@ -6,14 +6,16 @@ import { NextResponse } from "next/server";
  * (docs: https://scrapbox.io/2chtypebbs/ 各ページ参照)。
  * Cloudflare Workers上でも動く純JS実装(encoding-japanese)を使う。
  *
- * SJISで表現できない文字(絵文字など)は encoding-japanese が既定で "?" 等に
- * 代替する。取りこぼしは許容する(専ブラ対応が主目的で、絵文字の完全再現は諦める)。
+ * SJISで表現できない文字(絵文字など)は数値文字参照 `&#129299;` で出す。専ブラはこれを
+ * 文字に戻して表示する（本家 2ch と同じ）。受け取る側は decodeNumericCharRefs を参照。
+ * 呼び出し側は先に `&` を `&amp;` にエスケープしておくこと（lib/bbs/format.ts）。
  */
 export function utf8ToSjisBytes(text: string): Uint8Array {
 	const unicodeArray = Encoding.stringToCode(text);
 	const sjisArray = Encoding.convert(unicodeArray, {
 		to: "SJIS",
 		from: "UNICODE",
+		fallback: "html-entity",
 	});
 	return new Uint8Array(sjisArray);
 }
@@ -61,10 +63,32 @@ export function parseSjisFormBody(bytes: Uint8Array): Record<string, string> {
 		const rawKey = eq === -1 ? pair : pair.slice(0, eq);
 		const rawValue = eq === -1 ? "" : pair.slice(eq + 1);
 		const key = sjisBytesToUtf8(unpercentToBytes(rawKey));
-		const value = sjisBytesToUtf8(unpercentToBytes(rawValue));
+		const value = decodeNumericCharRefs(
+			sjisBytesToUtf8(unpercentToBytes(rawValue)),
+		);
 		result[key] = value;
 	}
 	return result;
+}
+
+/**
+ * 専ブラ・ブラウザは Shift_JIS で送れない文字（絵文字など）を `&#129299;` / `&#x1F913;` の
+ * 数値文字参照にして送ってくる。そのまま保存すると Web でも subject.txt でも `&#129299;` と
+ * 文字のまま出るので、ここで文字に戻す。
+ *
+ * 戻すのは非 ASCII（U+0080 以上）の有効なコードポイントだけ。`&#60;` のような ASCII は
+ * 書いたとおりの文字列として残す（`<` に化けさせる理由が無い）。サロゲート単体と範囲外も残す。
+ */
+export function decodeNumericCharRefs(text: string): string {
+	return text.replace(
+		/&#(?:([0-9]{1,7})|[xX]([0-9a-fA-F]{1,6}));/g,
+		(whole, dec: string | undefined, hex: string | undefined) => {
+			const cp = dec !== undefined ? Number(dec) : parseInt(hex ?? "", 16);
+			if (cp < 0x80 || cp > 0x10ffff) return whole;
+			if (cp >= 0xd800 && cp <= 0xdfff) return whole;
+			return String.fromCodePoint(cp);
+		},
+	);
 }
 
 function unpercentToBytes(field: string): Uint8Array {

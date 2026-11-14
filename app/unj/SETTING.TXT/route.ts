@@ -14,7 +14,7 @@ import { SITE_NAME } from "@/lib/site";
 //   BBS_NAME_COUNT / BBS_MAIL_COUNT / BBS_MESSAGE_COUNT  各欄の最大バイト数
 //   BBS_DAT_INC_HEADER=1        dat 1行目にTITLEを含む(lib/bbs/format.ts の仕様と一致)
 //   BBS_DELETE_BY_WRITER        投稿者自身の削除機能の有無(0=なし。未実装のため0)
-//   BBS_MOJIBAKE=1              Shift_JIS外の文字を「?」等に代替済みであることの申告
+//   BBS_MOJIBAKE=1              Shift_JIS外の文字を数値文字参照（&#129299; 等）で出していることの申告
 export async function GET() {
 	const lines = [
 		`BBS_TITLE=${SITE_NAME}`,

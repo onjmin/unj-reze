@@ -12,6 +12,7 @@ declare module "encoding-japanese" {
 	interface ConvertOptions {
 		to: Encoding;
 		from?: Encoding;
+		fallback?: "html-entity" | "html-entity-hex" | "ignore" | "error";
 	}
 
 	const Encoding: {
