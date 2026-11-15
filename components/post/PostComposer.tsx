@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { prefetchPostGuard } from "@/lib/security/post-guard-client";
 import { getAvatarInfo } from "@/lib/social/avatar";
 import { ORIGIN_TYPE_OPTIONS, OriginType } from "@/lib/types";
+import { savePreferredOriginType } from "@/lib/ui/origin-type-pref";
 import OriginTypeModal from "./OriginTypeModal";
 import SpriteImage from "@/components/assets/SpriteImage";
 
@@ -674,6 +675,7 @@ export default function PostComposer({
 			onClose={() => setShowOriginModal(false)}
 			onSelect={(v) => {
 				setOriginType(v);
+				savePreferredOriginType(v);
 				setShowOriginModal(false);
 			}}
 		/>

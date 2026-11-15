@@ -12,7 +12,8 @@ export type OriginType =
 	| "others_modify_ok"
 	| "others_modify_ng"
 	| "others_no_unauthorized_use"
-	| "fal_1_3";
+	| "fal_1_3"
+	| "cc_by_sa_4_0";
 
 export const ORIGIN_TYPE_OPTIONS: {
 	value: OriginType;
@@ -54,6 +55,12 @@ export const ORIGIN_TYPE_OPTIONS: {
 		label: "FAL 1.3 (自由芸術ライセンス)",
 		badgeClass: "bg-teal-500/20 text-teal-400 border-teal-500/40",
 	},
+	{
+		// unj の投稿は 26/11/15 から CC BY-SA 4.0（それより前は fal_1_3）
+		value: "cc_by_sa_4_0",
+		label: "CC BY-SA 4.0",
+		badgeClass: "bg-lime-500/20 text-lime-400 border-lime-500/40",
+	},
 ];
 
 /**
@@ -68,7 +75,8 @@ export function isCollabAllowed(originType?: OriginType): boolean {
 		!originType ||
 		originType === "own_modify_ok" ||
 		originType === "others_modify_ok" ||
-		originType === "fal_1_3"
+		originType === "fal_1_3" ||
+		originType === "cc_by_sa_4_0"
 	);
 }
 

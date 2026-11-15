@@ -74,6 +74,7 @@ import {
 	POST_BODY_COLLAPSE_LINES,
 	Post,
 } from "@/lib/types";
+import { loadPreferredOriginType } from "@/lib/ui/origin-type-pref";
 import { fetchText } from "@/lib/uploader";
 import BbsThreadView from "@/components/bbs/BbsThreadView";
 import type { GameManifestDraft } from "@/components/game/GameMaker";
@@ -177,6 +178,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
+	// 前回選んだ権利表記を最初から選んでおく（lib/ui/origin-type-pref.ts）。
+	// localStorage はマウント後に読む（サーバー描画と食い違わないように）。
+	useEffect(() => {
+		const preferred = loadPreferredOriginType();
+		if (!preferred) return;
+		Promise.resolve().then(() => {
+			setReplyOriginType((prev) => prev ?? preferred);
+		});
+	}, []);
 	const [activeScreen, setActiveScreen] = useState<string | null>(null);
 	const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(
 		undefined,
@@ -590,7 +600,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		setReplyMvDraft(null);
 		setReplyTalkDraft(null);
 		setReplyOtomadDraft(null);
-		setReplyOriginType(undefined);
+		setReplyOriginType(loadPreferredOriginType());
 		setComposerOpen(false);
 
 		const toastId = showToast("info", "送信中...", { duration: 0 });
@@ -786,6 +796,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const handleOpenCollab = useCallback(async (p: Post) => {
 		// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
 		if (!isCollabAllowed(p.originType)) return;
+		// 他人の作品が元なので、覚えている自作の表記（lib/ui/origin-type-pref.ts）を持ち越さない
+		setReplyOriginType(undefined);
 		// スレ主ポスト自身へのコラボは >>1 を挿さない（「返信を書き込む...」と同じ扱い）
 		openComposer(p.id === post.id ? null : p);
 		if (p.hasGame && p.gameId) {

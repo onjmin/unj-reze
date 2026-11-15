@@ -76,6 +76,7 @@ import { decodeId } from "@/lib/sqids";
 import { showToast, triggerHeartBurst } from "@/lib/toast";
 import { cachePost, readCachedPost } from "@/lib/post/post-cache";
 import { AnonymousUser, isCollabAllowed, OriginType, Post } from "@/lib/types";
+import { loadPreferredOriginType } from "@/lib/ui/origin-type-pref";
 import { fetchText } from "@/lib/uploader";
 
 /** フィード1ページあたりのスレッド数。サーバー側の上限は50。 */
@@ -225,6 +226,15 @@ export default function App() {
 	const [originType, setOriginType] = useState<OriginType | undefined>(
 		undefined,
 	);
+	// 前回選んだ権利表記を最初から選んでおく（lib/ui/origin-type-pref.ts）。
+	// localStorage はマウント後に読む（サーバー描画と食い違わないように）。
+	useEffect(() => {
+		const preferred = loadPreferredOriginType();
+		if (!preferred) return;
+		Promise.resolve().then(() => {
+			setOriginType((prev) => prev ?? preferred);
+		});
+	}, []);
 	const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(
 		undefined,
 	);
@@ -1019,7 +1029,7 @@ export default function App() {
 		setMvDraft(null);
 		setTalkDraft(null);
 		setOtomadDraft(null);
-		setOriginType(undefined);
+		setOriginType(loadPreferredOriginType());
 
 		try {
 			let imageSrc: string | undefined;
@@ -1243,7 +1253,7 @@ export default function App() {
 		setMvDraft(null);
 		setTalkDraft(null);
 		setOtomadDraft(null);
-		setOriginType(undefined);
+		setOriginType(loadPreferredOriginType());
 
 		try {
 			let imageSrc: string | undefined;
@@ -1363,6 +1373,8 @@ export default function App() {
 			// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
 			if (!isCollabAllowed(post.originType)) return;
 			clearEditingContext();
+			// 他人の作品が元なので、覚えている自作の表記（lib/ui/origin-type-pref.ts）を持ち越さない
+			setOriginType(undefined);
 			setReplyTargetPost(post);
 			// MML本文はR2にある。content にはマーカーしか残っていないので、
 			// hasMml/mmlUrl を経由しないと(inline抽出は常に空文字になる)コラボ編集を開始できない

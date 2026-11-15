@@ -37,6 +37,7 @@ import { buildPostShareText } from "@/lib/social/share-text";
 import { getThreadDisplayTime } from "@/lib/time";
 import { showToast } from "@/lib/toast";
 import { isCollabAllowed, OriginType, Post } from "@/lib/types";
+import { loadPreferredOriginType } from "@/lib/ui/origin-type-pref";
 import { fetchText } from "@/lib/uploader";
 import CollabSelector from "@/components/post/CollabSelector";
 import type { GameManifestDraft } from "@/components/game/GameMaker";
@@ -169,6 +170,15 @@ export default function BbsThreadView({
 	const [replyOriginType, setReplyOriginType] = useState<
 		OriginType | undefined
 	>(undefined);
+	// 前回選んだ権利表記を最初から選んでおく（lib/ui/origin-type-pref.ts）。
+	// localStorage はマウント後に読む（サーバー描画と食い違わないように）。
+	useEffect(() => {
+		const preferred = loadPreferredOriginType();
+		if (!preferred) return;
+		Promise.resolve().then(() => {
+			setReplyOriginType((prev) => prev ?? preferred);
+		});
+	}, []);
 	const [replyDotSize, setReplyDotSize] = useState<
 		{ w: number; h: number } | null
 	>(null);
@@ -396,7 +406,7 @@ export default function BbsThreadView({
 		setReplyMvDraft(null);
 		setReplyTalkDraft(null);
 		setReplyOtomadDraft(null);
-		setReplyOriginType(undefined);
+		setReplyOriginType(loadPreferredOriginType());
 		setReplyTo(null);
 
 		const toastId = showToast("info", "送信中...", { duration: 0 });
@@ -589,6 +599,8 @@ export default function BbsThreadView({
 	const handleOpenCollab = useCallback(async (p: Post) => {
 		// 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
 		if (!isCollabAllowed(p.originType)) return;
+		// 他人の作品が元なので、覚えている自作の表記（lib/ui/origin-type-pref.ts）を持ち越さない
+		setReplyOriginType(undefined);
 		if (p.hasGame && p.gameId) {
 			try {
 				// manifest はDBに無いのでR2から。loadGame が両方まとめて解決する

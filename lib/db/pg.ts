@@ -819,7 +819,8 @@ const SYSTEM_USER_ID = 1;
  * 判定は users.display_name が NULL でないこと:
  * - unj は display_name を一度も書かない（unj の auth.ts は `INSERT INTO users (ip, ninja_pokemon)` だけ）
  * - reze はどの作成経路（getOrCreateAnonymousUser。bbs.cgi の `bbscgi:` も含む）でも必ず書く
- * ほかの印は使えない: origin_type 'fal_1_3' は unj の既定値だが reze の OriginType にもある。
+ * ほかの印は使えない: origin_type 'cc_by_sa_4_0'（26/11/14 までは 'fal_1_3'）は unj の既定値だが
+ * reze の OriginType にもある。
  * ip '0.0.0.0' は reze の書き込みだけでなく unj のシステム投稿にも使われている。
  *
  * **呼び出し側の行には必ず author_display_name を載せること**（AUTHOR_SELECT か、createPost /
