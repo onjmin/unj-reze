@@ -1020,6 +1020,8 @@ export default function DrawingEditor({
 						[rgb[0], rgb[1], rgb[2], 255],
 						Math.min(100, Math.max(0, oekaki.opacity.value)) / 100,
 						active.alphaLocked,
+						// 膨らませた縁は線画を潰さず下へ塗る（塗るたびに外周が広がるのを防ぐ）
+						core ?? undefined,
 					);
 				}
 				active.trace();
