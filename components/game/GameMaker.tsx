@@ -79,6 +79,7 @@ import type { Mmo3dRenderer, WeatherDef, ObjectAi } from './presets/shared';
 import { WEATHER_LABELS, drawPixelWeather, type WeatherKind, type WeatherConfig } from '@/lib/game/pixel-weather';
 import { MV_AUDIO_MODE_LABELS, MV_AUDIO_MODE_HINTS } from '@/lib/mv/mv-config';
 import { useSaveShortcut } from '@/lib/hooks/useSaveShortcut';
+import { useLeaveGuard } from '@/lib/hooks/useLeaveGuard';
 import { recordPresetOpen } from '@/lib/post/game-mv-client';
 import dynamic from 'next/dynamic';
 
@@ -12077,6 +12078,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   // Ctrl+S は投稿ではなく JSON として手元に保存（再生専用の埋め込みでは効かせない）
   useSaveShortcut(handleExport, !playOnly);
+  useLeaveGuard(!playOnly && !embedded);
 
   const importFileRef = useRef<HTMLInputElement>(null);
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {

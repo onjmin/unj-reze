@@ -30,6 +30,7 @@ import OtomadPlayer, { type OtomadPlayerHandle } from "@/components/otomad/Otoma
 import OtomadVisualFields from "@/components/otomad/OtomadVisualFields";
 import { BTN_ADD, BTN_DEL, BTN_ICON, BTN_REF, HEADING, INPUT, INPUT_SM, LABEL, NumField, SECTION, SUBHEAD, Toggle } from "@/components/otomad/otomad-ui";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 import { getStudio } from "@/lib/mml/dtm";
 import { EMPTY_SONG, type MvSong } from "@/lib/mv/mv-engine";
 import { auditionSample, recordMmlBacking } from "@/lib/otomad/otomad-audio";
@@ -624,6 +625,7 @@ export default function OtomadMaker({ onClose, onSave, initialManifest, isEditin
 		downloadBlob(blob, `${safeTitle()}.json`);
 	};
 	useSaveShortcut(handleExportJson);
+	useLeaveGuard();
 	const handleImportJson = (file: File) => {
 		void file.text().then((text) => {
 			try {

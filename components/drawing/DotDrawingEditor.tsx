@@ -72,6 +72,7 @@ import {
 	syncReorderLayer,
 } from "@/lib/drawing/sync-edit";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 import {
 	clearAutosave,
 	DrawingEditorState,
@@ -336,6 +337,7 @@ export default function DotDrawingEditor({
 	};
 	// Ctrl+S は投稿ではなく全レイヤーを合成した画像として手元に保存
 	useSaveShortcut(handleSaveComposite);
+	useLeaveGuard();
 
 	const getAnimFramesForExport = (scale: number) => {
 		const frames =

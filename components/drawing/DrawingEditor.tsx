@@ -40,6 +40,7 @@ import {
 } from "@/lib/drawing/export-drawing";
 import { copyToClipboard, readPasteImage } from "@/lib/drawing/oekaki-clipboard";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 import {
 	clearAutosave,
 	DrawingEditorState,
@@ -238,6 +239,7 @@ export default function DrawingEditor({
 	};
 	// Ctrl+S は投稿ではなく全レイヤーを合成した画像として手元に保存
 	useSaveShortcut(handleExportSinglePng);
+	useLeaveGuard();
 
 	const getAnimFramesForExport = () => {
 		const frames =

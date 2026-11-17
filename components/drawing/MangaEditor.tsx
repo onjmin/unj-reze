@@ -57,6 +57,7 @@ import { exportSinglePng } from "@/lib/drawing/export-drawing";
 import * as oekaki from "@onjmin/oekaki";
 import LayerPanel, { type LayerEntry } from "./LayerPanel";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 1130; // 約 1 : 1.414 (漫画用紙比率)
@@ -1749,6 +1750,7 @@ export default function MangaEditor({
 	};
 	// Ctrl+S は投稿ではなく画像として手元に保存
 	useSaveShortcut(handleExportPng);
+	useLeaveGuard();
 
 	return (
 		<div className="fixed inset-0 z-50 flex flex-col bg-[#0b0e14] text-gray-200 select-none">

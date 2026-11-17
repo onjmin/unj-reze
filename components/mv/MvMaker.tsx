@@ -233,6 +233,7 @@ import MvTransitionModal from "./MvTransitionModal";
 import { buildMvPreset, MV_PRESETS } from "./presets";
 import VolumeControl from "@/components/ui/VolumeControl";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 
 function formatMinSecMs(sec: number): string {
 	if (!sec || isNaN(sec) || sec < 0) return "0:00.0";
@@ -2785,6 +2786,7 @@ export default function MvMaker({
 	};
 	// Ctrl+S は投稿ではなく JSON として手元に保存
 	useSaveShortcut(handleExport);
+	useLeaveGuard();
 
 	const handleExportMp4 = () => {
 		if (!playerRef.current) return;

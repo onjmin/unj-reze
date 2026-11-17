@@ -35,6 +35,7 @@ import {
 import { createDefaultTalkManifest, TALK_PRESETS } from "@/lib/talk/talk-presets";
 import { applyTalkScriptText, buildTalkScriptAiPrompt, parseTalkScriptText, TALK_SCRIPT_HELP_TEXT, talkManifestToScriptText } from "@/lib/talk/talk-script-text";
 import { useSaveShortcut } from "@/lib/hooks/useSaveShortcut";
+import { useLeaveGuard } from "@/lib/hooks/useLeaveGuard";
 
 export interface TalkMakerProps {
 	onClose: () => void;
@@ -313,6 +314,7 @@ export default function TalkMaker({ onClose, onSave, userId, initialManifest, is
 		URL.revokeObjectURL(url);
 	};
 	useSaveShortcut(handleExport);
+	useLeaveGuard();
 
 	const charById = (id: string) => manifest.characters.find((c) => c.id === id);
 
