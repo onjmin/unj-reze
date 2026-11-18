@@ -1,5 +1,7 @@
 "use client";
 
+import { safeSetItem, sweepStorageOnce } from "@/lib/ui/safe-storage";
+
 const COOKIE_NAME = "unj_reze_session";
 const STORAGE_KEY = "unj_reze_session_backup";
 
@@ -34,6 +36,9 @@ function writeCookie(name: string, value: string, days: number) {
  * 上書きしていたため、サーバーの Set-Cookie（廃止済み）を踏まされると元のアカウントが失われた。
  */
 export function ensureSessionId(): string {
+	// どの画面でも最初の API 呼び出しより前に必ず通るので、旧版が溜めたキャッシュの掃除をここで掛ける。
+	// 満杯のままだと下のセッション ID の保存まで失敗する。
+	if (typeof localStorage !== "undefined") sweepStorageOnce();
 	const fromCookie = readCookie(COOKIE_NAME);
 	let fromStorage: string | undefined;
 	try {
@@ -52,9 +57,7 @@ export function ensureSessionId(): string {
 				}));
 
 	writeCookie(COOKIE_NAME, sessionId, 365);
-	try {
-		localStorage.setItem(STORAGE_KEY, sessionId);
-	} catch {}
+	safeSetItem(STORAGE_KEY, sessionId);
 
 	return sessionId;
 }

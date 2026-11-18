@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/social/avatar";
 import { cacheProfileSeed } from "@/lib/social/profile-cache";
+import { writeProfileCache } from "@/lib/social/profile-local-cache";
 import { showToast } from "@/lib/toast";
 
 interface UserActionMenuProps {
@@ -87,17 +88,7 @@ export default function UserActionMenu({
 	const updateCache = (
 		updates: Partial<{ followers: number; following: number }>,
 	) => {
-		if (typeof localStorage === "undefined") return;
-		const key = `unj_cached_profile_${targetIdOrSlug}`;
-		const existingStr = localStorage.getItem(key);
-		let existing: Record<string, unknown> = {};
-		if (existingStr) {
-			try {
-				existing = JSON.parse(existingStr) || {};
-			} catch {}
-		}
-		const updated = { ...existing, ...updates };
-		localStorage.setItem(key, JSON.stringify(updated));
+		writeProfileCache(targetIdOrSlug, updates);
 	};
 
 	useEffect(() => {

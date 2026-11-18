@@ -1,5 +1,7 @@
 "use client";
 
+import { safeSetItem } from "@/lib/ui/safe-storage";
+
 /**
  * 通知・メッセージの既読まわり。
  *
@@ -36,7 +38,7 @@ export function markMessagesSeen(messages: { id: number }[]): void {
 	if (typeof localStorage === "undefined" || messages.length === 0) return;
 	const maxId = messages.reduce((max, m) => (m.id > max ? m.id : max), 0);
 	if (maxId <= getLastSeenMessageId()) return;
-	localStorage.setItem(KEY, String(maxId));
+	safeSetItem(KEY, String(maxId));
 	window.dispatchEvent(new CustomEvent(MESSAGES_READ_EVENT));
 }
 

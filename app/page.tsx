@@ -77,6 +77,7 @@ import { showToast, triggerHeartBurst } from "@/lib/toast";
 import { cachePost, readCachedPost } from "@/lib/post/post-cache";
 import { AnonymousUser, isCollabAllowed, OriginType, Post } from "@/lib/types";
 import { loadPreferredOriginType } from "@/lib/ui/origin-type-pref";
+import { safeSetItem } from "@/lib/ui/safe-storage";
 import { fetchText } from "@/lib/uploader";
 
 /** フィード1ページあたりのスレッド数。サーバー側の上限は50。 */
@@ -150,7 +151,7 @@ export default function App() {
 	const setBbsMode = (m: string) => {
 		setBbsModeRaw(m);
 		if (typeof localStorage !== "undefined")
-			localStorage.setItem("unj_bbs_mode", m);
+			safeSetItem("unj_bbs_mode", m);
 	};
 
 	useEffect(() => {
@@ -350,7 +351,7 @@ export default function App() {
 			.then((user) => {
 				setUserId(user.displayName);
 				setCurrentUser(user);
-				localStorage.setItem("unj_current_user", JSON.stringify(user));
+				safeSetItem("unj_current_user", JSON.stringify(user));
 				// 通知/メッセージAPIは users.id(=slug) を要求する（pg.tsがNumber(userId)で
 				// 整数として使う）。displayNameを渡すと "invalid input syntax for type integer"
 				// で500になる。slug は AnonymousUser.id と同じ値なので常に入っている。

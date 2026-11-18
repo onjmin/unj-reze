@@ -1,3 +1,5 @@
+import { safeSetItem } from "@/lib/ui/safe-storage";
+
 // 全体（MML投稿/YouTube埋め込み/ゲーム画面のBGM・SFX）に一律で掛かるマスター音量。
 // 0-100、既定50。localStorageに永続化し、変更をpub/subで通知する。
 // ミュート機能付き。ミュート時は実効音量が常に0になる。
@@ -25,7 +27,7 @@ export function setMasterVolume(v: number) {
 	const next = clamp(v);
 	cached = next;
 	if (typeof localStorage !== "undefined")
-		localStorage.setItem(KEY, String(next));
+		safeSetItem(KEY, String(next));
 	volumeListeners.forEach((cb) => cb(next));
 }
 
@@ -39,7 +41,7 @@ export function getMuted(): boolean {
 export function setMuted(m: boolean) {
 	mutedCache = m;
 	if (typeof localStorage !== "undefined")
-		localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+		safeSetItem(MUTE_KEY, m ? "1" : "0");
 	muteListeners.forEach((cb) => cb(m));
 	// ミュート変更時も音量リスナーへ通知し、既存の購読者（BgmManager等）が
 	// applyMasterVolume 経由で即座にミュート状態を反映できるようにする。

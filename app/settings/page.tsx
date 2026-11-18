@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/layout/AppShell";
 import SettingsView from "@/components/pages/SettingsView";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { safeSetItem } from "@/lib/ui/safe-storage";
 
 export default function SettingsPage() {
 	const currentUser = useCurrentUser();
@@ -23,7 +24,7 @@ export default function SettingsPage() {
 	const setBbsMode = (m: string) => {
 		setBbsModeRaw(m);
 		if (typeof localStorage !== "undefined")
-			localStorage.setItem("unj_bbs_mode", m);
+			safeSetItem("unj_bbs_mode", m);
 	};
 
 	return (

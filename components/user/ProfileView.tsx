@@ -69,6 +69,10 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cachePost } from "@/lib/post/post-cache";
 import { getDistinctTitle } from "@/lib/post/post-title";
 import { cacheProfileSeed, readProfileSeed } from "@/lib/social/profile-cache";
+import {
+	removeProfileCache,
+	writeProfileCache,
+} from "@/lib/social/profile-local-cache";
 
 interface ProfileViewProps {
 	userId: string;
@@ -861,10 +865,7 @@ export default function ProfileView({
 				following,
 				oshiItems,
 			};
-			localStorage.setItem(
-				`unj_cached_profile_${slug}`,
-				JSON.stringify(dataToCache),
-			);
+			writeProfileCache(slug, dataToCache);
 		}
 	}, [
 		slug,
@@ -895,9 +896,7 @@ export default function ProfileView({
 					// 以前のキャッシュ（404 になる前に積んだ投稿一覧など）を出し続けない。
 					setNotFoundSlug(slug);
 					setMyPosts([]);
-					try {
-						localStorage.removeItem(`unj_cached_profile_${slug}`);
-					} catch {}
+					removeProfileCache(slug);
 				}
 			})
 			.finally(() => setLoading(false));
