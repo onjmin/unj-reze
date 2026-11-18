@@ -1528,14 +1528,16 @@ export default function DotDrawingEditor({
 			if (!active?.editable) return;
 
 			if (toolRef.current === "dropper" || (buttons & 2) !== 0) {
+				// 右クリックは一時的なスポイト＝色だけ拾ってツールは変えない
+				const isDropperTool = toolRef.current === "dropper";
 				const result = oekaki.dropper(x, y);
 				if (result) {
 					const [r, g, b, a] = result;
 					if (a) {
 						const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 						applyColor(hex);
-						selectTool("pen");
-					} else {
+						if (isDropperTool) selectTool("pen");
+					} else if (isDropperTool) {
 						selectTool("eraser");
 					}
 				}
