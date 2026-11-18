@@ -397,7 +397,18 @@ export default function App() {
 	// Update localStorage cache whenever posts are successfully updated/loaded
 	useEffect(() => {
 		if (posts.length > 0 && typeof localStorage !== "undefined") {
-			localStorage.setItem("unj_cached_posts", JSON.stringify(posts));
+			// 即表示用なので先頭の1ページ分だけ持つ。スクロールで読んだ全件を書くと
+			// 容量（約5MB）を超えて QuotaExceededError になり、画面ごと落ちていた。
+			try {
+				localStorage.setItem(
+					"unj_cached_posts",
+					JSON.stringify(posts.slice(0, FEED_PAGE_SIZE)),
+				);
+			} catch {
+				try {
+					localStorage.removeItem("unj_cached_posts");
+				} catch {}
+			}
 		}
 	}, [posts]);
 
