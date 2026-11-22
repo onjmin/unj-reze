@@ -1895,30 +1895,19 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
 
 		const bx = barToX(c.bar);
 		const bw = Math.max(1, barToX(nextBar) - bx);
-		const active = d.bar >= c.bar && d.bar < nextBar;
 
+		// いま鳴っているブロックは色を変えない。再生位置は下の白い線だけで示す。
 		let fill: string;
 		if (layer.colorMode === "fixed") {
-			fill = active ? layer.activeColor : layer.color;
+			fill = layer.color;
 		} else {
-			const themeColor = getChordThemeColor(
+			fill = getChordThemeColor(
 				c.label,
 				layer.key,
 				layer.colorMode,
 				lastThemeColor,
 			);
-			lastThemeColor = themeColor;
-			if (active) {
-				fill =
-					layer.activeColor && layer.activeColor !== "#3b82f6"
-						? layer.activeColor
-						: themeColor.replace(
-								/(\d+)%\)/,
-								(_, l) => `${Math.min(90, Number(l) + 20)}%)`,
-							);
-			} else {
-				fill = themeColor;
-			}
+			lastThemeColor = fill;
 		}
 
 		ctx.fillStyle = fill;

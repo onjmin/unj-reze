@@ -3316,7 +3316,6 @@ export default function MvMaker({
 			key: "C",
 			colorMode: "degree",
 			color: "#1f2937",
-			activeColor: "#3f6212",
 			textColor: "#e5e7eb",
 			size: 9,
 			z: getNextZ(),
@@ -5584,16 +5583,6 @@ export default function MvMaker({
 							}
 						/>
 					)}
-					<ColorField
-						label="いまの色"
-						value={layer.activeColor}
-						onChange={(v) =>
-							updateLayer(
-								layer.id,
-								(l) => ({ ...l, activeColor: v }) as MvLayer,
-							)
-						}
-					/>
 					<ColorField
 						label="文字色"
 						value={layer.textColor}

@@ -1878,8 +1878,8 @@ export interface MvChordBarLayer extends MvLayerBase {
 	colorMode: MvChordColorMode;
 	/** colorMode==='fixed' のときの色、および degree のときのベース明度用。 */
 	color: string;
-	/** いま鳴っているブロックの色。 */
-	activeColor: string;
+	/** 使わない（鳴っているブロックの強調はやめた）。保存済みの作品に残っていても読める。 */
+	activeColor?: string;
 	textColor: string;
 	size: number;
 	/** 1画面に表示する小節数（未指定なら2） */
